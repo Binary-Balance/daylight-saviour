@@ -4,7 +4,7 @@ Daylight Saviour is a polished, playful Android and iOS app explaining whether d
 
 ## Project Status
 
-Product direction and architecture are documented in [product brief](docs/product-brief.md), [UI design brief](docs/ui-design-brief.md), [domain glossary](CONTEXT.md), and [architecture decisions](docs/adr/). Implementation work is tracked through [GitHub issues](https://github.com/Binary-Balance/daylight-saviour/issues). Issues labelled [`ready-for-agent`](https://github.com/Binary-Balance/daylight-saviour/issues?q=is%3Aissue%20state%3Aopen%20label%3Aready-for-agent) are specified and unblocked.
+Product direction and architecture are documented in [product brief](docs/product-brief.md), [UI design brief](docs/ui-design-brief.md), [domain glossary](CONTEXT.md), and [architecture decisions](docs/adr/). Implementation work is tracked through [GitHub issues](https://github.com/Binary-Balance/daylight-saviour/issues). The `ready-for-agent` label means an issue is sufficiently specified; agents may start only [ready issues without the `blocked` label](https://github.com/Binary-Balance/daylight-saviour/issues?q=is%3Aissue%20state%3Aopen%20label%3Aready-for-agent%20-label%3Ablocked).
 
 ## Repository Boundary
 
