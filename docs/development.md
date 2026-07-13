@@ -38,7 +38,7 @@ Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycl
 
 Root override `uuid@11.1.1` patches the version requested by Expo's transitive `xcode@3.0.1` tooling. `xcode` uses the retained `uuid.v4()` API. Keep native generation in validation and remove this override when Expo's dependency chain adopts a patched version directly.
 
-npm currently blocks the optional `unrs-resolver@1.12.2` postinstall inherited through `eslint-config-expo`. Repository linting works without it. Leave that lifecycle script unapproved unless its source, provenance, changed behavior, and demonstrated need are reviewed together.
+The root `allowScripts` policy denies the optional `unrs-resolver@1.12.2` postinstall inherited through `eslint-config-expo`; repository linting works without it. The exact `fsevents@2.3.3` install script is approved for optional native macOS file watching. `strict-allow-scripts=true` makes clean installs fail before any future unreviewed lifecycle script runs. Review and pin a script before approving it.
 
 ## JDK 17
 
