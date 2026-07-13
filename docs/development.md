@@ -82,6 +82,35 @@ sdkmanager \
 
 No emulator or system image is required for compilation. Runtime testing can use a physical Android device or later CI/device infrastructure. iOS compilation uses hosted macOS infrastructure.
 
+## Android build profiles
+
+Routine CI and local APK validation compile only `arm64-v8a`:
+
+```bash
+NODE_ENV=development apps/mobile/android/gradlew \
+  -p apps/mobile/android \
+  assembleDebug \
+  --no-daemon \
+  -PreactNativeArchitectures=arm64-v8a
+```
+
+Full release-oriented validation builds all configured ABIs by omitting the architecture property:
+
+```bash
+NODE_ENV=development apps/mobile/android/gradlew \
+  -p apps/mobile/android \
+  assembleDebug \
+  --no-daemon
+```
+
+Reference measurements on the two-vCPU, 7.7 GiB RAM development VM:
+
+- Cold four-ABI build: 1 hour 4 minutes 30 seconds.
+- Clean arm64-only build: 18 minutes 9 seconds.
+- Unchanged warm arm64-only build: 1 minute 43 seconds; 403 of 422 Gradle tasks reused.
+
+Full clean multi-ABI builds are release or major native-toolchain checks, not routine development. JavaScript/TypeScript changes normally need Metro, tests, typecheck, lint, and web export only. Preserve caches unless validating reproducibility or responding to native changes. `npm ci`, clean Expo prebuild, `gradlew clean`, native dependency changes, and changes to Expo, React Native, Gradle, Android Gradle Plugin, NDK, or CMake invalidate expensive build outputs.
+
 ## Validation
 
 Run repository checks from root:

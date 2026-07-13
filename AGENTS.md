@@ -36,6 +36,12 @@ After Expo scaffold exists, run from repository root:
 
 Linux supports web and Android after Android tooling is installed. iOS builds run on GitHub-hosted macOS runners. Do not introduce EAS without revisiting ADR 0001.
 
+## Android Build Cost
+
+Routine Android validation compiles only `arm64-v8a`; full four-ABI compilation is reserved for release validation and major native or toolchain changes. JavaScript/TypeScript UI work should use Metro, tests, typecheck, lint, and web export without a native build unless behavior crosses the native boundary.
+
+Preserve native build caches during ordinary work. `npm ci` replaces `node_modules` and dependency-local CMake outputs; clean Expo prebuild replaces generated app-native outputs; `gradlew clean` removes Gradle outputs. Use clean operations for reproducibility, lockfile or native configuration changes, or explicit evidence—not every edit. CI caches Gradle and performs an arm64-only debug build. See `docs/development.md` for commands and measured profiles.
+
 ## Dependency Management
 
 Use npm workspaces and the single root `package-lock.json`. Never commit nested lockfiles or run workspace-local installs that create a second dependency tree. CI and clean verification use `npm ci` from repository root.
