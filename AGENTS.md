@@ -36,6 +36,18 @@ After Expo scaffold exists, run from repository root:
 
 Linux supports web and Android after Android tooling is installed. iOS builds run on GitHub-hosted macOS runners. Do not introduce EAS without revisiting ADR 0001.
 
+## Dependency Management
+
+Use npm workspaces and the single root `package-lock.json`. Never commit nested lockfiles or run workspace-local installs that create a second dependency tree. CI and clean verification use `npm ci` from repository root.
+
+Put dependencies in the workspace that imports them. Root `devDependencies` are only for genuinely repository-wide tools. Mobile-only test packages, React renderers, Expo modules, and native dependencies belong in `apps/mobile/package.json`; service or shared-package dependencies belong to their owning workspace.
+
+Treat React and native modules as singletons. Keep `react`, `react-dom`, and `react-test-renderer` on the exact versions selected by the current Expo SDK, and mirror those versions in root npm `overrides` to prevent peer auto-install drift. Never accept duplicate React or native-module versions. After dependency changes, run `npm ls react react-dom react-test-renderer`, `npm dedupe`, Expo Doctor, typecheck, lint, tests, and relevant exports/builds.
+
+Use the project-local Expo CLI and `expo install` when adding or upgrading Expo/native packages so versions follow the installed SDK compatibility map. Inspect every manifest and lockfile diff. Prefer exact direct dependency versions; retain Expo-generated compatible ranges only where Expo deliberately manages them. Upgrade Expo SDKs as focused changes, then realign singleton overrides and regenerate native projects.
+
+Do not use `--legacy-peer-deps`, `npm audit fix --force`, unreviewed install-script approval, or broad opportunistic upgrades. Resolve peer conflicts explicitly. Review lifecycle scripts and package provenance before allowing them. Security fixes should identify affected runtime path, choose a compatible direct upgrade or override, and rerun the complete validation matrix.
+
 ## Coding Style & Naming
 
 Use two-space indentation and formatter defaults. Components and types use `PascalCase`; functions, hooks, and variables use `camelCase`; hooks start with `use`; route and asset files use lowercase kebab-case where Expo Router permits. Prefer small feature-owned modules over generic utility collections. Keep platform-specific implementations explicit with `.ios.ts(x)`, `.android.ts(x)`, or `.web.ts(x)` suffixes.
