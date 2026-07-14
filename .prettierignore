@@ -1,0 +1,9 @@
+.expo/
+android/
+ios/
+dist/
+coverage/
+docs/adr/
+docs/product-brief.md
+docs/ui-design-brief.md
+node_modules/

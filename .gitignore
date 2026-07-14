@@ -1,0 +1,18 @@
+node_modules/
+.expo/
+dist/
+coverage/
+
+# Generated native projects are disposable Expo prebuild output.
+apps/mobile/android/
+apps/mobile/ios/
+
+# Local configuration and secrets.
+.env
+.env.*
+!.env.example
+local.settings.json
+
+# Editors and operating systems.
+.DS_Store
+*.swp
