@@ -176,6 +176,58 @@ describe('minimal Functions platform Bicep module', () => {
     assert.doesNotMatch(templateText, /974c5e8b-45b9-4653-ba55-5f855dd0fb88/);
   });
 
+  it('derives deterministic role-assignment names without runtime identity lookup', () => {
+    const authorizationDeployment = resourcesOfType(
+      'Microsoft.Resources/deployments',
+    ).find(
+      (deployment) => deployment.name === 'notification-platform-authorization',
+    );
+    assert.ok(authorizationDeployment);
+
+    const identityResourceId =
+      authorizationDeployment.properties.parameters.runtimeIdentityResourceId
+        .value;
+    assert.equal(
+      identityResourceId,
+      "[variables('runtimeIdentityResourceId')]",
+    );
+    assert.equal(
+      compiledTemplate.variables.runtimeIdentityResourceId,
+      "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('resourceNames').runtimeIdentity)]",
+    );
+    assert.doesNotMatch(identityResourceId, /reference|list/i);
+    assert.doesNotMatch(
+      compiledTemplate.variables.runtimeIdentityResourceId,
+      /reference|list/i,
+    );
+
+    const roleAssignments = resourcesOfType(
+      'Microsoft.Authorization/roleAssignments',
+    );
+    for (const roleAssignment of roleAssignments) {
+      assert.match(roleAssignment.name, /^\[guid\(/);
+      assert.match(
+        roleAssignment.name,
+        /parameters\('runtimeIdentityResourceId'\)/,
+      );
+      assert.doesNotMatch(roleAssignment.name, /reference|list/i);
+      assert.equal(
+        roleAssignment.properties.principalId,
+        "[parameters('runtimePrincipalId')]",
+      );
+
+      const roleVariableMatch =
+        roleAssignment.properties.roleDefinitionId.match(
+          /variables\('([^']+RoleId)'\)/,
+        );
+      assert.ok(roleVariableMatch);
+      assert.match(
+        roleAssignment.name,
+        new RegExp(`variables\\('${roleVariableMatch[1]}'\\)`),
+      );
+    }
+  });
+
   it('routes supported platform diagnostics to Log Analytics', () => {
     const diagnostics = resourcesOfType(
       'Microsoft.Insights/diagnosticSettings',
