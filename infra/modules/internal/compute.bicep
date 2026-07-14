@@ -87,7 +87,6 @@ resource appSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     AzureWebJobsStorage__credential: 'managedidentity'
     BUILD_VERSION: buildVersion
     FUNCTIONS_EXTENSION_VERSION: '~4'
-    FUNCTIONS_WORKER_RUNTIME: runtimeName
     KEY_VAULT_URI: keyVaultUri
   }
 }

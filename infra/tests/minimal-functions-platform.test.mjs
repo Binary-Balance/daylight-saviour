@@ -123,6 +123,36 @@ describe('minimal Functions platform Bicep module', () => {
     );
   });
 
+  it('configures runtime through Flex metadata without legacy worker setting', () => {
+    const functionPlan = oneResource('Microsoft.Web/serverfarms');
+    const functionApp = oneResource('Microsoft.Web/sites');
+    const appSettings = oneResource('Microsoft.Web/sites/config').properties;
+
+    assert.deepEqual(functionPlan.sku, {
+      name: 'FC1',
+      tier: 'FlexConsumption',
+    });
+    assert.deepEqual(functionApp.properties.functionAppConfig.runtime, {
+      name: "[parameters('runtimeName')]",
+      version: "[parameters('runtimeVersion')]",
+    });
+    assert.equal(Object.hasOwn(appSettings, 'FUNCTIONS_WORKER_RUNTIME'), false);
+    assert.equal(
+      appSettings.AzureWebJobsStorage__accountName,
+      "[parameters('storageAccountName')]",
+    );
+    assert.equal(
+      appSettings.AzureWebJobsStorage__clientId,
+      "[parameters('runtimeIdentityClientId')]",
+    );
+    assert.equal(
+      appSettings.AzureWebJobsStorage__credential,
+      'managedidentity',
+    );
+    assert.equal(appSettings.KEY_VAULT_URI, "[parameters('keyVaultUri')]");
+    assert.equal(appSettings.BUILD_VERSION, "[parameters('buildVersion')]");
+  });
+
   it('denies shared-key, public-blob, and basic publishing access', () => {
     const storage = oneResource('Microsoft.Storage/storageAccounts');
     const deploymentContainer = oneResource(
