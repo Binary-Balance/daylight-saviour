@@ -95,6 +95,11 @@ param security SecuritySettings = {
 @maxLength(64)
 param buildVersion string = 'unavailable'
 
+var runtimeIdentityResourceId = resourceId(
+  'Microsoft.ManagedIdentity/userAssignedIdentities',
+  resourceNames.runtimeIdentity
+)
+
 module identity './internal/identity.bicep' = {
   name: 'notification-platform-identity'
   params: {
@@ -143,6 +148,7 @@ module authorization './internal/authorization.bicep' = {
     applicationInsightsName: resourceNames.applicationInsights
     keyVaultName: resourceNames.keyVault
     runtimePrincipalId: identity.outputs.principalId
+    runtimeIdentityResourceId: runtimeIdentityResourceId
     storageAccountName: resourceNames.storageAccount
   }
   dependsOn: [

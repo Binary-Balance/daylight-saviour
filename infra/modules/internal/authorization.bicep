@@ -2,6 +2,7 @@ targetScope = 'resourceGroup'
 
 param applicationInsightsName string
 param keyVaultName string
+param runtimeIdentityResourceId string
 param runtimePrincipalId string
 param storageAccountName string
 
@@ -23,7 +24,7 @@ resource applicationInsights 'Microsoft.Insights/components@2020-02-02' existing
 }
 
 resource blobDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, runtimePrincipalId, storageBlobDataOwnerRoleId)
+  name: guid(storageAccount.id, runtimeIdentityResourceId, storageBlobDataOwnerRoleId)
   scope: storageAccount
   properties: {
     principalId: runtimePrincipalId
@@ -33,7 +34,7 @@ resource blobDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 }
 
 resource tableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, runtimePrincipalId, storageTableDataContributorRoleId)
+  name: guid(storageAccount.id, runtimeIdentityResourceId, storageTableDataContributorRoleId)
   scope: storageAccount
   properties: {
     principalId: runtimePrincipalId
@@ -46,7 +47,7 @@ resource tableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-0
 }
 
 resource keyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, runtimePrincipalId, keyVaultSecretsUserRoleId)
+  name: guid(keyVault.id, runtimeIdentityResourceId, keyVaultSecretsUserRoleId)
   scope: keyVault
   properties: {
     principalId: runtimePrincipalId
@@ -56,7 +57,7 @@ resource keyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01
 }
 
 resource monitoringMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(applicationInsights.id, runtimePrincipalId, monitoringMetricsPublisherRoleId)
+  name: guid(applicationInsights.id, runtimeIdentityResourceId, monitoringMetricsPublisherRoleId)
   scope: applicationInsights
   properties: {
     principalId: runtimePrincipalId
