@@ -38,6 +38,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Bicep
+        run: az bicep install --version v0.44.1
+
+      - name: Validate portable Azure infrastructure
+        run: npm run infra:validate
+
       - name: Check formatting
         run: npm run format:check
 
