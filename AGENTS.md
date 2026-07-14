@@ -68,4 +68,4 @@ Use concise imperative subjects, for example `Add daylight offset calculator`. K
 
 ## CI/CD & Security
 
-GitHub Actions is the CI/CD system. Untrusted public pull requests run only on isolated GitHub-hosted runners; never run them on this Azure VM. Protect signing material and deployment access with GitHub Environments. Authenticate Azure deployments through least-privilege OIDC workload identity. Never commit credentials, signing keys, generated secrets, or `.env` files; provide sanitized `.env.example` entries instead.
+GitHub Actions is the CI/CD system. Untrusted public pull requests run only on isolated GitHub-hosted runners; never run them on this Azure VM. Azure deployment controls for every environment follow ADR 0004: separate least-privilege branch-bound OIDC identities, manual apply, same-commit reviewed what-if evidence, and explicit confirmation. Never claim protected-branch or protected-environment enforcement while the current GitHub plan lacks it. Never commit credentials, signing keys, generated secrets, or `.env` files; provide sanitized `.env.example` entries instead.
