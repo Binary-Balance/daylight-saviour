@@ -16,6 +16,11 @@ describe('notification-service artifact', () => {
       id: 'Microsoft.Azure.Functions.ExtensionBundle',
       version: '[4.0.0, 5.0.0)',
     });
+    assert.deepEqual(host.extensions, {
+      http: {
+        routePrefix: '',
+      },
+    });
   });
 
   it('packages compiled functions and host metadata', () => {
