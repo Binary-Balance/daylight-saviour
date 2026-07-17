@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.example.daylightsaviour"
+      "bundleIdentifier": "au.com.binarybalance.daylightsaviour"
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +19,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": true,
-      "package": "com.example.daylightsaviour"
+      "package": "au.com.binarybalance.daylightsaviour"
     },
     "web": {
       "output": "static",

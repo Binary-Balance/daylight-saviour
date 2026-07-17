@@ -129,4 +129,4 @@ NODE_ENV=development apps/mobile/android/gradlew -p apps/mobile/android assemble
 
 Generated native directories are disposable and ignored. Regenerate after Expo configuration or native dependency changes. Routine CI compiles `arm64-v8a`; release validation must restore every supported ABI.
 
-Android application ID `com.example.daylightsaviour` is a non-release placeholder. Final identifiers and signing belong to release coordination and private operations configuration.
+Production identifier `au.com.binarybalance.daylightsaviour` applies to both the Android application ID and iOS bundle identifier. Signing and environment-specific release configuration remain private operations concerns.
