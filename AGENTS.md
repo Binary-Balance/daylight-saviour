@@ -2,7 +2,7 @@
 
 ## Architecture & Project Structure
 
-Daylight Saviour uses Expo, React Native, and strict TypeScript for Android, iOS, and web. Read `CONTEXT.md` and `docs/adr/` before changing architecture.
+Daylight Saviour uses Expo, React Native, and strict TypeScript for Android, iOS, and web. Follow the reading order in [`docs/README.md`](docs/README.md) before changing architecture. [`CONTEXT.md`](CONTEXT.md) is the domain glossary, not a project-status ledger; use public issues for current delivery state.
 
 Use Expo Router routes under `apps/mobile/app/`. Keep mobile UI in `apps/mobile/components/`, feature logic in `apps/mobile/src/features/<feature>/`, notification code in `services/notifications/`, shared domain/contracts/copy/data tooling in `packages/`, and generic Bicep in `infra/modules/`. Place tests beside subjects as `*.test.ts(x)`. Treat generated `android/` and `ios/` directories as disposable output unless an ADR changes that policy.
 

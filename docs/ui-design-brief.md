@@ -1,6 +1,6 @@
 # Daylight Saviour UI Design Brief
 
-_Status: accepted MVP design direction. Initial design pass delegated to GPT-5.6 Sol._
+_Status: accepted MVP design direction._
 
 ## Design Proposition
 

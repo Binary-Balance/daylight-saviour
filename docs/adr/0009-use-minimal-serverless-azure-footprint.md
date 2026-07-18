@@ -4,7 +4,7 @@ status: accepted
 
 # Use a minimal serverless Azure footprint
 
-MVP Azure infrastructure will comprise one 512 MB Flex Consumption Function App with no always-ready instances, one Storage account for signed data packs and Table entities, one Key Vault for APNs/FCM credentials, Application Insights, managed identities, and least-privilege RBAC. HTTP functions manage installation-scoped subscriptions; a five-minute timer determines due zone/reminder combinations from the active data pack and dispatches directly through APNs and FCM.
+MVP Azure infrastructure will comprise one 512 MB Flex Consumption Function App with no always-ready instances, one Storage account for signed data packs and Table entities, one Key Vault for APNs private material and other secrets, Application Insights, managed identities, and least-privilege RBAC. FCM authorization uses keyless workload identity federation from the Azure runtime identity. HTTP functions manage installation-scoped subscriptions; a five-minute timer determines due zone/reminder combinations from the active data pack and dispatches directly through APNs and FCM.
 
 ## Consequences
 

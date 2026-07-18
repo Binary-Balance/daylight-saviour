@@ -1,6 +1,6 @@
 # Daylight Saviour Product Brief
 
-_Status: accepted product direction. Delivery is tracked in the private GitHub Project._
+_Status: accepted product direction. Portable delivery is tracked in [public GitHub issues](https://github.com/Binary-Balance/daylight-saviour/issues)._
 
 ## Purpose
 

@@ -11,7 +11,7 @@ Daylight Saviour will derive transition data from IANA tzdb and distribute a com
 - Daylight-saving rule changes do not require App Store or Google Play releases.
 - Generated data must identify its tzdb version, schema version, generation time, and validity horizon.
 - Validation must cover Australian observing and non-observing zones, non-hour transitions such as Lord Howe Island, and unchanged-zone regressions.
-- Local reminders must be rescheduled after an active pack changes.
+- The remote reminder service must recalculate eligible dispatches after its active pack changes.
 - Offline or long-inactive devices may retain stale data; notification design must account for that limitation.
 - Failed downloads never replace a known-good pack, and expired data must produce an explicit degraded state rather than treating absence of a known transition as proof that none exists.
 - Notification dispatch must not schedule beyond the active pack's declared validity horizon.
