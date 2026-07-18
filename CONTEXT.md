@@ -1,4 +1,6 @@
-# Daylight Saviour
+# Domain Glossary
+
+Canonical Daylight Saviour domain terms follow. Use them consistently in code, documentation, and issues. This file defines language; it does not track implementation status or delivery progress. See [documentation index](docs/README.md) for reading order and [public GitHub issues](https://github.com/Binary-Balance/daylight-saviour/issues) for current work.
 
 Daylight Saviour tells people whether daylight saving time currently applies and how clocks will move at the next change. It presents accurate Australian civil-time information with a polished, playful, anti-daylight-saving voice.
 

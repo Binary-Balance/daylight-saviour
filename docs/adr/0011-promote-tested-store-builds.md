@@ -4,7 +4,7 @@ status: accepted
 
 # Promote tested store builds without rebuilding
 
-Mobile releases begin from immutable semantic-version tags in the public repository. A private operations workflow checks out the exact tag, builds signed Android and iOS artifacts once, submits them to Google Play internal testing and TestFlight, then promotes those same artifacts to production after protected approval and device smoke tests.
+Mobile releases begin from immutable semantic-version tags in the public repository. A private operations workflow checks out the exact tag, builds signed Android and iOS artifacts once, submits them to Google Play internal testing and TestFlight, then promotes those same artifacts to production after documented manual approval and device smoke tests.
 
 ## Consequences
 

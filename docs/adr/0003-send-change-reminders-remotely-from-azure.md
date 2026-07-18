@@ -11,7 +11,8 @@ Daylight Saviour will send Change Reminders from lightweight Azure-hosted infras
 - MVP infrastructure must register and retire device push tokens, retain each installation's Home Time Zone and reminder preference, schedule sends, and process delivery failures.
 - Registration will be installation-scoped; user accounts are not required for MVP.
 - Stored data and Azure permissions must be minimal, and push tokens must be treated as sensitive identifiers.
-- APNs and FCM provider credentials must be isolated in Azure Key Vault and accessed only by the sender's managed identity.
+- APNs private material must be isolated in Azure Key Vault and accessed only by the sender's managed identity.
+- FCM access uses workload identity federation from the Azure runtime identity to a least-privilege Google service account; no user-managed Google service-account key is stored.
 - The app will not schedule equivalent long-lived local reminders, avoiding duplicate or stale notifications.
 - Delivery remains best-effort because APNs and FCM do not guarantee arrival.
 - Each reminder is eligible from 9:00 am through 9:00 pm in the Home Time Zone. Transient failures are retried idempotently only within that Delivery Window.
