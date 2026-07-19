@@ -43,6 +43,24 @@ export interface ChangeEvent {
   readonly secondsUntil: number;
 }
 
+export type LivingDossierPhase =
+  | 'ordinary'
+  | 'approaching'
+  | 'reminder-week'
+  | 'reminder-day'
+  | 'aftermath'
+  | 'no-event';
+
+export interface LivingDossierDecision {
+  readonly civilTime: CivilTimeDecision;
+  readonly featuredEvent: ChangeEvent | null;
+  readonly phase: LivingDossierPhase;
+}
+
+export interface LivingDossierContext {
+  readonly acknowledgedEventAt?: string | null;
+}
+
 export interface CivilTimeDecision {
   readonly abbreviation: string;
   readonly daylightSavingStatus: DaylightSavingStatus;
@@ -54,11 +72,20 @@ export interface CivilTimeDecision {
 }
 
 export class CivilTimeDecisionUnavailableError extends Error {
-  constructor(problem: string) {
+  readonly reason: CivilTimeDecisionUnavailableReason;
+
+  constructor(reason: CivilTimeDecisionUnavailableReason, problem: string) {
     super(`Civil-time decision unavailable: ${problem}`);
     this.name = 'CivilTimeDecisionUnavailableError';
+    this.reason = reason;
   }
 }
+
+export type CivilTimeDecisionUnavailableReason =
+  | 'invalid-instant'
+  | 'before-coverage'
+  | 'validity-expired'
+  | 'unsupported-zone';
 
 function localDateTimeAt(
   instantMilliseconds: number,
@@ -101,6 +128,33 @@ function nextTransition(
   );
 }
 
+function changeEventFromTransition(
+  transition: TimeZoneTransition,
+  instantMilliseconds: number,
+): ChangeEvent {
+  return {
+    abbreviationAfter: transition.abbreviation,
+    at: transition.at,
+    direction:
+      transition.utcOffsetSeconds > transition.offsetBeforeSeconds
+        ? 'Forward Change'
+        : 'Backward Change',
+    localAfter: localDateTimeAt(
+      Date.parse(transition.at),
+      transition.utcOffsetSeconds,
+    ),
+    localBefore: localDateTimeAt(
+      Date.parse(transition.at),
+      transition.offsetBeforeSeconds,
+    ),
+    offsetAfterSeconds: transition.utcOffsetSeconds,
+    offsetBeforeSeconds: transition.offsetBeforeSeconds,
+    offsetDeltaSeconds:
+      transition.utcOffsetSeconds - transition.offsetBeforeSeconds,
+    secondsUntil: (Date.parse(transition.at) - instantMilliseconds) / 1_000,
+  };
+}
+
 export function decideCivilTime(
   pack: ActivatedTimeZoneDataPack,
   zoneId: string,
@@ -110,23 +164,33 @@ export function decideCivilTime(
 
   const instantMilliseconds = now.getTime();
   if (!Number.isFinite(instantMilliseconds)) {
-    throw new CivilTimeDecisionUnavailableError('current instant is invalid');
+    throw new CivilTimeDecisionUnavailableError(
+      'invalid-instant',
+      'current instant is invalid',
+    );
   }
 
   const coverageStartMilliseconds = Date.parse(pack.coverage.startsAt);
   const validityHorizonMilliseconds = Date.parse(pack.coverage.validUntil);
-  if (
-    instantMilliseconds < coverageStartMilliseconds ||
-    instantMilliseconds > validityHorizonMilliseconds
-  ) {
+  if (instantMilliseconds < coverageStartMilliseconds) {
     throw new CivilTimeDecisionUnavailableError(
-      'instant falls outside pack coverage and Validity Horizon',
+      'before-coverage',
+      'instant falls before pack coverage',
+    );
+  }
+  if (instantMilliseconds > validityHorizonMilliseconds) {
+    throw new CivilTimeDecisionUnavailableError(
+      'validity-expired',
+      'instant falls after the Validity Horizon',
     );
   }
 
   const zone = pack.zones.find((candidate) => candidate.id === zoneId);
   if (zone === undefined) {
-    throw new CivilTimeDecisionUnavailableError(`unsupported zone ${zoneId}`);
+    throw new CivilTimeDecisionUnavailableError(
+      'unsupported-zone',
+      `unsupported zone ${zoneId}`,
+    );
   }
 
   const state = activeState(
@@ -138,28 +202,7 @@ export function decideCivilTime(
   const nextChangeEvent =
     transition === undefined
       ? null
-      : {
-          abbreviationAfter: transition.abbreviation,
-          at: transition.at,
-          direction:
-            transition.utcOffsetSeconds > transition.offsetBeforeSeconds
-              ? ('Forward Change' as const)
-              : ('Backward Change' as const),
-          localAfter: localDateTimeAt(
-            Date.parse(transition.at),
-            transition.utcOffsetSeconds,
-          ),
-          localBefore: localDateTimeAt(
-            Date.parse(transition.at),
-            transition.offsetBeforeSeconds,
-          ),
-          offsetAfterSeconds: transition.utcOffsetSeconds,
-          offsetBeforeSeconds: transition.offsetBeforeSeconds,
-          offsetDeltaSeconds:
-            transition.utcOffsetSeconds - transition.offsetBeforeSeconds,
-          secondsUntil:
-            (Date.parse(transition.at) - instantMilliseconds) / 1_000,
-        };
+      : changeEventFromTransition(transition, instantMilliseconds);
 
   return {
     abbreviation: state.abbreviation,
@@ -172,4 +215,70 @@ export function decideCivilTime(
     utcOffsetSeconds: state.utcOffsetSeconds,
     zoneId: zone.id,
   };
+}
+
+const daySeconds = 24 * 60 * 60;
+const aftermathSeconds = 2 * daySeconds;
+const approachingSeconds = 28 * daySeconds;
+const reminderWeekSeconds = 7 * daySeconds;
+
+/**
+ * Selects one Living Dossier phase from activated pack transitions.
+ *
+ * Boundaries are deliberately asymmetric: an event is upcoming only while
+ * secondsUntil is positive; 28 days, 7 days, and 24 hours belong to the phase
+ * beginning at that boundary. The event instant begins aftermath, which lasts
+ * on the first unacknowledged opening while elapsed time is less than 48
+ * hours. Acknowledged events and the exact 48-hour boundary resume the normal
+ * next-event dossier. There is no interval or "underway" phase.
+ */
+export function decideLivingDossier(
+  pack: ActivatedTimeZoneDataPack,
+  zoneId: string,
+  now: Date,
+  context: LivingDossierContext = {},
+): LivingDossierDecision {
+  const civilTime = decideCivilTime(pack, zoneId, now);
+  const instantMilliseconds = now.getTime();
+  const zone = pack.zones.find(
+    (candidate) => candidate.id === civilTime.zoneId,
+  )!;
+  const previousTransition = [...zone.transitions]
+    .reverse()
+    .find((transition) => Date.parse(transition.at) <= instantMilliseconds);
+
+  if (previousTransition !== undefined) {
+    const elapsedSeconds =
+      (instantMilliseconds - Date.parse(previousTransition.at)) / 1_000;
+    if (
+      elapsedSeconds >= 0 &&
+      elapsedSeconds < aftermathSeconds &&
+      context.acknowledgedEventAt !== previousTransition.at
+    ) {
+      return {
+        civilTime,
+        featuredEvent: changeEventFromTransition(
+          previousTransition,
+          instantMilliseconds,
+        ),
+        phase: 'aftermath',
+      };
+    }
+  }
+
+  const event = civilTime.nextChangeEvent;
+  if (event === null) {
+    return { civilTime, featuredEvent: null, phase: 'no-event' };
+  }
+
+  const phase: LivingDossierPhase =
+    event.secondsUntil <= daySeconds
+      ? 'reminder-day'
+      : event.secondsUntil <= reminderWeekSeconds
+        ? 'reminder-week'
+        : event.secondsUntil <= approachingSeconds
+          ? 'approaching'
+          : 'ordinary';
+
+  return { civilTime, featuredEvent: event, phase };
 }

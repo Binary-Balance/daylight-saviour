@@ -90,7 +90,40 @@ describe('decideCivilTime', () => {
           'Australia/Sydney',
           new Date('2031-01-01T00:00:00.000Z'),
         ),
-      CivilTimeDecisionUnavailableError,
+      (error) =>
+        error instanceof CivilTimeDecisionUnavailableError &&
+        error.reason === 'validity-expired',
+    );
+  });
+
+  it('types unavailable reasons independently from freshness expiry', () => {
+    assert.throws(
+      () =>
+        decideCivilTime(
+          pack,
+          'Australia/Sydney',
+          new Date('2024-12-31T23:59:59.000Z'),
+        ),
+      (error) =>
+        error instanceof CivilTimeDecisionUnavailableError &&
+        error.reason === 'before-coverage',
+    );
+    assert.throws(
+      () =>
+        decideCivilTime(
+          pack,
+          'Europe/London',
+          new Date('2026-07-19T00:00:00.000Z'),
+        ),
+      (error) =>
+        error instanceof CivilTimeDecisionUnavailableError &&
+        error.reason === 'unsupported-zone',
+    );
+    assert.throws(
+      () => decideCivilTime(pack, 'Australia/Sydney', new Date('invalid')),
+      (error) =>
+        error instanceof CivilTimeDecisionUnavailableError &&
+        error.reason === 'invalid-instant',
     );
   });
 

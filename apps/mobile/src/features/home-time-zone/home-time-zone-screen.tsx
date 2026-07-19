@@ -19,26 +19,11 @@ import {
 
 import StatusScreen from '../status/status-screen';
 import { createStatusViewModel } from '../status/status-view-model';
+import {
+  daylightSaviourPalettes,
+  type DaylightSaviourPalette,
+} from '../../theme';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
-
-const palettes = {
-  light: {
-    accent: '#E5482D',
-    background: '#F4EEDC',
-    ink: '#111B2C',
-    rule: '#A9A38F',
-    secondaryInk: '#596273',
-    surface: '#FFF9EA',
-  },
-  dark: {
-    accent: '#FF6A4D',
-    background: '#081426',
-    ink: '#F6F0DE',
-    rule: '#405067',
-    secondaryInk: '#B6C0CF',
-    surface: '#101F35',
-  },
-} as const;
 
 type FlowState =
   | { readonly kind: 'loading' }
@@ -51,10 +36,12 @@ type FlowState =
   | {
       readonly kind: 'choose';
       readonly notice?: string;
+      readonly returnAcknowledgedEventAt?: string | null;
       readonly returnZoneId?: string;
       readonly uses24hourClock: boolean;
     }
   | {
+      readonly acknowledgedEventAt: string | null;
       readonly kind: 'ready';
       readonly uses24hourClock: boolean;
       readonly zoneId: string;
@@ -69,7 +56,7 @@ interface ChooserProps {
   readonly notice?: string;
   readonly onCancel?: () => void;
   readonly onSelect: (zoneId: string) => void;
-  readonly palette: (typeof palettes)[keyof typeof palettes];
+  readonly palette: DaylightSaviourPalette;
   readonly saveError: string | null;
   readonly saving: boolean;
 }
@@ -204,7 +191,7 @@ export default function HomeTimeZoneScreen({
   now,
 }: HomeTimeZoneScreenProps) {
   const appearance = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = palettes[appearance];
+  const palette = daylightSaviourPalettes[appearance];
   const [flow, setFlow] = useState<FlowState>({ kind: 'loading' });
   const [retry, setRetry] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -222,7 +209,17 @@ export default function HomeTimeZoneScreen({
         if (saved !== null) {
           const canonical = normalizeAustralianZoneId(saved);
           if (canonical === saved) {
+            let acknowledgedEventAt: string | null = null;
+            try {
+              acknowledgedEventAt =
+                await adapters.aftermathAcknowledgements.load(canonical);
+            } catch {
+              // Acknowledgement is noncritical. Missing it may repeat one
+              // factual aftermath opening but cannot block the home screen.
+            }
+            if (!active) return;
             setFlow({
+              acknowledgedEventAt,
               kind: 'ready',
               uses24hourClock: localization.uses24hourClock,
               zoneId: canonical,
@@ -273,7 +270,21 @@ export default function HomeTimeZoneScreen({
     setSaveError(null);
     try {
       await adapters.storage.save(zone.id);
-      setFlow({ kind: 'ready', uses24hourClock, zoneId: zone.id });
+      let acknowledgedEventAt: string | null = null;
+      try {
+        acknowledgedEventAt = await adapters.aftermathAcknowledgements.load(
+          zone.id,
+        );
+      } catch {
+        // A missing acknowledgement may repeat one factual aftermath opening,
+        // but must not make a successfully saved Home Time Zone unusable.
+      }
+      setFlow({
+        acknowledgedEventAt,
+        kind: 'ready',
+        uses24hourClock,
+        zoneId: zone.id,
+      });
     } catch {
       setSaveError('Could not save Home Time Zone. Try again.');
     } finally {
@@ -284,11 +295,31 @@ export default function HomeTimeZoneScreen({
   if (flow.kind === 'ready') {
     return (
       <StatusScreen
+        acknowledgedEventAt={flow.acknowledgedEventAt}
+        key={flow.zoneId}
         now={now}
+        onAcknowledgeAftermath={(eventAt) => {
+          setFlow((current) => {
+            if (current.kind === 'ready' && current.zoneId === flow.zoneId) {
+              return { ...current, acknowledgedEventAt: eventAt };
+            }
+            if (
+              current.kind === 'choose' &&
+              current.returnZoneId === flow.zoneId
+            ) {
+              return { ...current, returnAcknowledgedEventAt: eventAt };
+            }
+            return current;
+          });
+          void adapters.aftermathAcknowledgements
+            .save(flow.zoneId, eventAt)
+            .catch(() => undefined);
+        }}
         onChooseZone={() => {
           setSaveError(null);
           setFlow({
             kind: 'choose',
+            returnAcknowledgedEventAt: flow.acknowledgedEventAt,
             returnZoneId: flow.zoneId,
             uses24hourClock: flow.uses24hourClock,
           });
@@ -309,6 +340,7 @@ export default function HomeTimeZoneScreen({
             ? undefined
             : () =>
                 setFlow({
+                  acknowledgedEventAt: flow.returnAcknowledgedEventAt ?? null,
                   kind: 'ready',
                   uses24hourClock: flow.uses24hourClock,
                   zoneId: returnZoneId,

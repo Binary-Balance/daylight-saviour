@@ -4,8 +4,16 @@ import { getCalendars } from 'expo-localization';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
 
 const storageKey = 'home-time-zone';
+const aftermathStorageKey = (canonicalZoneId: string) =>
+  `living-dossier-aftermath:${canonicalZoneId}`;
 
 export const productionHomeTimeZoneAdapters: HomeTimeZoneAdapters = {
+  aftermathAcknowledgements: {
+    load: (canonicalZoneId) =>
+      AsyncStorage.getItem(aftermathStorageKey(canonicalZoneId)),
+    save: (canonicalZoneId, eventAt) =>
+      AsyncStorage.setItem(aftermathStorageKey(canonicalZoneId), eventAt),
+  },
   localization: {
     read: () => {
       const calendar = getCalendars()[0];
