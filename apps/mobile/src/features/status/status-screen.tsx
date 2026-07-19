@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -19,7 +19,9 @@ import { createDossierMotionRecipe } from './dossier-motion';
 import { createStatusViewModel } from './status-view-model';
 
 interface StatusScreenProps {
+  readonly acknowledgedEventAt?: string | null;
   readonly now?: Date;
+  readonly onAcknowledgeAftermath?: (eventAt: string) => void;
   readonly onChooseZone?: () => void;
   readonly reducedMotion?: boolean;
   readonly uses24hourClock?: boolean;
@@ -42,7 +44,9 @@ function useCurrentInstant(fixedNow: Date | undefined) {
 }
 
 function useReducedMotion(override: boolean | undefined) {
-  const [systemPreference, setSystemPreference] = useState(false);
+  const [systemPreference, setSystemPreference] = useState<boolean | null>(
+    null,
+  );
 
   useEffect(() => {
     if (override !== undefined) return;
@@ -71,22 +75,29 @@ function SemanticEventMotion({
   eventKey,
   reducedMotion,
   echo,
+  echoColor,
 }: {
   readonly children: ReactNode;
   readonly direction: ChangeDirection;
   readonly echo: string;
+  readonly echoColor: string;
   readonly eventKey: string;
-  readonly reducedMotion: boolean;
+  readonly reducedMotion: boolean | null;
 }) {
   const [opacity] = useState(() => new Animated.Value(0));
   const [travel] = useState(() => new Animated.Value(0));
   const [echoOpacity] = useState(() => new Animated.Value(0));
   const recipe = useMemo(
-    () => createDossierMotionRecipe(direction, reducedMotion),
+    () =>
+      reducedMotion === null
+        ? null
+        : createDossierMotionRecipe(direction, reducedMotion),
     [direction, reducedMotion],
   );
 
   useEffect(() => {
+    if (recipe === null) return;
+
     opacity.stopAnimation();
     travel.stopAnimation();
     echoOpacity.stopAnimation();
@@ -122,20 +133,30 @@ function SemanticEventMotion({
   }, [echoOpacity, eventKey, opacity, recipe, travel]);
 
   return (
-    <View style={styles.motionFrame} testID={`motion-${recipe.kind}`}>
-      {recipe.decorativeEcho ? (
+    <View
+      style={styles.motionFrame}
+      testID={
+        recipe === null ? 'motion-awaiting-preference' : `motion-${recipe.kind}`
+      }
+    >
+      {recipe?.decorativeEcho ? (
         <Animated.Text
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
           style={[
             styles.decorativeEcho,
-            { opacity: echoOpacity, transform: [{ translateX: travel }] },
+            {
+              color: echoColor,
+              opacity: echoOpacity,
+              transform: [{ translateX: travel }],
+            },
           ]}
         >
           {echo}
         </Animated.Text>
       ) : null}
       <Animated.View
+        testID="semantic-event-content"
         style={{
           opacity,
           transform: [
@@ -152,7 +173,9 @@ function SemanticEventMotion({
 }
 
 export default function StatusScreen({
+  acknowledgedEventAt = null,
   now,
+  onAcknowledgeAftermath,
   onChooseZone,
   reducedMotion: reducedMotionOverride,
   uses24hourClock = false,
@@ -168,8 +191,30 @@ export default function StatusScreen({
     zoneId,
     currentInstant,
     uses24hourClock,
+    acknowledgedEventAt,
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const acknowledgedDuringOpening = useRef<string | null>(null);
+  const aftermathEventAt =
+    viewModel.availability === 'ready' && viewModel.phase === 'aftermath'
+      ? (viewModel.event?.instant ?? null)
+      : null;
+  const freshnessDescription =
+    viewModel.freshness === 'current'
+      ? 'bundled data current'
+      : viewModel.freshness === 'expired'
+        ? 'validity expired'
+        : 'freshness not determined, civil-time decision unavailable';
+
+  useEffect(() => {
+    if (
+      aftermathEventAt !== null &&
+      acknowledgedDuringOpening.current !== aftermathEventAt
+    ) {
+      acknowledgedDuringOpening.current = aftermathEventAt;
+      onAcknowledgeAftermath?.(aftermathEventAt);
+    }
+  }, [aftermathEventAt, onAcknowledgeAftermath]);
 
   return (
     <SafeAreaView
@@ -226,27 +271,32 @@ export default function StatusScreen({
         {viewModel.availability === 'ready' ? (
           <>
             <View style={styles.statusSection}>
-              <Text
+              <View
+                accessibilityLabel={`Home Time Zone current time, ${viewModel.clock}, ${viewModel.abbreviation}, ${viewModel.currentOffset}`}
                 accessibilityLiveRegion="none"
-                accessible={false}
-                style={[
-                  styles.clock,
-                  {
-                    color: palette.ink,
-                    fontSize: clockSize,
-                    lineHeight: clockSize * 1.05,
-                  },
-                ]}
+                accessible
               >
-                {viewModel.clock}
-              </Text>
-              <Text
-                accessible={false}
-                style={[styles.identifier, { color: palette.secondaryInk }]}
-              >
-                {viewModel.abbreviation} · {viewModel.currentOffset} · HOME TIME
-                ZONE
-              </Text>
+                <Text
+                  accessible={false}
+                  style={[
+                    styles.clock,
+                    {
+                      color: palette.ink,
+                      fontSize: clockSize,
+                      lineHeight: clockSize * 1.05,
+                    },
+                  ]}
+                >
+                  {viewModel.clock}
+                </Text>
+                <Text
+                  accessible={false}
+                  style={[styles.identifier, { color: palette.secondaryInk }]}
+                >
+                  {viewModel.abbreviation} · {viewModel.currentOffset} · HOME
+                  TIME ZONE
+                </Text>
+              </View>
               <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
                 DAYLIGHT SAVING STATUS
               </Text>
@@ -318,6 +368,7 @@ export default function StatusScreen({
               <SemanticEventMotion
                 direction={viewModel.event.direction}
                 echo={viewModel.event.wallTimeChange}
+                echoColor={palette.secondaryInk}
                 eventKey={`${viewModel.event.instant}:${viewModel.event.relation}`}
                 reducedMotion={reducedMotion}
               >
@@ -428,10 +479,16 @@ export default function StatusScreen({
               styles.expiredCard,
               { backgroundColor: palette.surface, borderColor: palette.accent },
             ]}
-            testID="expired-dossier"
+            testID={
+              viewModel.freshness === 'expired'
+                ? 'expired-dossier'
+                : 'unavailable-dossier'
+            }
           >
             <Text style={[styles.metadata, { color: palette.accent }]}>
-              REFRESH REQUIRED
+              {viewModel.freshness === 'expired'
+                ? 'REFRESH REQUIRED'
+                : 'DECISION UNAVAILABLE'}
             </Text>
             <Text
               accessibilityRole="header"
@@ -447,20 +504,18 @@ export default function StatusScreen({
 
         <View
           accessible
-          accessibilityLabel={`Time-Zone Data Pack ${viewModel.packVersion}, ${
-            viewModel.availability === 'ready'
-              ? 'bundled data current'
-              : 'validity expired'
-          }, valid until ${viewModel.validUntil}`}
+          accessibilityLabel={`Time-Zone Data Pack ${viewModel.packVersion}, ${freshnessDescription}, valid until ${viewModel.validUntil}`}
           style={[styles.footer, { borderTopColor: palette.rule }]}
         >
           <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
             DATA FRESHNESS
           </Text>
           <Text style={[styles.body, { color: palette.ink }]}>
-            {viewModel.availability === 'ready'
-              ? 'Bundled data current'
-              : 'Validity Horizon passed'}
+            {viewModel.freshness === 'expired'
+              ? 'Validity Horizon passed'
+              : viewModel.freshness === 'decision-unavailable'
+                ? 'Freshness not determined · decision unavailable'
+                : 'Bundled data current'}
           </Text>
           <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
             Pack {viewModel.packVersion} · Valid through {viewModel.validUntil}
@@ -488,44 +543,52 @@ export default function StatusScreen({
       </ScrollView>
 
       <Modal
-        animationType={reducedMotion ? 'none' : 'fade'}
+        animationType={reducedMotion === false ? 'fade' : 'none'}
         onRequestClose={() => setSettingsOpen(false)}
         transparent
         visible={settingsOpen}
       >
-        <View style={styles.modalBackdrop}>
-          <View
-            accessibilityViewIsModal
-            style={[styles.settingsSheet, { backgroundColor: palette.surface }]}
-          >
-            <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
-              APP DETAILS
-            </Text>
-            <Text
-              accessibilityRole="header"
-              style={[styles.eventDate, { color: palette.ink }]}
+        <SafeAreaView
+          edges={['right', 'bottom', 'left']}
+          style={styles.modalSafeArea}
+          testID="settings-modal-safe-area"
+        >
+          <View style={styles.modalBackdrop}>
+            <View
+              accessibilityViewIsModal
+              style={[
+                styles.settingsSheet,
+                { backgroundColor: palette.surface },
+              ]}
             >
-              Settings
-            </Text>
-            <Text style={[styles.body, { color: palette.ink }]}>
-              Home Time Zone: {viewModel.friendlyZoneLabel}
-            </Text>
-            <Text style={[styles.body, { color: palette.ink }]}>
-              Time-Zone Data Pack: {viewModel.packVersion}
-            </Text>
-            <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
-              Zone selection is available from Home Time Zone. Reminder controls
-              are not available in this version.
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setSettingsOpen(false)}
-              style={[styles.closeButton, { backgroundColor: palette.accent }]}
-            >
-              <Text style={styles.closeButtonText}>Close settings</Text>
-            </Pressable>
+              <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
+                APP DETAILS
+              </Text>
+              <Text
+                accessibilityRole="header"
+                style={[styles.eventDate, { color: palette.ink }]}
+              >
+                Settings
+              </Text>
+              <Text style={[styles.body, { color: palette.ink }]}>
+                Home Time Zone: {viewModel.friendlyZoneLabel}
+              </Text>
+              <Text style={[styles.body, { color: palette.ink }]}>
+                Time-Zone Data Pack: {viewModel.packVersion}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setSettingsOpen(false)}
+                style={[
+                  styles.closeButton,
+                  { backgroundColor: palette.accent },
+                ]}
+              >
+                <Text style={styles.closeButtonText}>Close settings</Text>
+              </Pressable>
+            </View>
           </View>
-        </View>
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
@@ -650,6 +713,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
     padding: 16,
+  },
+  modalSafeArea: {
+    flex: 1,
   },
   motionFrame: {
     position: 'relative',

@@ -11,16 +11,31 @@ import HomeTimeZoneScreen from './home-time-zone-screen';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
 
 function createAdapters({
+  acknowledgedEventAt = null,
   deviceZone = 'Australia/Sydney',
   savedZone = null,
   uses24hourClock = false,
 }: {
+  readonly acknowledgedEventAt?: string | null;
   readonly deviceZone?: string | null;
   readonly savedZone?: string | null;
   readonly uses24hourClock?: boolean;
 } = {}) {
   let stored = savedZone;
+  const acknowledgements = new Map<string, string>();
+  if (savedZone !== null && acknowledgedEventAt !== null) {
+    acknowledgements.set(savedZone, acknowledgedEventAt);
+  }
   const adapters: HomeTimeZoneAdapters = {
+    aftermathAcknowledgements: {
+      load: jest.fn(
+        async (canonicalZoneId) =>
+          acknowledgements.get(canonicalZoneId) ?? null,
+      ),
+      save: jest.fn(async (canonicalZoneId, eventAt) => {
+        acknowledgements.set(canonicalZoneId, eventAt);
+      }),
+    },
     localization: {
       read: jest.fn(() => ({ timeZone: deviceZone, uses24hourClock })),
     },
@@ -265,8 +280,34 @@ describe('HomeTimeZoneScreen', () => {
     ).toBeTruthy();
   });
 
+  it('persists per-event aftermath acknowledgement and resumes normal dossier', async () => {
+    const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+    const aftermathNow = new Date('2026-10-03T17:00:00.000Z');
+    const first = render(
+      <HomeTimeZoneScreen adapters={adapters} now={aftermathNow} />,
+    );
+
+    expect(await screen.findByTestId('aftermath-dossier')).toBeTruthy();
+    await waitFor(() =>
+      expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalledWith(
+        'Australia/Sydney',
+        '2026-10-03T16:00:00.000Z',
+      ),
+    );
+
+    first.unmount();
+    render(<HomeTimeZoneScreen adapters={adapters} now={aftermathNow} />);
+
+    expect(await screen.findByTestId('ordinary-dossier')).toBeTruthy();
+    expect(screen.queryByTestId('aftermath-dossier')).toBeNull();
+  });
+
   it('shows literal load and save errors', async () => {
     const loadFailure: HomeTimeZoneAdapters = {
+      aftermathAcknowledgements: {
+        load: jest.fn(async () => null),
+        save: jest.fn(async () => undefined),
+      },
       localization: {
         read: jest.fn(() => ({
           timeZone: 'Australia/Sydney',

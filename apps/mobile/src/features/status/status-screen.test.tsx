@@ -129,6 +129,10 @@ describe('StatusScreen', () => {
     );
 
     expect(intervalSpy).not.toHaveBeenCalled();
+    const clockFacts = screen.getByLabelText(
+      'Home Time Zone current time, 10:00 am, AEST, UTC+10:00',
+    );
+    expect(clockFacts.props.accessibilityLiveRegion).toBe('none');
   });
 
   it('updates status atomically while production screen remains mounted', () => {
@@ -171,6 +175,23 @@ describe('StatusScreen', () => {
     expect(screen.getByTestId('expired-dossier')).toBeTruthy();
     expect(screen.queryByTestId('no-event-dossier')).toBeNull();
     expect(screen.getByLabelText(/validity expired/)).toBeTruthy();
+  });
+
+  it('does not misreport non-expiry decision failures as expired data', () => {
+    render(
+      <StatusScreen
+        now={new Date('2026-07-19T00:00:00.000Z')}
+        reducedMotion
+        zoneId="Europe/London"
+      />,
+    );
+
+    expect(screen.getByTestId('unavailable-dossier')).toBeTruthy();
+    expect(screen.getByText('DECISION UNAVAILABLE')).toBeTruthy();
+    expect(screen.getByText(/Home Time Zone is not supported/)).toBeTruthy();
+    expect(screen.getByLabelText(/freshness not determined/)).toBeTruthy();
+    expect(screen.queryByText('Validity Horizon passed')).toBeNull();
+    expect(screen.queryByLabelText(/validity expired/)).toBeNull();
   });
 
   it.each(['light', 'dark'] as const)(
@@ -273,6 +294,83 @@ describe('StatusScreen', () => {
     expect(loopSpy).not.toHaveBeenCalled();
   });
 
+  it('waits for async reduced-motion preference before choosing a motion recipe', async () => {
+    let resolvePreference: ((enabled: boolean) => void) | undefined;
+    jest
+      .spyOn(ReactNative.AccessibilityInfo, 'isReduceMotionEnabled')
+      .mockReturnValue(
+        new Promise<boolean>((resolve) => {
+          resolvePreference = resolve;
+        }),
+      );
+    const timingSpy = jest.spyOn(ReactNative.Animated, 'timing');
+
+    render(<StatusScreen now={new Date('2026-04-04T15:59:59.000Z')} />);
+
+    expect(screen.getByTestId('motion-awaiting-preference')).toBeTruthy();
+    expect(timingSpy).not.toHaveBeenCalled();
+    expect(
+      screen.getAllByText('3:00 am → 2:00 am', {
+        includeHiddenElements: true,
+      }),
+    ).toHaveLength(1);
+
+    await act(async () => resolvePreference?.(true));
+
+    expect(screen.getByTestId('motion-short-fade')).toBeTruthy();
+    expect(
+      screen.getAllByText('3:00 am → 2:00 am', {
+        includeHiddenElements: true,
+      }),
+    ).toHaveLength(1);
+    const content = screen.getByTestId('semantic-event-content');
+    expect(content.props.style.transform[0].translateX).toBe(0);
+  });
+
+  it('themes the decorative Backward echo in dark appearance', () => {
+    jest.spyOn(ReactNative, 'useColorScheme').mockReturnValue('dark');
+    render(
+      <StatusScreen
+        now={new Date('2026-04-04T15:59:59.000Z')}
+        reducedMotion={false}
+      />,
+    );
+
+    const echo = screen
+      .getAllByText('3:00 am → 2:00 am', { includeHiddenElements: true })
+      .find((node) => node.props.accessibilityElementsHidden);
+    expect(echo).toBeDefined();
+    expect(ReactNative.StyleSheet.flatten(echo?.props.style).color).toBe(
+      daylightSaviourPalettes.dark.secondaryInk,
+    );
+  });
+
+  it('acknowledges first aftermath opening and skips it on repeat opening', () => {
+    const acknowledge = jest.fn();
+    const first = render(
+      <StatusScreen
+        now={new Date('2026-10-03T17:00:00.000Z')}
+        onAcknowledgeAftermath={acknowledge}
+        reducedMotion
+      />,
+    );
+    expect(screen.getByTestId('aftermath-dossier')).toBeTruthy();
+    expect(acknowledge).toHaveBeenCalledWith('2026-10-03T16:00:00.000Z');
+
+    first.unmount();
+    render(
+      <StatusScreen
+        acknowledgedEventAt="2026-10-03T16:00:00.000Z"
+        now={new Date('2026-10-03T17:00:00.000Z')}
+        onAcknowledgeAftermath={acknowledge}
+        reducedMotion
+      />,
+    );
+    expect(screen.getByTestId('ordinary-dossier')).toBeTruthy();
+    expect(screen.queryByTestId('aftermath-dossier')).toBeNull();
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+  });
+
   it('renders Lord Howe 30-minute Forward Change and absolute countdown', () => {
     render(
       <StatusScreen
@@ -297,7 +395,10 @@ describe('StatusScreen', () => {
     fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByRole('header', { name: 'Settings' })).toBeTruthy();
     expect(screen.getByText(/Home Time Zone: Sydney/)).toBeTruthy();
-    expect(screen.queryByText(/reminders enabled/i)).toBeNull();
+    expect(screen.queryByText(/not available|version|arrive/i)).toBeNull();
+    expect(
+      screen.getByTestId('settings-modal-safe-area').props.edges,
+    ).toMatchObject({ bottom: 'additive', top: 'off' });
     fireEvent.press(screen.getByRole('button', { name: 'Close settings' }));
     expect(screen.queryByRole('header', { name: 'Settings' })).toBeNull();
   });
@@ -313,6 +414,9 @@ describe('StatusScreen', () => {
     const order = explicitAccessibilityOrder(result.toJSON() as RenderNode);
     const positions = [
       order.findIndex((label) => label.startsWith('Home Time Zone,')),
+      order.findIndex((label) =>
+        label.startsWith('Home Time Zone current time,'),
+      ),
       order.indexOf('Standard time applies'),
       order.indexOf('4 October 2026'),
       order.indexOf('COUNTDOWN'),

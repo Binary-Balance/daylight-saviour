@@ -20,7 +20,9 @@ selects a zone.
 an activated pack. Upcoming events are Ordinary beyond 28 days, Approaching at
 28 days through more than 7 days, Reminder Week at 7 days through more than 24
 hours, and Reminder Day at 24 hours through the final positive instant. The
-event instant begins Aftermath; Aftermath ends at exactly 48 hours, when the
-normal next-event decision resumes. Change Events are atomic, so no underway
-phase exists. Zones without either a recent or upcoming transition receive the
+event instant makes Aftermath eligible on the first opening that has not
+acknowledged that event. Persist the featured event instant after showing it;
+repeat openings resume the normal next-event decision. Aftermath eligibility
+also ends at exactly 48 hours. Change Events are atomic, so no underway phase
+exists. Zones without either a recent or upcoming transition receive the
 intentional no-event phase.

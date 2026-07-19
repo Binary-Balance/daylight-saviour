@@ -3,6 +3,7 @@ import {
   CivilTimeDecisionUnavailableError,
   decideLivingDossier,
   getAustralianZone,
+  type CivilTimeDecisionUnavailableReason,
   type LivingDossierPhase,
   type LocalDateTime,
 } from '@daylight-saviour/domain';
@@ -146,6 +147,7 @@ export type StatusViewModel =
         readonly wallTimeChange: string;
       } | null;
       readonly friendlyZoneLabel: string;
+      readonly freshness: 'current';
       readonly packVersion: string;
       readonly phase: LivingDossierPhase;
       readonly phaseLabel: string;
@@ -157,8 +159,10 @@ export type StatusViewModel =
   | {
       readonly availability: 'unavailable';
       readonly friendlyZoneLabel: string;
+      readonly freshness: 'decision-unavailable' | 'expired';
       readonly message: string;
       readonly packVersion: string;
+      readonly unavailabilityReason: CivilTimeDecisionUnavailableReason;
       readonly validUntil: string;
       readonly zoneId: string;
     };
@@ -167,9 +171,12 @@ export function createStatusViewModel(
   zoneId: string,
   now: Date,
   uses24hourClock = false,
+  acknowledgedEventAt: string | null = null,
 ): StatusViewModel {
   try {
-    const dossier = decideLivingDossier(activatedAustralianPack, zoneId, now);
+    const dossier = decideLivingDossier(activatedAustralianPack, zoneId, now, {
+      acknowledgedEventAt,
+    });
     const decision = dossier.civilTime;
     const event = dossier.featuredEvent;
     const presentation = phasePresentation[dossier.phase];
@@ -199,6 +206,7 @@ export function createStatusViewModel(
               wallTimeChange: `${formatTime(event.localBefore, uses24hourClock)} → ${formatTime(event.localAfter, uses24hourClock)}`,
             },
       friendlyZoneLabel: decision.friendlyZoneLabel,
+      freshness: 'current',
       ...packDetails,
       phase: dossier.phase,
       phaseLabel: presentation.label,
@@ -211,14 +219,44 @@ export function createStatusViewModel(
       throw error;
     }
 
+    const unavailablePresentation: Record<
+      CivilTimeDecisionUnavailableReason,
+      {
+        readonly freshness: 'decision-unavailable' | 'expired';
+        readonly message: string;
+      }
+    > = {
+      'before-coverage': {
+        freshness: 'decision-unavailable',
+        message:
+          'The selected instant precedes this Time-Zone Data Pack coverage.',
+      },
+      'invalid-instant': {
+        freshness: 'decision-unavailable',
+        message: 'The current instant is invalid. Civil-time facts are hidden.',
+      },
+      'unsupported-zone': {
+        freshness: 'decision-unavailable',
+        message:
+          'This Home Time Zone is not supported. Choose an Australian Home Time Zone.',
+      },
+      'validity-expired': {
+        freshness: 'expired',
+        message:
+          'The Validity Horizon has passed. New verified data is required before civil-time facts can be shown.',
+      },
+    };
+    const unavailable = unavailablePresentation[error.reason];
+
     return {
       availability: 'unavailable',
       friendlyZoneLabel:
         getAustralianZone(zoneId)?.friendlyLabel ??
         'Unsupported Home Time Zone',
-      message:
-        'Time-zone data does not cover this instant. New verified data is required before civil-time facts can be shown.',
+      freshness: unavailable.freshness,
+      message: unavailable.message,
       ...packDetails,
+      unavailabilityReason: error.reason,
       zoneId,
     };
   }

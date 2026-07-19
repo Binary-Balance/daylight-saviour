@@ -57,6 +57,10 @@ export interface LivingDossierDecision {
   readonly phase: LivingDossierPhase;
 }
 
+export interface LivingDossierContext {
+  readonly acknowledgedEventAt?: string | null;
+}
+
 export interface CivilTimeDecision {
   readonly abbreviation: string;
   readonly daylightSavingStatus: DaylightSavingStatus;
@@ -68,11 +72,20 @@ export interface CivilTimeDecision {
 }
 
 export class CivilTimeDecisionUnavailableError extends Error {
-  constructor(problem: string) {
+  readonly reason: CivilTimeDecisionUnavailableReason;
+
+  constructor(reason: CivilTimeDecisionUnavailableReason, problem: string) {
     super(`Civil-time decision unavailable: ${problem}`);
     this.name = 'CivilTimeDecisionUnavailableError';
+    this.reason = reason;
   }
 }
+
+export type CivilTimeDecisionUnavailableReason =
+  | 'invalid-instant'
+  | 'before-coverage'
+  | 'validity-expired'
+  | 'unsupported-zone';
 
 function localDateTimeAt(
   instantMilliseconds: number,
@@ -151,23 +164,33 @@ export function decideCivilTime(
 
   const instantMilliseconds = now.getTime();
   if (!Number.isFinite(instantMilliseconds)) {
-    throw new CivilTimeDecisionUnavailableError('current instant is invalid');
+    throw new CivilTimeDecisionUnavailableError(
+      'invalid-instant',
+      'current instant is invalid',
+    );
   }
 
   const coverageStartMilliseconds = Date.parse(pack.coverage.startsAt);
   const validityHorizonMilliseconds = Date.parse(pack.coverage.validUntil);
-  if (
-    instantMilliseconds < coverageStartMilliseconds ||
-    instantMilliseconds > validityHorizonMilliseconds
-  ) {
+  if (instantMilliseconds < coverageStartMilliseconds) {
     throw new CivilTimeDecisionUnavailableError(
-      'instant falls outside pack coverage and Validity Horizon',
+      'before-coverage',
+      'instant falls before pack coverage',
+    );
+  }
+  if (instantMilliseconds > validityHorizonMilliseconds) {
+    throw new CivilTimeDecisionUnavailableError(
+      'validity-expired',
+      'instant falls after the Validity Horizon',
     );
   }
 
   const zone = pack.zones.find((candidate) => candidate.id === zoneId);
   if (zone === undefined) {
-    throw new CivilTimeDecisionUnavailableError(`unsupported zone ${zoneId}`);
+    throw new CivilTimeDecisionUnavailableError(
+      'unsupported-zone',
+      `unsupported zone ${zoneId}`,
+    );
   }
 
   const state = activeState(
@@ -205,13 +228,15 @@ const reminderWeekSeconds = 7 * daySeconds;
  * Boundaries are deliberately asymmetric: an event is upcoming only while
  * secondsUntil is positive; 28 days, 7 days, and 24 hours belong to the phase
  * beginning at that boundary. The event instant begins aftermath, which lasts
- * while elapsed time is less than 48 hours. At exactly 48 hours the normal
- * next-event dossier resumes. There is no interval or "underway" phase.
+ * on the first unacknowledged opening while elapsed time is less than 48
+ * hours. Acknowledged events and the exact 48-hour boundary resume the normal
+ * next-event dossier. There is no interval or "underway" phase.
  */
 export function decideLivingDossier(
   pack: ActivatedTimeZoneDataPack,
   zoneId: string,
   now: Date,
+  context: LivingDossierContext = {},
 ): LivingDossierDecision {
   const civilTime = decideCivilTime(pack, zoneId, now);
   const instantMilliseconds = now.getTime();
@@ -225,7 +250,11 @@ export function decideLivingDossier(
   if (previousTransition !== undefined) {
     const elapsedSeconds =
       (instantMilliseconds - Date.parse(previousTransition.at)) / 1_000;
-    if (elapsedSeconds >= 0 && elapsedSeconds < aftermathSeconds) {
+    if (
+      elapsedSeconds >= 0 &&
+      elapsedSeconds < aftermathSeconds &&
+      context.acknowledgedEventAt !== previousTransition.at
+    ) {
       return {
         civilTime,
         featuredEvent: changeEventFromTransition(

@@ -70,6 +70,29 @@ describe('decideLivingDossier', () => {
     assert.ok(!['underway', 'in-progress'].includes(exact.phase));
   });
 
+  it('shows aftermath only for the first unacknowledged opening', () => {
+    const instant = atSecondsAfter(3_600);
+    const firstOpening = decideLivingDossier(pack, 'Australia/Sydney', instant);
+    const repeatOpening = decideLivingDossier(
+      pack,
+      'Australia/Sydney',
+      instant,
+      { acknowledgedEventAt: '2026-10-03T16:00:00.000Z' },
+    );
+    const staleAcknowledgement = decideLivingDossier(
+      pack,
+      'Australia/Sydney',
+      instant,
+      { acknowledgedEventAt: '2026-04-04T16:00:00.000Z' },
+    );
+
+    assert.equal(firstOpening.phase, 'aftermath');
+    assert.equal(firstOpening.featuredEvent.at, '2026-10-03T16:00:00.000Z');
+    assert.equal(repeatOpening.phase, 'ordinary');
+    assert.equal(repeatOpening.featuredEvent.at, '2027-04-03T16:00:00.000Z');
+    assert.equal(staleAcknowledgement.phase, 'aftermath');
+  });
+
   it('keeps aftermath inside 48 hours and resumes normal dossier at 48 hours', () => {
     assert.equal(
       decideLivingDossier(
