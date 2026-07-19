@@ -29,7 +29,11 @@ function twoDigits(value: number) {
   return value.toString().padStart(2, '0');
 }
 
-function formatTime(local: LocalDateTime) {
+function formatTime(local: LocalDateTime, uses24hourClock: boolean) {
+  if (uses24hourClock) {
+    return `${twoDigits(local.hour)}:${twoDigits(local.minute)}`;
+  }
+
   const period = local.hour >= 12 ? 'pm' : 'am';
   const hour = local.hour % 12 || 12;
   return `${hour}:${twoDigits(local.minute)} ${period}`;
@@ -122,6 +126,7 @@ export type StatusViewModel =
 export function createStatusViewModel(
   zoneId: string,
   now: Date,
+  uses24hourClock = false,
 ): StatusViewModel {
   try {
     const decision = decideCivilTime(activatedAustralianPack, zoneId, now);
@@ -130,7 +135,7 @@ export function createStatusViewModel(
     return {
       availability: 'ready',
       abbreviation: decision.abbreviation,
-      clock: formatTime(decision.localDateTime),
+      clock: formatTime(decision.localDateTime, uses24hourClock),
       currentOffset: formatOffset(decision.utcOffsetSeconds),
       event:
         event === null
@@ -141,7 +146,7 @@ export function createStatusViewModel(
               direction: event.direction,
               offsetAmount: formatDelta(event.offsetDeltaSeconds),
               offsetChange: `${formatOffset(event.offsetBeforeSeconds)} → ${formatOffset(event.offsetAfterSeconds)}`,
-              wallTimeChange: `${formatTime(event.localBefore)} → ${formatTime(event.localAfter)}`,
+              wallTimeChange: `${formatTime(event.localBefore, uses24hourClock)} → ${formatTime(event.localAfter, uses24hourClock)}`,
             },
       friendlyZoneLabel: decision.friendlyZoneLabel,
       ...packDetails,

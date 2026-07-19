@@ -33,6 +33,7 @@ const palettes = {
 interface StatusScreenProps {
   readonly now?: Date;
   readonly onChooseZone?: () => void;
+  readonly uses24hourClock?: boolean;
   readonly zoneId?: string;
 }
 
@@ -54,12 +55,17 @@ function useCurrentInstant(fixedNow: Date | undefined) {
 export default function StatusScreen({
   now,
   onChooseZone,
+  uses24hourClock = false,
   zoneId = 'Australia/Sydney',
 }: StatusScreenProps) {
   const appearance = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = palettes[appearance];
   const currentInstant = useCurrentInstant(now);
-  const viewModel = createStatusViewModel(zoneId, currentInstant);
+  const viewModel = createStatusViewModel(
+    zoneId,
+    currentInstant,
+    uses24hourClock,
+  );
 
   return (
     <SafeAreaView

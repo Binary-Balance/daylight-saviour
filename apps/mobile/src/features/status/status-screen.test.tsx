@@ -41,6 +41,24 @@ describe('StatusScreen', () => {
     },
   );
 
+  it.each([
+    [false, '2:59 am', '3:00 am → 2:00 am'],
+    [true, '02:59', '03:00 → 02:00'],
+  ] as const)(
+    'formats current and event times for uses24hourClock=%s',
+    (uses24hourClock, expectedClock, expectedChange) => {
+      render(
+        <StatusScreen
+          now={new Date('2026-04-04T15:59:59.000Z')}
+          uses24hourClock={uses24hourClock}
+        />,
+      );
+
+      expect(screen.getByText(expectedClock)).toBeTruthy();
+      expect(screen.getByText(expectedChange)).toBeTruthy();
+    },
+  );
+
   it('agrees with domain-derived app output and uses bundled data offline', () => {
     const fetchSpy = jest.spyOn(globalThis, 'fetch');
     const now = new Date('2026-07-19T00:00:00.000Z');

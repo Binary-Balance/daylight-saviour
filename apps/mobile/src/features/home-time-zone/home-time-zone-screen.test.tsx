@@ -9,22 +9,20 @@ import appConfig from '../../../app.json';
 import HomeTimeZoneScreen from './home-time-zone-screen';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
 
-jest.mock('@react-native-async-storage/async-storage', () =>
-  jest.requireActual(
-    '@react-native-async-storage/async-storage/jest/async-storage-mock',
-  ),
-);
-
 function createAdapters({
   deviceZone = 'Australia/Sydney',
   savedZone = null,
+  uses24hourClock = false,
 }: {
   readonly deviceZone?: string | null;
   readonly savedZone?: string | null;
+  readonly uses24hourClock?: boolean;
 } = {}) {
   let stored = savedZone;
   const adapters: HomeTimeZoneAdapters = {
-    deviceTimeZone: { read: jest.fn(() => deviceZone) },
+    localization: {
+      read: jest.fn(() => ({ timeZone: deviceZone, uses24hourClock })),
+    },
     storage: {
       load: jest.fn(async () => stored),
       save: jest.fn(async (canonicalZoneId) => {
@@ -77,6 +75,11 @@ describe('HomeTimeZoneScreen', () => {
     ).toBeTruthy();
     expect(screen.getByText('Mainland & state regions')).toBeTruthy();
     expect(screen.getByText(/outside Australian Coverage/)).toBeTruthy();
+    expect(
+      screen.queryByRole('button', {
+        name: 'Cancel Home Time Zone selection',
+      }),
+    ).toBeNull();
 
     fireEvent.changeText(
       screen.getByLabelText('Search Australian Home Time Zones'),
@@ -114,7 +117,35 @@ describe('HomeTimeZoneScreen', () => {
       ),
     ).toBeTruthy();
     expect(screen.queryByText('SUGGESTED HOME TIME ZONE')).toBeNull();
+    expect(adapters.localization.read).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    [false, '10:00 am'],
+    [true, '10:00'],
+  ] as const)(
+    'uses device %s-hour preference for onboarding and saved dossier',
+    async (uses24hourClock, expectedClock) => {
+      const adapters = createAdapters({ uses24hourClock });
+      const first = render(
+        <HomeTimeZoneScreen adapters={adapters} now={now} />,
+      );
+
+      expect(
+        await screen.findByLabelText(`${expectedClock} AEST`),
+      ).toBeTruthy();
+      fireEvent.press(
+        screen.getByRole('button', { name: 'Use this Home Time Zone' }),
+      );
+      expect(await screen.findByText(expectedClock)).toBeTruthy();
+
+      first.unmount();
+      render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+
+      expect(await screen.findByText(expectedClock)).toBeTruthy();
+      expect(adapters.localization.read).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it('returns corrupt saved selection safely to chooser', async () => {
     const adapters = createAdapters({ savedZone: 'Australia/West' });
@@ -160,9 +191,37 @@ describe('HomeTimeZoneScreen', () => {
     expect(screen.getAllByText(/UTC\+10:30/).length).toBeGreaterThan(0);
   });
 
+  it('cancels dossier chooser without saving and restores prior zone', async () => {
+    const adapters = createAdapters({ savedZone: 'Australia/Brisbane' });
+
+    render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+
+    const priorZone = await screen.findByRole('button', {
+      name: 'Home Time Zone, Brisbane & most of Queensland, Australia/Brisbane',
+    });
+    fireEvent.press(priorZone);
+    fireEvent.press(
+      screen.getByRole('button', {
+        name: 'Cancel Home Time Zone selection',
+      }),
+    );
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Home Time Zone, Brisbane & most of Queensland, Australia/Brisbane',
+      }),
+    ).toBeTruthy();
+    expect(adapters.storage.save).not.toHaveBeenCalled();
+  });
+
   it('shows literal load and save errors', async () => {
     const loadFailure: HomeTimeZoneAdapters = {
-      deviceTimeZone: { read: jest.fn(() => 'Australia/Sydney') },
+      localization: {
+        read: jest.fn(() => ({
+          timeZone: 'Australia/Sydney',
+          uses24hourClock: false,
+        })),
+      },
       storage: {
         load: jest.fn(async () => Promise.reject(new Error('storage down'))),
         save: jest.fn(async () => undefined),

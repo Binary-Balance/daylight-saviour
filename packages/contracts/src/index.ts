@@ -184,7 +184,10 @@ function zoneAt(
   exactKeys(zone, path, ['friendlyLabel', 'id', 'initial', 'transitions']);
 
   const id = stringAt(zone.id, `${path}.id`);
-  if (!/^[A-Za-z_+-]+\/[A-Za-z_+-]+$/.test(id)) {
+  if (
+    !/^[A-Za-z0-9._+-]+(?:\/[A-Za-z0-9._+-]+)+$/.test(id) ||
+    id.split('/').some((segment) => segment === '.' || segment === '..')
+  ) {
     fail(`${path}.id`, 'expected a canonical IANA-style identifier');
   }
 

@@ -19,10 +19,7 @@ import {
 
 import StatusScreen from '../status/status-screen';
 import { createStatusViewModel } from '../status/status-view-model';
-import {
-  productionHomeTimeZoneAdapters,
-  type HomeTimeZoneAdapters,
-} from './home-time-zone-adapters';
+import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
 
 const palettes = {
   light: {
@@ -46,17 +43,31 @@ const palettes = {
 type FlowState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'load-error' }
-  | { readonly kind: 'confirm'; readonly zoneId: string }
-  | { readonly kind: 'choose'; readonly notice?: string }
-  | { readonly kind: 'ready'; readonly zoneId: string };
+  | {
+      readonly kind: 'confirm';
+      readonly uses24hourClock: boolean;
+      readonly zoneId: string;
+    }
+  | {
+      readonly kind: 'choose';
+      readonly notice?: string;
+      readonly returnZoneId?: string;
+      readonly uses24hourClock: boolean;
+    }
+  | {
+      readonly kind: 'ready';
+      readonly uses24hourClock: boolean;
+      readonly zoneId: string;
+    };
 
 interface HomeTimeZoneScreenProps {
-  readonly adapters?: HomeTimeZoneAdapters;
+  readonly adapters: HomeTimeZoneAdapters;
   readonly now?: Date;
 }
 
 interface ChooserProps {
   readonly notice?: string;
+  readonly onCancel?: () => void;
   readonly onSelect: (zoneId: string) => void;
   readonly palette: (typeof palettes)[keyof typeof palettes];
   readonly saveError: string | null;
@@ -65,6 +76,7 @@ interface ChooserProps {
 
 function ZoneChooser({
   notice,
+  onCancel,
   onSelect,
   palette,
   saveError,
@@ -87,6 +99,19 @@ function ZoneChooser({
       style={[styles.safeArea, { backgroundColor: palette.background }]}
     >
       <View style={styles.chooserHeader}>
+        {onCancel === undefined ? null : (
+          <Pressable
+            accessibilityHint="Returns to the current Home Time Zone without saving"
+            accessibilityLabel="Cancel Home Time Zone selection"
+            accessibilityRole="button"
+            onPress={onCancel}
+            style={styles.cancelButton}
+          >
+            <Text style={[styles.buttonText, { color: palette.ink }]}>
+              Cancel
+            </Text>
+          </Pressable>
+        )}
         <Text
           accessibilityRole="header"
           style={[styles.title, { color: palette.ink }]}
@@ -174,7 +199,7 @@ function ZoneChooser({
 }
 
 export default function HomeTimeZoneScreen({
-  adapters = productionHomeTimeZoneAdapters,
+  adapters,
   now,
 }: HomeTimeZoneScreenProps) {
   const appearance = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -187,26 +212,32 @@ export default function HomeTimeZoneScreen({
   useEffect(() => {
     let active = true;
 
-    void adapters.storage
-      .load()
-      .then((saved) => {
+    void (async () => {
+      try {
+        const saved = await adapters.storage.load();
         if (!active) return;
+        const localization = adapters.localization.read();
 
         if (saved !== null) {
           const canonical = normalizeAustralianZoneId(saved);
           if (canonical === saved) {
-            setFlow({ kind: 'ready', zoneId: canonical });
+            setFlow({
+              kind: 'ready',
+              uses24hourClock: localization.uses24hourClock,
+              zoneId: canonical,
+            });
           } else {
             setFlow({
               kind: 'choose',
               notice:
                 'Saved Home Time Zone is unsupported or invalid. Choose a region again.',
+              uses24hourClock: localization.uses24hourClock,
             });
           }
           return;
         }
 
-        const suggested = adapters.deviceTimeZone.read();
+        const suggested = localization.timeZone;
         const canonical =
           suggested === null ? null : normalizeAustralianZoneId(suggested);
         setFlow(
@@ -215,20 +246,25 @@ export default function HomeTimeZoneScreen({
                 kind: 'choose',
                 notice:
                   'Device time zone is outside Australian Coverage. Choose without a location guess.',
+                uses24hourClock: localization.uses24hourClock,
               }
-            : { kind: 'confirm', zoneId: canonical },
+            : {
+                kind: 'confirm',
+                uses24hourClock: localization.uses24hourClock,
+                zoneId: canonical,
+              },
         );
-      })
-      .catch(() => {
+      } catch {
         if (active) setFlow({ kind: 'load-error' });
-      });
+      }
+    })();
 
     return () => {
       active = false;
     };
   }, [adapters, retry]);
 
-  async function selectZone(zoneId: string) {
+  async function selectZone(zoneId: string, uses24hourClock: boolean) {
     const zone = getAustralianZone(zoneId);
     if (zone === null || zone.id !== zoneId) return;
 
@@ -236,7 +272,7 @@ export default function HomeTimeZoneScreen({
     setSaveError(null);
     try {
       await adapters.storage.save(zone.id);
-      setFlow({ kind: 'ready', zoneId: zone.id });
+      setFlow({ kind: 'ready', uses24hourClock, zoneId: zone.id });
     } catch {
       setSaveError('Could not save Home Time Zone. Try again.');
     } finally {
@@ -250,18 +286,34 @@ export default function HomeTimeZoneScreen({
         now={now}
         onChooseZone={() => {
           setSaveError(null);
-          setFlow({ kind: 'choose' });
+          setFlow({
+            kind: 'choose',
+            returnZoneId: flow.zoneId,
+            uses24hourClock: flow.uses24hourClock,
+          });
         }}
+        uses24hourClock={flow.uses24hourClock}
         zoneId={flow.zoneId}
       />
     );
   }
 
   if (flow.kind === 'choose') {
+    const returnZoneId = flow.returnZoneId;
     return (
       <ZoneChooser
         notice={flow.notice}
-        onSelect={(zoneId) => void selectZone(zoneId)}
+        onCancel={
+          returnZoneId === undefined
+            ? undefined
+            : () =>
+                setFlow({
+                  kind: 'ready',
+                  uses24hourClock: flow.uses24hourClock,
+                  zoneId: returnZoneId,
+                })
+        }
+        onSelect={(zoneId) => void selectZone(zoneId, flow.uses24hourClock)}
         palette={palette}
         saveError={saveError}
         saving={saving}
@@ -271,7 +323,11 @@ export default function HomeTimeZoneScreen({
 
   if (flow.kind === 'confirm') {
     const zone = getAustralianZone(flow.zoneId)!;
-    const status = createStatusViewModel(flow.zoneId, now ?? new Date());
+    const status = createStatusViewModel(
+      flow.zoneId,
+      now ?? new Date(),
+      flow.uses24hourClock,
+    );
     return (
       <SafeAreaView
         edges={['top', 'right', 'bottom', 'left']}
@@ -291,7 +347,10 @@ export default function HomeTimeZoneScreen({
             {zone.id}
           </Text>
           {status.availability === 'ready' ? (
-            <Text style={[styles.suggestedTime, { color: palette.ink }]}>
+            <Text
+              accessibilityLabel={`${status.clock} ${status.abbreviation}`}
+              style={[styles.suggestedTime, { color: palette.ink }]}
+            >
               {status.clock} {status.abbreviation}
             </Text>
           ) : null}
@@ -310,7 +369,7 @@ export default function HomeTimeZoneScreen({
           <Pressable
             accessibilityRole="button"
             disabled={saving}
-            onPress={() => void selectZone(zone.id)}
+            onPress={() => void selectZone(zone.id, flow.uses24hourClock)}
             style={[styles.primaryButton, { backgroundColor: palette.accent }]}
           >
             <Text style={styles.primaryButtonText}>
@@ -320,7 +379,12 @@ export default function HomeTimeZoneScreen({
           <Pressable
             accessibilityRole="button"
             disabled={saving}
-            onPress={() => setFlow({ kind: 'choose' })}
+            onPress={() =>
+              setFlow({
+                kind: 'choose',
+                uses24hourClock: flow.uses24hourClock,
+              })
+            }
             style={[styles.secondaryButton, { borderColor: palette.rule }]}
           >
             <Text style={[styles.buttonText, { color: palette.ink }]}>
@@ -368,6 +432,7 @@ export default function HomeTimeZoneScreen({
 const styles = StyleSheet.create({
   body: { fontSize: 17, lineHeight: 25 },
   buttonText: { fontSize: 17, fontWeight: '700' },
+  cancelButton: { alignSelf: 'flex-start', minHeight: 44, paddingVertical: 10 },
   chooserHeader: { gap: 12, paddingHorizontal: 24, paddingTop: 24 },
   confirmation: { flex: 1, gap: 20, justifyContent: 'center', padding: 24 },
   identifier: { fontSize: 14 },

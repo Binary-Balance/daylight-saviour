@@ -67,6 +67,16 @@ describe('activateTimeZoneDataPack', () => {
     assert.equal(Object.isFrozen(pack.zones[0].transitions), true);
   });
 
+  it('accepts multi-segment canonical IANA identifiers', () => {
+    const pack = clonePack();
+    pack.zones[0].id = 'America/Argentina/Buenos_Aires';
+
+    assert.equal(
+      activateTimeZoneDataPack(pack).zones[0].id,
+      'America/Argentina/Buenos_Aires',
+    );
+  });
+
   for (const [name, mutate] of [
     ['unknown fields', (pack) => (pack.surprise = true)],
     ['unsupported schema', (pack) => (pack.schemaVersion = 3)],
@@ -92,6 +102,15 @@ describe('activateTimeZoneDataPack', () => {
       (pack) => (pack.coverage.validUntil = pack.coverage.startsAt),
     ],
     ['empty labels', (pack) => (pack.zones[0].friendlyLabel = '')],
+    ['identifier without region', (pack) => (pack.zones[0].id = 'Sydney')],
+    [
+      'identifier with empty segment',
+      (pack) => (pack.zones[0].id = 'Australia//Sydney'),
+    ],
+    [
+      'identifier with traversal segment',
+      (pack) => (pack.zones[0].id = 'Australia/../Sydney'),
+    ],
     [
       'duplicate zones',
       (pack) => pack.zones.push(structuredClone(pack.zones[0])),
