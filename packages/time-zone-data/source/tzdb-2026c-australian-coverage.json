@@ -1,0 +1,230 @@
+{
+  "source": {
+    "archiveSha256": "e4a178a4477f3d0ea77cc31828ff72aa38feff8d61aa13e7e99e142e9d902be4",
+    "files": [
+      "antarctica",
+      "asia",
+      "australasia",
+      "backward",
+      "zone.tab",
+      "zone1970.tab"
+    ],
+    "name": "IANA Time Zone Database",
+    "version": "2026c",
+    "versionUrl": "https://data.iana.org/time-zones/releases/tzdata2026c.tar.gz"
+  },
+  "provenance": {
+    "coverageAssumption": "Casey, Davis, and Mawson represent Australian Antarctic Territory stations within Australian-administered civil-time regions. Uninhabited Australian territories without IANA regions are excluded.",
+    "ruleLines": [
+      "Rule AN 2008 max - Apr Sun>=1 2:00s 0 S",
+      "Rule AN 2008 max - Oct Sun>=1 2:00s 1:00 D",
+      "Rule AS 2008 max - Apr Sun>=1 2:00s 0 S",
+      "Rule AS 2008 max - Oct Sun>=1 2:00s 1:00 D",
+      "Rule AT 2008 max - Apr Sun>=1 2:00s 0 S",
+      "Rule AT 2001 max - Oct Sun>=1 2:00s 1:00 D",
+      "Rule AV 2008 max - Apr Sun>=1 2:00s 0 S",
+      "Rule AV 2008 max - Oct Sun>=1 2:00s 1:00 D",
+      "Rule LH 2008 max - Apr Sun>=1 2:00 0 -",
+      "Rule LH 2008 max - Oct Sun>=1 2:00 0:30 -"
+    ]
+  },
+  "generation": {
+    "schemaVersion": 2,
+    "packVersion": "2026c-australian-coverage-2025-2030.1",
+    "generatedAt": "2026-07-19T08:38:40.000Z",
+    "coverageStartsAt": "2025-01-01T00:00:00.000Z",
+    "validUntil": "2030-12-31T23:59:59.000Z",
+    "firstYear": 2025,
+    "lastYear": 2030
+  },
+  "ruleSets": {
+    "australianHour": {
+      "daylightSaveSeconds": 3600,
+      "rules": [
+        {
+          "month": 4,
+          "onOrAfterDay": 1,
+          "weekday": 0,
+          "atSeconds": 7200,
+          "atBasis": "standard",
+          "saveAfterSeconds": 0
+        },
+        {
+          "month": 10,
+          "onOrAfterDay": 1,
+          "weekday": 0,
+          "atSeconds": 7200,
+          "atBasis": "standard",
+          "saveAfterSeconds": 3600
+        }
+      ]
+    },
+    "lordHowe": {
+      "daylightSaveSeconds": 1800,
+      "rules": [
+        {
+          "month": 4,
+          "onOrAfterDay": 1,
+          "weekday": 0,
+          "atSeconds": 7200,
+          "atBasis": "wall",
+          "saveAfterSeconds": 0
+        },
+        {
+          "month": 10,
+          "onOrAfterDay": 1,
+          "weekday": 0,
+          "atSeconds": 7200,
+          "atBasis": "wall",
+          "saveAfterSeconds": 1800
+        }
+      ]
+    }
+  },
+  "zones": [
+    {
+      "id": "Australia/Sydney",
+      "friendlyLabel": "Sydney, Canberra & most of NSW",
+      "baseOffsetSeconds": 36000,
+      "standardAbbreviation": "AEST",
+      "daylightAbbreviation": "AEDT",
+      "ruleSet": "australianHour"
+    },
+    {
+      "id": "Australia/Broken_Hill",
+      "friendlyLabel": "Broken Hill & far-western NSW",
+      "baseOffsetSeconds": 34200,
+      "standardAbbreviation": "ACST",
+      "daylightAbbreviation": "ACDT",
+      "ruleSet": "australianHour"
+    },
+    {
+      "id": "Australia/Melbourne",
+      "friendlyLabel": "Melbourne & Victoria",
+      "baseOffsetSeconds": 36000,
+      "standardAbbreviation": "AEST",
+      "daylightAbbreviation": "AEDT",
+      "ruleSet": "australianHour"
+    },
+    {
+      "id": "Australia/Hobart",
+      "friendlyLabel": "Hobart & Tasmania",
+      "baseOffsetSeconds": 36000,
+      "standardAbbreviation": "AEST",
+      "daylightAbbreviation": "AEDT",
+      "ruleSet": "australianHour"
+    },
+    {
+      "id": "Australia/Brisbane",
+      "friendlyLabel": "Brisbane & most of Queensland",
+      "baseOffsetSeconds": 36000,
+      "standardAbbreviation": "AEST",
+      "daylightAbbreviation": null,
+      "ruleSet": null
+    },
+    {
+      "id": "Australia/Lindeman",
+      "friendlyLabel": "Whitsunday Islands",
+      "baseOffsetSeconds": 36000,
+      "standardAbbreviation": "AEST",
+      "daylightAbbreviation": null,
+      "ruleSet": null
+    },
+    {
+      "id": "Australia/Adelaide",
+      "friendlyLabel": "Adelaide & South Australia",
+      "baseOffsetSeconds": 34200,
+      "standardAbbreviation": "ACST",
+      "daylightAbbreviation": "ACDT",
+      "ruleSet": "australianHour"
+    },
+    {
+      "id": "Australia/Darwin",
+      "friendlyLabel": "Darwin & Northern Territory",
+      "baseOffsetSeconds": 34200,
+      "standardAbbreviation": "ACST",
+      "daylightAbbreviation": null,
+      "ruleSet": null
+    },
+    {
+      "id": "Australia/Perth",
+      "friendlyLabel": "Perth & most of Western Australia",
+      "baseOffsetSeconds": 28800,
+      "standardAbbreviation": "AWST",
+      "daylightAbbreviation": null,
+      "ruleSet": null
+    },
+    {
+      "id": "Australia/Eucla",
+      "friendlyLabel": "Eucla & south-eastern WA",
+      "baseOffsetSeconds": 31500,
+      "standardAbbreviation": "+0845",
+      "daylightAbbreviation": null,
+      "ruleSet": null
+    },
+    {
+      "id": "Australia/Lord_Howe",
+      "friendlyLabel": "Lord Howe Island",
+      "baseOffsetSeconds": 37800,
+      "standardAbbreviation": "+1030",
+      "daylightAbbreviation": "+11",
+      "ruleSet": "lordHowe"
+    },
+    {
+      "id": "Antarctica/Macquarie",
+      "friendlyLabel": "Macquarie Island",
+      "baseOffsetSeconds": 36000,
+      "standardAbbreviation": "AEST",
+      "daylightAbbreviation": "AEDT",
+      "ruleSet": "australianHour"
+    },
+    {
+      "id": "Pacific/Norfolk",
+      "friendlyLabel": "Norfolk Island",
+      "baseOffsetSeconds": 39600,
+      "standardAbbreviation": "+11",
+      "daylightAbbreviation": "+12",
+      "ruleSet": "australianHour"
+    },
+    {
+      "id": "Indian/Christmas",
+      "friendlyLabel": "Christmas Island",
+      "baseOffsetSeconds": 25200,
+      "standardAbbreviation": "+07",
+      "daylightAbbreviation": null,
+      "ruleSet": null
+    },
+    {
+      "id": "Indian/Cocos",
+      "friendlyLabel": "Cocos (Keeling) Islands",
+      "baseOffsetSeconds": 23400,
+      "standardAbbreviation": "+0630",
+      "daylightAbbreviation": null,
+      "ruleSet": null
+    },
+    {
+      "id": "Antarctica/Casey",
+      "friendlyLabel": "Casey Station, Australian Antarctic Territory",
+      "baseOffsetSeconds": 28800,
+      "standardAbbreviation": "+08",
+      "daylightAbbreviation": null,
+      "ruleSet": null
+    },
+    {
+      "id": "Antarctica/Davis",
+      "friendlyLabel": "Davis Station, Australian Antarctic Territory",
+      "baseOffsetSeconds": 25200,
+      "standardAbbreviation": "+07",
+      "daylightAbbreviation": null,
+      "ruleSet": null
+    },
+    {
+      "id": "Antarctica/Mawson",
+      "friendlyLabel": "Mawson Station, Australian Antarctic Territory",
+      "baseOffsetSeconds": 18000,
+      "standardAbbreviation": "+05",
+      "daylightAbbreviation": null,
+      "ruleSet": null
+    }
+  ]
+}

@@ -2,9 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
-import { activateTimeZoneDataPack } from '@daylight-saviour/contracts';
-
 import {
+  activateAustralianTimeZoneDataPack,
   CivilTimeDecisionUnavailableError,
   decideCivilTime,
 } from '../src/index.ts';
@@ -12,13 +11,13 @@ import {
 const packJson = JSON.parse(
   await readFile(
     new URL(
-      '../../time-zone-data/generated/australia-sydney.pack.json',
+      '../../time-zone-data/generated/australian-coverage.pack.json',
       import.meta.url,
     ),
     'utf8',
   ),
 );
-const pack = activateTimeZoneDataPack(packJson);
+const pack = activateAustralianTimeZoneDataPack(packJson);
 
 describe('decideCivilTime', () => {
   const boundary = '2026-04-04T16:00:00.000Z';
@@ -105,5 +104,53 @@ describe('decideCivilTime', () => {
         ),
       /must be activated/,
     );
+  });
+
+  it('applies every generated Change Event atomically', () => {
+    for (const zone of pack.zones) {
+      for (const transition of zone.transitions) {
+        const transitionMs = Date.parse(transition.at);
+        const before = decideCivilTime(
+          pack,
+          zone.id,
+          new Date(transitionMs - 1_000),
+        );
+        const exact = decideCivilTime(pack, zone.id, new Date(transitionMs));
+        const after = decideCivilTime(
+          pack,
+          zone.id,
+          new Date(transitionMs + 1_000),
+        );
+
+        assert.equal(before.utcOffsetSeconds, transition.offsetBeforeSeconds);
+        assert.equal(before.nextChangeEvent.at, transition.at);
+        assert.equal(exact.utcOffsetSeconds, transition.utcOffsetSeconds);
+        assert.notEqual(exact.nextChangeEvent?.at, transition.at);
+        assert.equal(after.utcOffsetSeconds, transition.utcOffsetSeconds);
+        assert.equal(
+          exact.daylightSavingStatus,
+          transition.daylightSaving
+            ? 'Daylight saving time applies'
+            : 'Standard time applies',
+        );
+      }
+    }
+  });
+
+  it('covers non-hour, unusual-offset, no-event, and external regions', () => {
+    const instant = new Date('2026-07-19T00:00:00.000Z');
+    const lordHowe = decideCivilTime(pack, 'Australia/Lord_Howe', instant);
+    const eucla = decideCivilTime(pack, 'Australia/Eucla', instant);
+    const brisbane = decideCivilTime(pack, 'Australia/Brisbane', instant);
+    const norfolk = decideCivilTime(pack, 'Pacific/Norfolk', instant);
+    const casey = decideCivilTime(pack, 'Antarctica/Casey', instant);
+
+    assert.equal(Math.abs(lordHowe.nextChangeEvent.offsetDeltaSeconds), 1_800);
+    assert.equal(eucla.utcOffsetSeconds, 31_500);
+    assert.equal(eucla.nextChangeEvent, null);
+    assert.equal(brisbane.nextChangeEvent, null);
+    assert.equal(norfolk.nextChangeEvent.direction, 'Forward Change');
+    assert.equal(casey.utcOffsetSeconds, 28_800);
+    assert.equal(casey.nextChangeEvent, null);
   });
 });

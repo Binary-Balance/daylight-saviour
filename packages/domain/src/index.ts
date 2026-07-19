@@ -5,6 +5,18 @@ import {
   type TimeZoneTransition,
 } from '@daylight-saviour/contracts';
 
+export {
+  activateAustralianTimeZoneDataPack,
+  AustralianCoverageValidationError,
+  australianZoneGroups,
+  australianZones,
+  getAustralianZone,
+  normalizeAustralianZoneId,
+  searchAustralianZones,
+  type AustralianZone,
+  type AustralianZoneGroup,
+} from './australian-zones.ts';
+
 export type DaylightSavingStatus =
   | 'Daylight saving time applies'
   | 'Standard time applies';

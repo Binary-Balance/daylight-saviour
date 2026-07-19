@@ -1,10 +1,12 @@
 import { act, render, screen } from '@testing-library/react-native';
 import * as ReactNative from 'react-native';
-import { activateTimeZoneDataPack } from '@daylight-saviour/contracts';
-import { decideCivilTime } from '@daylight-saviour/domain';
-import { bundledSydneyDataPack } from '@daylight-saviour/time-zone-data';
+import {
+  activateAustralianTimeZoneDataPack,
+  decideCivilTime,
+} from '@daylight-saviour/domain';
+import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
-import { createSydneyStatusViewModel } from './status-view-model';
+import { createStatusViewModel } from './status-view-model';
 import StatusScreen from './status-screen';
 
 describe('StatusScreen', () => {
@@ -39,12 +41,30 @@ describe('StatusScreen', () => {
     },
   );
 
+  it.each([
+    [false, '2:59 am', '3:00 am → 2:00 am'],
+    [true, '02:59', '03:00 → 02:00'],
+  ] as const)(
+    'formats current and event times for uses24hourClock=%s',
+    (uses24hourClock, expectedClock, expectedChange) => {
+      render(
+        <StatusScreen
+          now={new Date('2026-04-04T15:59:59.000Z')}
+          uses24hourClock={uses24hourClock}
+        />,
+      );
+
+      expect(screen.getByText(expectedClock)).toBeTruthy();
+      expect(screen.getByText(expectedChange)).toBeTruthy();
+    },
+  );
+
   it('agrees with domain-derived app output and uses bundled data offline', () => {
     const fetchSpy = jest.spyOn(globalThis, 'fetch');
     const now = new Date('2026-07-19T00:00:00.000Z');
-    const viewModel = createSydneyStatusViewModel(now);
+    const viewModel = createStatusViewModel('Australia/Sydney', now);
     const domainDecision = decideCivilTime(
-      activateTimeZoneDataPack(bundledSydneyDataPack),
+      activateAustralianTimeZoneDataPack(bundledAustralianDataPack),
       'Australia/Sydney',
       now,
     );
@@ -98,5 +118,46 @@ describe('StatusScreen', () => {
     ).toBeTruthy();
     expect(screen.queryByText(/time applies$/)).toBeNull();
     expect(screen.queryByText(/UTC\+\d/)).toBeNull();
+  });
+
+  it.each(['light', 'dark'] as const)(
+    'renders intentional no-event state in %s appearance',
+    (appearance) => {
+      jest.spyOn(ReactNative, 'useColorScheme').mockReturnValue(appearance);
+
+      render(
+        <StatusScreen
+          now={new Date('2026-07-19T00:00:00.000Z')}
+          zoneId="Australia/Brisbane"
+        />,
+      );
+
+      expect(
+        screen.getByRole('header', { name: 'Standard time applies' }),
+      ).toBeTruthy();
+      expect(screen.getByText(/AEST · UTC\+10:00/)).toBeTruthy();
+      expect(
+        screen.getByRole('header', {
+          name: 'No Change Event scheduled within verified data',
+        }),
+      ).toBeTruthy();
+      expect(screen.queryByText(/^In /)).toBeNull();
+    },
+  );
+
+  it('renders an external Antarctic territory without guessing by offset', () => {
+    render(
+      <StatusScreen
+        now={new Date('2026-07-19T00:00:00.000Z')}
+        zoneId="Antarctica/Casey"
+      />,
+    );
+
+    expect(
+      screen.getByLabelText(
+        'Home Time Zone, Casey Station, Australian Antarctic Territory, Antarctica/Casey',
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/\+08 · UTC\+08:00/)).toBeTruthy();
   });
 });

@@ -1,3 +1,3 @@
-import bundledSydneyDataPack from '../generated/australia-sydney.pack.json';
+import bundledAustralianDataPack from '../generated/australian-coverage.pack.json';
 
-export { bundledSydneyDataPack };
+export { bundledAustralianDataPack };

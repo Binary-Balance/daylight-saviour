@@ -1,13 +1,15 @@
-import { activateTimeZoneDataPack } from '@daylight-saviour/contracts';
 import {
+  activateAustralianTimeZoneDataPack,
   CivilTimeDecisionUnavailableError,
   decideCivilTime,
+  getAustralianZone,
   type LocalDateTime,
 } from '@daylight-saviour/domain';
-import { bundledSydneyDataPack } from '@daylight-saviour/time-zone-data';
+import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
-const homeTimeZone = 'Australia/Sydney';
-const activatedSydneyPack = activateTimeZoneDataPack(bundledSydneyDataPack);
+const activatedAustralianPack = activateAustralianTimeZoneDataPack(
+  bundledAustralianDataPack,
+);
 const months = [
   'January',
   'February',
@@ -27,7 +29,11 @@ function twoDigits(value: number) {
   return value.toString().padStart(2, '0');
 }
 
-function formatTime(local: LocalDateTime) {
+function formatTime(local: LocalDateTime, uses24hourClock: boolean) {
+  if (uses24hourClock) {
+    return `${twoDigits(local.hour)}:${twoDigits(local.minute)}`;
+  }
+
   const period = local.hour >= 12 ? 'pm' : 'am';
   const hour = local.hour % 12 || 12;
   return `${hour}:${twoDigits(local.minute)} ${period}`;
@@ -84,15 +90,16 @@ function formatDelta(offsetDeltaSeconds: number) {
 }
 
 const packDetails = {
-  packVersion: activatedSydneyPack.packVersion,
-  validUntil: activatedSydneyPack.coverage.validUntil,
+  packVersion: activatedAustralianPack.packVersion,
+  validUntil: activatedAustralianPack.coverage.validUntil,
 } as const;
 
-export type SydneyStatusViewModel =
+export type StatusViewModel =
   | {
       readonly availability: 'ready';
       readonly abbreviation: string;
       readonly clock: string;
+      readonly currentOffset: string;
       readonly event: {
         readonly countdown: string;
         readonly date: string;
@@ -116,15 +123,20 @@ export type SydneyStatusViewModel =
       readonly zoneId: string;
     };
 
-export function createSydneyStatusViewModel(now: Date): SydneyStatusViewModel {
+export function createStatusViewModel(
+  zoneId: string,
+  now: Date,
+  uses24hourClock = false,
+): StatusViewModel {
   try {
-    const decision = decideCivilTime(activatedSydneyPack, homeTimeZone, now);
+    const decision = decideCivilTime(activatedAustralianPack, zoneId, now);
     const event = decision.nextChangeEvent;
 
     return {
       availability: 'ready',
       abbreviation: decision.abbreviation,
-      clock: formatTime(decision.localDateTime),
+      clock: formatTime(decision.localDateTime, uses24hourClock),
+      currentOffset: formatOffset(decision.utcOffsetSeconds),
       event:
         event === null
           ? null
@@ -134,7 +146,7 @@ export function createSydneyStatusViewModel(now: Date): SydneyStatusViewModel {
               direction: event.direction,
               offsetAmount: formatDelta(event.offsetDeltaSeconds),
               offsetChange: `${formatOffset(event.offsetBeforeSeconds)} → ${formatOffset(event.offsetAfterSeconds)}`,
-              wallTimeChange: `${formatTime(event.localBefore)} → ${formatTime(event.localAfter)}`,
+              wallTimeChange: `${formatTime(event.localBefore, uses24hourClock)} → ${formatTime(event.localAfter, uses24hourClock)}`,
             },
       friendlyZoneLabel: decision.friendlyZoneLabel,
       ...packDetails,
@@ -148,11 +160,13 @@ export function createSydneyStatusViewModel(now: Date): SydneyStatusViewModel {
 
     return {
       availability: 'unavailable',
-      friendlyZoneLabel: 'Sydney, Canberra & most of NSW',
+      friendlyZoneLabel:
+        getAustralianZone(zoneId)?.friendlyLabel ??
+        'Unsupported Home Time Zone',
       message:
         'Time-zone data does not cover this instant. Refresh required before civil-time facts can be shown.',
       ...packDetails,
-      zoneId: homeTimeZone,
+      zoneId,
     };
   }
 }
