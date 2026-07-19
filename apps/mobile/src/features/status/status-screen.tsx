@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ScrollView,
+  Pressable,
   StyleSheet,
   Text,
   useColorScheme,
@@ -8,7 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { createSydneyStatusViewModel } from './status-view-model';
+import { createStatusViewModel } from './status-view-model';
 
 const palettes = {
   light: {
@@ -31,6 +32,8 @@ const palettes = {
 
 interface StatusScreenProps {
   readonly now?: Date;
+  readonly onChooseZone?: () => void;
+  readonly zoneId?: string;
 }
 
 function useCurrentInstant(fixedNow: Date | undefined) {
@@ -48,11 +51,15 @@ function useCurrentInstant(fixedNow: Date | undefined) {
   return fixedNow ?? liveNow;
 }
 
-export default function StatusScreen({ now }: StatusScreenProps) {
+export default function StatusScreen({
+  now,
+  onChooseZone,
+  zoneId = 'Australia/Sydney',
+}: StatusScreenProps) {
   const appearance = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = palettes[appearance];
   const currentInstant = useCurrentInstant(now);
-  const viewModel = createSydneyStatusViewModel(currentInstant);
+  const viewModel = createStatusViewModel(zoneId, currentInstant);
 
   return (
     <SafeAreaView
@@ -71,13 +78,20 @@ export default function StatusScreen({ now }: StatusScreenProps) {
             DAYLIGHT SAVIOUR · STATUS RECORD
           </Text>
           <Text style={[styles.reference, { color: palette.accent }]}>
-            WI—02
+            WI—03
           </Text>
         </View>
 
-        <View
-          accessible
+        <Pressable
+          accessibilityHint={
+            onChooseZone === undefined
+              ? undefined
+              : 'Opens Australian Home Time Zone selection'
+          }
           accessibilityLabel={`Home Time Zone, ${viewModel.friendlyZoneLabel}, ${viewModel.zoneId}`}
+          accessibilityRole={onChooseZone === undefined ? undefined : 'button'}
+          disabled={onChooseZone === undefined}
+          onPress={onChooseZone}
           style={[styles.card, { backgroundColor: palette.surface }]}
         >
           <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
@@ -89,7 +103,7 @@ export default function StatusScreen({ now }: StatusScreenProps) {
           <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
             {viewModel.zoneId}
           </Text>
-        </View>
+        </Pressable>
 
         {viewModel.availability === 'ready' ? (
           <>
@@ -100,7 +114,8 @@ export default function StatusScreen({ now }: StatusScreenProps) {
               <Text
                 style={[styles.identifier, { color: palette.secondaryInk }]}
               >
-                {viewModel.abbreviation} · HOME TIME ZONE
+                {viewModel.abbreviation} · {viewModel.currentOffset} · HOME TIME
+                ZONE
               </Text>
               <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
                 DAYLIGHT SAVING STATUS

@@ -1,1 +1,1 @@
-export { default } from '../src/features/status/status-screen';
+export { default } from '../src/features/home-time-zone/home-time-zone-screen';

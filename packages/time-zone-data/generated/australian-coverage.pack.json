@@ -1,0 +1,885 @@
+{
+  "coverage": {
+    "startsAt": "2025-01-01T00:00:00.000Z",
+    "validUntil": "2030-12-31T23:59:59.000Z"
+  },
+  "generatedAt": "2026-07-19T08:38:40.000Z",
+  "packVersion": "2026c-australian-coverage-2025-2030.1",
+  "schemaVersion": 2,
+  "source": {
+    "archiveSha256": "e4a178a4477f3d0ea77cc31828ff72aa38feff8d61aa13e7e99e142e9d902be4",
+    "files": [
+      "antarctica",
+      "asia",
+      "australasia",
+      "backward",
+      "zone.tab",
+      "zone1970.tab"
+    ],
+    "name": "IANA Time Zone Database",
+    "version": "2026c",
+    "versionUrl": "https://data.iana.org/time-zones/releases/tzdata2026c.tar.gz"
+  },
+  "zones": [
+    {
+      "friendlyLabel": "Sydney, Canberra & most of NSW",
+      "id": "Australia/Sydney",
+      "initial": {
+        "abbreviation": "AEDT",
+        "daylightSaving": true,
+        "utcOffsetSeconds": 39600
+      },
+      "transitions": [
+        {
+          "abbreviation": "AEST",
+          "at": "2025-04-05T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2025-10-04T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2026-04-04T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2026-10-03T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2027-04-03T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2027-10-02T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2028-04-01T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2028-09-30T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2029-03-31T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2029-10-06T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2030-04-06T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2030-10-05T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        }
+      ]
+    },
+    {
+      "friendlyLabel": "Broken Hill & far-western NSW",
+      "id": "Australia/Broken_Hill",
+      "initial": {
+        "abbreviation": "ACDT",
+        "daylightSaving": true,
+        "utcOffsetSeconds": 37800
+      },
+      "transitions": [
+        {
+          "abbreviation": "ACST",
+          "at": "2025-04-05T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2025-10-04T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "ACST",
+          "at": "2026-04-04T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2026-10-03T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "ACST",
+          "at": "2027-04-03T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2027-10-02T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "ACST",
+          "at": "2028-04-01T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2028-09-30T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "ACST",
+          "at": "2029-03-31T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2029-10-06T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "ACST",
+          "at": "2030-04-06T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2030-10-05T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        }
+      ]
+    },
+    {
+      "friendlyLabel": "Melbourne & Victoria",
+      "id": "Australia/Melbourne",
+      "initial": {
+        "abbreviation": "AEDT",
+        "daylightSaving": true,
+        "utcOffsetSeconds": 39600
+      },
+      "transitions": [
+        {
+          "abbreviation": "AEST",
+          "at": "2025-04-05T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2025-10-04T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2026-04-04T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2026-10-03T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2027-04-03T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2027-10-02T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2028-04-01T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2028-09-30T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2029-03-31T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2029-10-06T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2030-04-06T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2030-10-05T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        }
+      ]
+    },
+    {
+      "friendlyLabel": "Hobart & Tasmania",
+      "id": "Australia/Hobart",
+      "initial": {
+        "abbreviation": "AEDT",
+        "daylightSaving": true,
+        "utcOffsetSeconds": 39600
+      },
+      "transitions": [
+        {
+          "abbreviation": "AEST",
+          "at": "2025-04-05T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2025-10-04T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2026-04-04T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2026-10-03T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2027-04-03T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2027-10-02T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2028-04-01T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2028-09-30T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2029-03-31T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2029-10-06T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2030-04-06T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2030-10-05T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        }
+      ]
+    },
+    {
+      "friendlyLabel": "Brisbane & most of Queensland",
+      "id": "Australia/Brisbane",
+      "initial": {
+        "abbreviation": "AEST",
+        "daylightSaving": false,
+        "utcOffsetSeconds": 36000
+      },
+      "transitions": []
+    },
+    {
+      "friendlyLabel": "Whitsunday Islands",
+      "id": "Australia/Lindeman",
+      "initial": {
+        "abbreviation": "AEST",
+        "daylightSaving": false,
+        "utcOffsetSeconds": 36000
+      },
+      "transitions": []
+    },
+    {
+      "friendlyLabel": "Adelaide & South Australia",
+      "id": "Australia/Adelaide",
+      "initial": {
+        "abbreviation": "ACDT",
+        "daylightSaving": true,
+        "utcOffsetSeconds": 37800
+      },
+      "transitions": [
+        {
+          "abbreviation": "ACST",
+          "at": "2025-04-05T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2025-10-04T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "ACST",
+          "at": "2026-04-04T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2026-10-03T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "ACST",
+          "at": "2027-04-03T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2027-10-02T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "ACST",
+          "at": "2028-04-01T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2028-09-30T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "ACST",
+          "at": "2029-03-31T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2029-10-06T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "ACST",
+          "at": "2030-04-06T16:30:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 34200
+        },
+        {
+          "abbreviation": "ACDT",
+          "at": "2030-10-05T16:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 34200,
+          "utcOffsetSeconds": 37800
+        }
+      ]
+    },
+    {
+      "friendlyLabel": "Darwin & Northern Territory",
+      "id": "Australia/Darwin",
+      "initial": {
+        "abbreviation": "ACST",
+        "daylightSaving": false,
+        "utcOffsetSeconds": 34200
+      },
+      "transitions": []
+    },
+    {
+      "friendlyLabel": "Perth & most of Western Australia",
+      "id": "Australia/Perth",
+      "initial": {
+        "abbreviation": "AWST",
+        "daylightSaving": false,
+        "utcOffsetSeconds": 28800
+      },
+      "transitions": []
+    },
+    {
+      "friendlyLabel": "Eucla & south-eastern WA",
+      "id": "Australia/Eucla",
+      "initial": {
+        "abbreviation": "+0845",
+        "daylightSaving": false,
+        "utcOffsetSeconds": 31500
+      },
+      "transitions": []
+    },
+    {
+      "friendlyLabel": "Lord Howe Island",
+      "id": "Australia/Lord_Howe",
+      "initial": {
+        "abbreviation": "+11",
+        "daylightSaving": true,
+        "utcOffsetSeconds": 39600
+      },
+      "transitions": [
+        {
+          "abbreviation": "+1030",
+          "at": "2025-04-05T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "+11",
+          "at": "2025-10-04T15:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "+1030",
+          "at": "2026-04-04T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "+11",
+          "at": "2026-10-03T15:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "+1030",
+          "at": "2027-04-03T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "+11",
+          "at": "2027-10-02T15:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "+1030",
+          "at": "2028-04-01T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "+11",
+          "at": "2028-09-30T15:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "+1030",
+          "at": "2029-03-31T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "+11",
+          "at": "2029-10-06T15:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "+1030",
+          "at": "2030-04-06T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 37800
+        },
+        {
+          "abbreviation": "+11",
+          "at": "2030-10-05T15:30:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 37800,
+          "utcOffsetSeconds": 39600
+        }
+      ]
+    },
+    {
+      "friendlyLabel": "Macquarie Island",
+      "id": "Antarctica/Macquarie",
+      "initial": {
+        "abbreviation": "AEDT",
+        "daylightSaving": true,
+        "utcOffsetSeconds": 39600
+      },
+      "transitions": [
+        {
+          "abbreviation": "AEST",
+          "at": "2025-04-05T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2025-10-04T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2026-04-04T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2026-10-03T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2027-04-03T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2027-10-02T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2028-04-01T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2028-09-30T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2029-03-31T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2029-10-06T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "AEST",
+          "at": "2030-04-06T16:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 36000
+        },
+        {
+          "abbreviation": "AEDT",
+          "at": "2030-10-05T16:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 36000,
+          "utcOffsetSeconds": 39600
+        }
+      ]
+    },
+    {
+      "friendlyLabel": "Norfolk Island",
+      "id": "Pacific/Norfolk",
+      "initial": {
+        "abbreviation": "+12",
+        "daylightSaving": true,
+        "utcOffsetSeconds": 43200
+      },
+      "transitions": [
+        {
+          "abbreviation": "+11",
+          "at": "2025-04-05T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 43200,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "+12",
+          "at": "2025-10-04T15:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 43200
+        },
+        {
+          "abbreviation": "+11",
+          "at": "2026-04-04T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 43200,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "+12",
+          "at": "2026-10-03T15:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 43200
+        },
+        {
+          "abbreviation": "+11",
+          "at": "2027-04-03T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 43200,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "+12",
+          "at": "2027-10-02T15:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 43200
+        },
+        {
+          "abbreviation": "+11",
+          "at": "2028-04-01T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 43200,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "+12",
+          "at": "2028-09-30T15:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 43200
+        },
+        {
+          "abbreviation": "+11",
+          "at": "2029-03-31T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 43200,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "+12",
+          "at": "2029-10-06T15:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 43200
+        },
+        {
+          "abbreviation": "+11",
+          "at": "2030-04-06T15:00:00.000Z",
+          "daylightSaving": false,
+          "offsetBeforeSeconds": 43200,
+          "utcOffsetSeconds": 39600
+        },
+        {
+          "abbreviation": "+12",
+          "at": "2030-10-05T15:00:00.000Z",
+          "daylightSaving": true,
+          "offsetBeforeSeconds": 39600,
+          "utcOffsetSeconds": 43200
+        }
+      ]
+    },
+    {
+      "friendlyLabel": "Christmas Island",
+      "id": "Indian/Christmas",
+      "initial": {
+        "abbreviation": "+07",
+        "daylightSaving": false,
+        "utcOffsetSeconds": 25200
+      },
+      "transitions": []
+    },
+    {
+      "friendlyLabel": "Cocos (Keeling) Islands",
+      "id": "Indian/Cocos",
+      "initial": {
+        "abbreviation": "+0630",
+        "daylightSaving": false,
+        "utcOffsetSeconds": 23400
+      },
+      "transitions": []
+    },
+    {
+      "friendlyLabel": "Casey Station, Australian Antarctic Territory",
+      "id": "Antarctica/Casey",
+      "initial": {
+        "abbreviation": "+08",
+        "daylightSaving": false,
+        "utcOffsetSeconds": 28800
+      },
+      "transitions": []
+    },
+    {
+      "friendlyLabel": "Davis Station, Australian Antarctic Territory",
+      "id": "Antarctica/Davis",
+      "initial": {
+        "abbreviation": "+07",
+        "daylightSaving": false,
+        "utcOffsetSeconds": 25200
+      },
+      "transitions": []
+    },
+    {
+      "friendlyLabel": "Mawson Station, Australian Antarctic Territory",
+      "id": "Antarctica/Mawson",
+      "initial": {
+        "abbreviation": "+05",
+        "daylightSaving": false,
+        "utcOffsetSeconds": 18000
+      },
+      "transitions": []
+    }
+  ]
+}

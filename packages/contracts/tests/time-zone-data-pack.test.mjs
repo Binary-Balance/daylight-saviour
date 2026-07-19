@@ -13,10 +13,12 @@ const validPack = {
   },
   generatedAt: '2026-07-19T06:09:07.000Z',
   packVersion: '2026c-test-pack',
-  schemaVersion: 1,
+  schemaVersion: 2,
   source: {
+    archiveSha256:
+      'e4a178a4477f3d0ea77cc31828ff72aa38feff8d61aa13e7e99e142e9d902be4',
+    files: ['australasia'],
     name: 'IANA Time Zone Database',
-    rulesFile: 'australasia',
     version: '2026c',
     versionUrl: 'https://data.iana.org/time-zones/releases/tzdata2026c.tar.gz',
   },
@@ -39,6 +41,16 @@ const validPack = {
         },
       ],
     },
+    {
+      friendlyLabel: 'Brisbane & most of Queensland',
+      id: 'Australia/Brisbane',
+      initial: {
+        abbreviation: 'AEST',
+        daylightSaving: false,
+        utcOffsetSeconds: 36_000,
+      },
+      transitions: [],
+    },
   ],
 };
 
@@ -57,7 +69,7 @@ describe('activateTimeZoneDataPack', () => {
 
   for (const [name, mutate] of [
     ['unknown fields', (pack) => (pack.surprise = true)],
-    ['unsupported schema', (pack) => (pack.schemaVersion = 2)],
+    ['unsupported schema', (pack) => (pack.schemaVersion = 3)],
     ['invalid instants', (pack) => (pack.coverage.startsAt = '2025-01-01')],
     [
       'invalid offsets',
@@ -79,7 +91,11 @@ describe('activateTimeZoneDataPack', () => {
       'wrong coverage bounds',
       (pack) => (pack.coverage.validUntil = pack.coverage.startsAt),
     ],
-    ['inconsistent labels', (pack) => (pack.zones[0].friendlyLabel = 'Sydney')],
+    ['empty labels', (pack) => (pack.zones[0].friendlyLabel = '')],
+    [
+      'duplicate zones',
+      (pack) => pack.zones.push(structuredClone(pack.zones[0])),
+    ],
   ]) {
     it(`rejects ${name}`, () => {
       const pack = clonePack();

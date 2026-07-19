@@ -1,4 +1,4 @@
-export const timeZoneDataPackSchemaVersion = 1 as const;
+export const timeZoneDataPackSchemaVersion = 2 as const;
 
 export type TimeZoneDataPackSchemaVersion =
   typeof timeZoneDataPackSchemaVersion;
@@ -30,8 +30,9 @@ export interface ActivatedTimeZoneDataPack {
   readonly packVersion: string;
   readonly schemaVersion: TimeZoneDataPackSchemaVersion;
   readonly source: {
+    readonly archiveSha256: string;
+    readonly files: readonly string[];
     readonly name: 'IANA Time Zone Database';
-    readonly rulesFile: string;
     readonly version: string;
     readonly versionUrl: string;
   };
@@ -45,9 +46,6 @@ export class TimeZoneDataPackValidationError extends Error {
   }
 }
 
-const supportedZoneLabels = new Map([
-  ['Australia/Sydney', 'Sydney, Canberra & most of NSW'],
-]);
 const activatedPacks = new WeakSet<object>();
 
 type JsonObject = Record<string, unknown>;
@@ -133,7 +131,7 @@ function stateAt(value: unknown, path: string): TimeZoneState {
   ]);
 
   const abbreviation = stringAt(state.abbreviation, `${path}.abbreviation`);
-  if (!/^[A-Z+-]{2,8}$/.test(abbreviation)) {
+  if (!/^[A-Z0-9+-]{2,8}$/.test(abbreviation)) {
     fail(`${path}.abbreviation`, 'expected a civil-time abbreviation');
   }
 
@@ -186,19 +184,15 @@ function zoneAt(
   exactKeys(zone, path, ['friendlyLabel', 'id', 'initial', 'transitions']);
 
   const id = stringAt(zone.id, `${path}.id`);
-  const expectedLabel = supportedZoneLabels.get(id);
-  if (expectedLabel === undefined) {
-    fail(`${path}.id`, `unsupported zone ${id}`);
+  if (!/^[A-Za-z_+-]+\/[A-Za-z_+-]+$/.test(id)) {
+    fail(`${path}.id`, 'expected a canonical IANA-style identifier');
   }
 
   const friendlyLabel = stringAt(zone.friendlyLabel, `${path}.friendlyLabel`);
-  if (friendlyLabel !== expectedLabel) {
-    fail(`${path}.friendlyLabel`, `expected ${expectedLabel}`);
-  }
 
   const initial = stateAt(zone.initial, `${path}.initial`);
-  if (!Array.isArray(zone.transitions) || zone.transitions.length === 0) {
-    fail(`${path}.transitions`, 'expected at least one transition');
+  if (!Array.isArray(zone.transitions)) {
+    fail(`${path}.transitions`, 'expected an array');
   }
 
   let previousAt = coverageStartMs;
@@ -291,14 +285,35 @@ export function activateTimeZoneDataPack(
   }
 
   const source = objectAt(pack.source, '$.source');
-  exactKeys(source, '$.source', ['name', 'rulesFile', 'version', 'versionUrl']);
+  exactKeys(source, '$.source', [
+    'archiveSha256',
+    'files',
+    'name',
+    'version',
+    'versionUrl',
+  ]);
+  const archiveSha256 = stringAt(
+    source.archiveSha256,
+    '$.source.archiveSha256',
+  );
+  if (!/^[a-f0-9]{64}$/.test(archiveSha256)) {
+    fail('$.source.archiveSha256', 'expected a lowercase SHA-256 digest');
+  }
+  if (!Array.isArray(source.files) || source.files.length === 0) {
+    fail('$.source.files', 'expected at least one IANA source file');
+  }
+  const files = source.files.map((file, index) =>
+    stringAt(file, `$.source.files[${index}]`),
+  );
+  if (new Set(files).size !== files.length) {
+    fail('$.source.files', 'source files must be unique');
+  }
+  if (files.some((file, index) => index > 0 && files[index - 1]! > file)) {
+    fail('$.source.files', 'source files must be sorted');
+  }
   const sourceName = stringAt(source.name, '$.source.name');
   if (sourceName !== 'IANA Time Zone Database') {
     fail('$.source.name', 'unsupported source');
-  }
-  const rulesFile = stringAt(source.rulesFile, '$.source.rulesFile');
-  if (rulesFile !== 'australasia') {
-    fail('$.source.rulesFile', 'expected australasia');
   }
   const sourceVersion = stringAt(source.version, '$.source.version');
   if (!/^20\d{2}[a-z]$/.test(sourceVersion)) {
@@ -316,12 +331,16 @@ export function activateTimeZoneDataPack(
     fail('$.packVersion', 'version does not identify source version');
   }
 
-  if (!Array.isArray(pack.zones) || pack.zones.length !== 1) {
-    fail('$.zones', 'Sydney slice requires exactly one zone');
+  if (!Array.isArray(pack.zones) || pack.zones.length === 0) {
+    fail('$.zones', 'expected at least one zone');
   }
   const zones = pack.zones.map((zone, index) =>
     zoneAt(zone, `$.zones[${index}]`, coverageStartMs, validityHorizonMs),
   );
+  const zoneIds = zones.map((zone) => zone.id);
+  if (new Set(zoneIds).size !== zoneIds.length) {
+    fail('$.zones', 'zone identifiers must be unique');
+  }
 
   const activated: ActivatedTimeZoneDataPack = {
     coverage: { startsAt, validUntil },
@@ -329,8 +348,9 @@ export function activateTimeZoneDataPack(
     packVersion,
     schemaVersion,
     source: {
+      archiveSha256,
+      files,
       name: sourceName,
-      rulesFile,
       version: sourceVersion,
       versionUrl,
     },
