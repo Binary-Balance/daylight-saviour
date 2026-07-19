@@ -111,6 +111,90 @@ Reference measurements on the two-vCPU, 7.7 GiB RAM development VM:
 
 Full clean multi-ABI builds are release or major native-toolchain checks, not routine development. JavaScript/TypeScript changes normally need Metro, tests, typecheck, lint, and web export only. Preserve caches unless validating reproducibility or responding to native changes. `npm ci`, clean Expo prebuild, `gradlew clean`, native dependency changes, and changes to Expo, React Native, Gradle, Android Gradle Plugin, NDK, or CMake invalidate expensive build outputs.
 
+## Browser screenshot evidence
+
+Linux contributors can capture repeatable web evidence with distribution-managed
+Chromium, ChromeDriver, and Selenium. These tools are workstation capabilities,
+not product dependencies: do not add browser binaries or Selenium to this
+repository.
+
+Install and inspect the native packages:
+
+```sh
+sudo apt-get update
+sudo apt-get install --yes chromium chromium-driver python3-selenium
+
+chromium --version
+/usr/bin/chromedriver --version
+/usr/bin/python3 -c 'import selenium; print(selenium.__version__)'
+```
+
+Keep Chromium and ChromeDriver on matching major versions by upgrading them
+together through the operating-system package manager. Use `/usr/bin/python3`
+so Python loads the distribution-managed Selenium package.
+
+Start Expo from the repository root on a fixed loopback port:
+
+```sh
+npm run web --workspace @daylight-saviour/mobile -- --port 8087 --localhost
+```
+
+Use `http://localhost:8087` for automation. On this Linux workbench, Expo has
+been observed listening on IPv6 localhost while `127.0.0.1` did not connect.
+The following disposable example opens the same-origin page before seeding the
+persisted Home Time Zone, refreshes into the dossier, waits for semantic UI
+content, and captures a mobile-sized screenshot:
+
+```sh
+/usr/bin/python3 <<'PY'
+from tempfile import TemporaryDirectory
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+
+with TemporaryDirectory(prefix="daylight-saviour-chromium-") as profile:
+    options = Options()
+    options.binary_location = "/usr/bin/chromium"
+    options.add_argument("--headless=new")
+    options.add_argument(f"--user-data-dir={profile}")
+    options.add_argument("--window-size=430,789")
+
+    driver = webdriver.Chrome(
+        service=Service("/usr/bin/chromedriver"),
+        options=options,
+    )
+    try:
+        driver.get("http://localhost:8087")
+        driver.execute_script(
+            "window.localStorage.setItem(arguments[0], arguments[1])",
+            "home-time-zone",
+            "Australia/Sydney",
+        )
+        driver.refresh()
+        WebDriverWait(driver, 20).until(
+            lambda browser: "HOME TIME ZONE"
+            in browser.find_element(By.TAG_NAME, "body").text
+        )
+        driver.save_screenshot("/tmp/daylight-saviour-web.png")
+    finally:
+        driver.quit()
+PY
+```
+
+Use ChromeDriver's explicit system path because Selenium Manager may not manage
+distribution-packaged Chromium correctly. Run Chromium with its normal sandbox;
+never add `--no-sandbox` to this workflow. The temporary profile and browser
+process are cleaned when the example exits. Stop the Expo process after capture
+and keep evidence free of private or environment-specific data.
+
+Web screenshots provide fast layout evidence only. They complement rather than
+replace physical-device or native-runtime validation for Android and iOS
+behavior, including permissions, notifications, secure storage, and lifecycle
+handling.
+
 ## Validation
 
 Run repository checks from root:
