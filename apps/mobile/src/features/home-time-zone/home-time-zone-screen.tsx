@@ -209,8 +209,14 @@ export default function HomeTimeZoneScreen({
         if (saved !== null) {
           const canonical = normalizeAustralianZoneId(saved);
           if (canonical === saved) {
-            const acknowledgedEventAt =
-              await adapters.aftermathAcknowledgements.load(canonical);
+            let acknowledgedEventAt: string | null = null;
+            try {
+              acknowledgedEventAt =
+                await adapters.aftermathAcknowledgements.load(canonical);
+            } catch {
+              // Acknowledgement is noncritical. Missing it may repeat one
+              // factual aftermath opening but cannot block the home screen.
+            }
             if (!active) return;
             setFlow({
               acknowledgedEventAt,
@@ -290,8 +296,21 @@ export default function HomeTimeZoneScreen({
     return (
       <StatusScreen
         acknowledgedEventAt={flow.acknowledgedEventAt}
+        key={flow.zoneId}
         now={now}
         onAcknowledgeAftermath={(eventAt) => {
+          setFlow((current) => {
+            if (current.kind === 'ready' && current.zoneId === flow.zoneId) {
+              return { ...current, acknowledgedEventAt: eventAt };
+            }
+            if (
+              current.kind === 'choose' &&
+              current.returnZoneId === flow.zoneId
+            ) {
+              return { ...current, returnAcknowledgedEventAt: eventAt };
+            }
+            return current;
+          });
           void adapters.aftermathAcknowledgements
             .save(flow.zoneId, eventAt)
             .catch(() => undefined);

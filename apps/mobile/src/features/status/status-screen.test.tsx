@@ -310,6 +310,9 @@ describe('StatusScreen', () => {
     expect(screen.getByTestId('motion-awaiting-preference')).toBeTruthy();
     expect(timingSpy).not.toHaveBeenCalled();
     expect(
+      screen.getByTestId('semantic-event-content').props.style.opacity,
+    ).toBe(1);
+    expect(
       screen.getAllByText('3:00 am → 2:00 am', {
         includeHiddenElements: true,
       }),
@@ -325,6 +328,28 @@ describe('StatusScreen', () => {
     ).toHaveLength(1);
     const content = screen.getByTestId('semantic-event-content');
     expect(content.props.style.transform[0].translateX).toBe(0);
+  });
+
+  it('keeps event facts visible when reduced-motion lookup rejects', async () => {
+    jest
+      .spyOn(ReactNative.AccessibilityInfo, 'isReduceMotionEnabled')
+      .mockRejectedValue(new Error('preference unavailable'));
+
+    render(<StatusScreen now={new Date('2026-04-04T15:59:59.000Z')} />);
+    await act(async () => undefined);
+
+    expect(screen.getByTestId('motion-short-fade')).toBeTruthy();
+    expect(screen.getByText('Backward Change')).toBeTruthy();
+    expect(screen.getByText('3:00 am → 2:00 am')).toBeTruthy();
+    expect(
+      screen.getAllByText('3:00 am → 2:00 am', {
+        includeHiddenElements: true,
+      }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByTestId('semantic-event-content').props.style.transform[0]
+        .translateX,
+    ).toBe(0);
   });
 
   it('themes the decorative Backward echo in dark appearance', () => {

@@ -52,9 +52,13 @@ function useReducedMotion(override: boolean | undefined) {
     if (override !== undefined) return;
 
     let active = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (active) setSystemPreference(enabled);
-    });
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (active) setSystemPreference(enabled);
+      })
+      .catch(() => {
+        if (active) setSystemPreference(true);
+      });
     const subscription = AccessibilityInfo.addEventListener(
       'reduceMotionChanged',
       setSystemPreference,
@@ -84,7 +88,7 @@ function SemanticEventMotion({
   readonly eventKey: string;
   readonly reducedMotion: boolean | null;
 }) {
-  const [opacity] = useState(() => new Animated.Value(0));
+  const [opacity] = useState(() => new Animated.Value(1));
   const [travel] = useState(() => new Animated.Value(0));
   const [echoOpacity] = useState(() => new Animated.Value(0));
   const recipe = useMemo(
@@ -101,7 +105,7 @@ function SemanticEventMotion({
     opacity.stopAnimation();
     travel.stopAnimation();
     echoOpacity.stopAnimation();
-    opacity.setValue(0);
+    opacity.setValue(recipe.kind === 'short-fade' ? 0.72 : 1);
     travel.setValue(recipe.travel);
     echoOpacity.setValue(recipe.decorativeEcho ? 0.35 : 0);
 
@@ -185,13 +189,14 @@ export default function StatusScreen({
   const palette = daylightSaviourPalettes[appearance];
   const currentInstant = useCurrentInstant(now);
   const reducedMotion = useReducedMotion(reducedMotionOverride);
+  const [openingAcknowledgedEventAt] = useState(acknowledgedEventAt);
   const { width } = useWindowDimensions();
   const clockSize = Math.min(104, Math.max(72, (width - 48) * 0.25));
   const viewModel = createStatusViewModel(
     zoneId,
     currentInstant,
     uses24hourClock,
-    acknowledgedEventAt,
+    openingAcknowledgedEventAt,
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const acknowledgedDuringOpening = useRef<string | null>(null);
