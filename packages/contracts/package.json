@@ -1,5 +1,5 @@
 {
-  "name": "@daylight-saviour/domain",
+  "name": "@daylight-saviour/contracts",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,8 +11,5 @@
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@daylight-saviour/contracts": "*"
   }
 }

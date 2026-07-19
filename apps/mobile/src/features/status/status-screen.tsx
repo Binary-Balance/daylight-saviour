@@ -1,4 +1,4 @@
-import { foundationStatus } from '@daylight-saviour/domain';
+import { useEffect, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -7,6 +7,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { createSydneyStatusViewModel } from './status-view-model';
 
 const palettes = {
   light: {
@@ -27,9 +29,30 @@ const palettes = {
   },
 } as const;
 
-export default function StatusScreen() {
+interface StatusScreenProps {
+  readonly now?: Date;
+}
+
+function useCurrentInstant(fixedNow: Date | undefined) {
+  const [liveNow, setLiveNow] = useState(() => fixedNow ?? new Date());
+
+  useEffect(() => {
+    if (fixedNow !== undefined) {
+      return;
+    }
+
+    const timer = setInterval(() => setLiveNow(new Date()), 1_000);
+    return () => clearInterval(timer);
+  }, [fixedNow]);
+
+  return fixedNow ?? liveNow;
+}
+
+export default function StatusScreen({ now }: StatusScreenProps) {
   const appearance = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = palettes[appearance];
+  const currentInstant = useCurrentInstant(now);
+  const viewModel = createSydneyStatusViewModel(currentInstant);
 
   return (
     <SafeAreaView
@@ -41,59 +64,134 @@ export default function StatusScreen() {
         contentInsetAdjustmentBehavior="automatic"
       >
         <View
-          accessibilityLabel="Daylight Saviour foundation dossier"
+          accessibilityLabel="Daylight Saviour status document"
           style={[styles.utilityHeader, { borderBottomColor: palette.rule }]}
         >
           <Text style={[styles.documentLabel, { color: palette.secondaryInk }]}>
-            DAYLIGHT SAVIOUR · FOUNDATION DOSSIER
+            DAYLIGHT SAVIOUR · STATUS RECORD
           </Text>
           <Text style={[styles.reference, { color: palette.accent }]}>
-            WI—01
+            WI—02
           </Text>
         </View>
 
         <View
           accessible
-          accessibilityLabel={`Home Time Zone, ${foundationStatus.homeTimeZone}`}
+          accessibilityLabel={`Home Time Zone, ${viewModel.friendlyZoneLabel}, ${viewModel.zoneId}`}
           style={[styles.card, { backgroundColor: palette.surface }]}
         >
           <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
             HOME TIME ZONE
           </Text>
           <Text style={[styles.zone, { color: palette.ink }]}>
-            Sydney & Canberra
+            {viewModel.friendlyZoneLabel}
           </Text>
           <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
-            {foundationStatus.homeTimeZone}
+            {viewModel.zoneId}
           </Text>
         </View>
 
-        <View style={styles.statusSection}>
-          <Text
-            accessibilityRole="header"
-            style={[styles.status, { color: palette.ink }]}
-          >
-            {foundationStatus.status}
-          </Text>
-          <View
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            style={[styles.rule, { backgroundColor: palette.accent }]}
-          />
-          <Text style={[styles.body, { color: palette.secondaryInk }]}>
-            {foundationStatus.explanation}
-          </Text>
-        </View>
+        {viewModel.availability === 'ready' ? (
+          <>
+            <View style={styles.statusSection}>
+              <Text style={[styles.clock, { color: palette.ink }]}>
+                {viewModel.clock}
+              </Text>
+              <Text
+                style={[styles.identifier, { color: palette.secondaryInk }]}
+              >
+                {viewModel.abbreviation} · HOME TIME ZONE
+              </Text>
+              <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
+                DAYLIGHT SAVING STATUS
+              </Text>
+              <Text
+                accessibilityRole="header"
+                style={[styles.status, { color: palette.ink }]}
+              >
+                {viewModel.status}
+              </Text>
+              <View
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                style={[styles.rule, { backgroundColor: palette.accent }]}
+              />
+            </View>
+
+            <View
+              accessible
+              accessibilityLabel={
+                viewModel.event === null
+                  ? 'No Change Event is scheduled within current verified data'
+                  : `${viewModel.event.direction}, ${viewModel.event.date}, ${viewModel.event.wallTimeChange}, offset ${viewModel.event.offsetChange}, in ${viewModel.event.countdown}`
+              }
+              style={[styles.eventCard, { borderColor: palette.rule }]}
+            >
+              <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
+                NEXT CHANGE EVENT
+              </Text>
+              {viewModel.event === null ? (
+                <Text
+                  accessibilityRole="header"
+                  style={[styles.eventDate, { color: palette.ink }]}
+                >
+                  No Change Event scheduled within verified data
+                </Text>
+              ) : (
+                <>
+                  <Text
+                    accessibilityRole="header"
+                    style={[styles.eventDate, { color: palette.ink }]}
+                  >
+                    {viewModel.event.date}
+                  </Text>
+                  <Text style={[styles.direction, { color: palette.accent }]}>
+                    {viewModel.event.direction}
+                  </Text>
+                  <Text style={[styles.eventFact, { color: palette.ink }]}>
+                    {viewModel.event.wallTimeChange}
+                  </Text>
+                  <Text style={[styles.eventFact, { color: palette.ink }]}>
+                    {viewModel.event.offsetChange}
+                  </Text>
+                  <Text style={[styles.body, { color: palette.secondaryInk }]}>
+                    Clocks move {viewModel.event.offsetAmount.toLowerCase()} ·
+                    Home Time Zone
+                  </Text>
+                  <Text style={[styles.countdown, { color: palette.ink }]}>
+                    In {viewModel.event.countdown}
+                  </Text>
+                </>
+              )}
+            </View>
+          </>
+        ) : (
+          <View style={styles.statusSection}>
+            <Text
+              accessibilityRole="header"
+              style={[styles.status, { color: palette.ink }]}
+            >
+              Civil-time decision unavailable
+            </Text>
+            <Text style={[styles.body, { color: palette.ink }]}>
+              {viewModel.message}
+            </Text>
+          </View>
+        )}
 
         <View
-          accessibilityLabel="Foundation validation pending"
+          accessible
+          accessibilityLabel={`Time-Zone Data Pack ${viewModel.packVersion}, valid until ${viewModel.validUntil}`}
           style={[styles.footer, { borderTopColor: palette.rule }]}
         >
           <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
-            VALIDATION
+            VERIFIED OFFLINE DATA
           </Text>
           <Text style={[styles.body, { color: palette.ink }]}>
-            Scaffold ready for deterministic civil-time data.
+            Pack {viewModel.packVersion}
+          </Text>
+          <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
+            Validity Horizon · {viewModel.validUntil}
           </Text>
         </View>
       </ScrollView>
@@ -110,16 +208,50 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 24,
   },
+  clock: {
+    fontSize: 80,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '800',
+    letterSpacing: -4,
+    lineHeight: 88,
+  },
   content: {
     gap: 32,
     paddingHorizontal: 24,
     paddingVertical: 24,
+  },
+  countdown: {
+    fontSize: 22,
+    fontWeight: '700',
+    lineHeight: 28,
+    paddingTop: 8,
+  },
+  direction: {
+    fontSize: 18,
+    fontWeight: '800',
+    textTransform: 'uppercase',
   },
   documentLabel: {
     flex: 1,
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 1.2,
+  },
+  eventCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+    padding: 24,
+  },
+  eventDate: {
+    fontSize: 30,
+    fontWeight: '700',
+    lineHeight: 36,
+  },
+  eventFact: {
+    fontSize: 24,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '700',
+    lineHeight: 30,
   },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -152,7 +284,7 @@ const styles = StyleSheet.create({
     lineHeight: 44,
   },
   statusSection: {
-    gap: 16,
+    gap: 12,
   },
   utilityHeader: {
     alignItems: 'center',

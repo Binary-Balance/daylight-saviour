@@ -1,5 +1,5 @@
 {
-  "name": "@daylight-saviour/domain",
+  "name": "@daylight-saviour/time-zone-data",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,10 +9,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "generate": "node scripts/generate-sydney-pack.mjs",
     "test": "node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@daylight-saviour/contracts": "*"
   }
 }
