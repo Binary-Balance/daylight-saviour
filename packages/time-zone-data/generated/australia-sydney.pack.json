@@ -3,13 +3,13 @@
     "startsAt": "2025-01-01T00:00:00.000Z",
     "validUntil": "2030-12-31T23:59:59.000Z"
   },
-  "generatedAt": "2025-03-24T00:00:00.000Z",
-  "packVersion": "2025b-sydney-2025-2030.1",
+  "generatedAt": "2026-07-19T06:09:07.000Z",
+  "packVersion": "2026c-sydney-2025-2030.1",
   "schemaVersion": 1,
   "source": {
     "name": "IANA Time Zone Database",
-    "version": "2025b",
-    "versionUrl": "https://data.iana.org/time-zones/releases/tzdata2025b.tar.gz",
+    "version": "2026c",
+    "versionUrl": "https://data.iana.org/time-zones/releases/tzdata2026c.tar.gz",
     "rulesFile": "australasia"
   },
   "zones": [

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react-native';
+import { act, render, screen } from '@testing-library/react-native';
 import * as ReactNative from 'react-native';
 import { activateTimeZoneDataPack } from '@daylight-saviour/contracts';
 import { decideCivilTime } from '@daylight-saviour/domain';
@@ -10,6 +10,7 @@ import StatusScreen from './status-screen';
 describe('StatusScreen', () => {
   afterEach(() => {
     jest.restoreAllMocks();
+    jest.useRealTimers();
   });
 
   it.each(['light', 'dark'] as const)(
@@ -58,6 +59,33 @@ describe('StatusScreen', () => {
     );
     expect(viewModel.event?.offsetChange).toBe('UTC+10:00 → UTC+11:00');
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not start a live clock when an explicit instant is supplied', () => {
+    const intervalSpy = jest.spyOn(globalThis, 'setInterval');
+
+    render(<StatusScreen now={new Date('2026-07-19T00:00:00.000Z')} />);
+
+    expect(intervalSpy).not.toHaveBeenCalled();
+  });
+
+  it('updates status atomically while production screen remains mounted', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-04T15:59:59.000Z'));
+
+    render(<StatusScreen />);
+
+    expect(
+      screen.getByRole('header', { name: 'Daylight saving time applies' }),
+    ).toBeTruthy();
+    expect(screen.getByText('Backward Change')).toBeTruthy();
+
+    act(() => jest.advanceTimersByTime(1_000));
+
+    expect(
+      screen.getByRole('header', { name: 'Standard time applies' }),
+    ).toBeTruthy();
+    expect(screen.getByText('Forward Change')).toBeTruthy();
   });
 
   it('suppresses civil-time claims after the Validity Horizon', () => {

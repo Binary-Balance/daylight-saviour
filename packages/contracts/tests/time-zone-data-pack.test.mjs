@@ -11,14 +11,14 @@ const validPack = {
     startsAt: '2025-01-01T00:00:00.000Z',
     validUntil: '2027-01-01T00:00:00.000Z',
   },
-  generatedAt: '2025-03-24T00:00:00.000Z',
-  packVersion: '2025b-test-pack',
+  generatedAt: '2026-07-19T06:09:07.000Z',
+  packVersion: '2026c-test-pack',
   schemaVersion: 1,
   source: {
     name: 'IANA Time Zone Database',
     rulesFile: 'australasia',
-    version: '2025b',
-    versionUrl: 'https://data.iana.org/time-zones/releases/tzdata2025b.tar.gz',
+    version: '2026c',
+    versionUrl: 'https://data.iana.org/time-zones/releases/tzdata2026c.tar.gz',
   },
   zones: [
     {

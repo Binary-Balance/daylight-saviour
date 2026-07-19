@@ -1,11 +1,12 @@
 {
   "source": {
     "name": "IANA Time Zone Database",
-    "version": "2025b",
-    "versionUrl": "https://data.iana.org/time-zones/releases/tzdata2025b.tar.gz",
+    "version": "2026c",
+    "versionUrl": "https://data.iana.org/time-zones/releases/tzdata2026c.tar.gz",
     "rulesFile": "australasia"
   },
   "provenance": {
+    "archiveSha256": "e4a178a4477f3d0ea77cc31828ff72aa38feff8d61aa13e7e99e142e9d902be4",
     "zoneLine": "Zone Australia/Sydney 10:04:52 - LMT 1895 Feb; 10:00 Aus AE%sT 1971; 10:00 AN AE%sT",
     "ruleLines": [
       "Rule AN 2008 max - Apr Sun>=1 2:00s 0 S",
@@ -14,8 +15,8 @@
   },
   "generation": {
     "schemaVersion": 1,
-    "packVersion": "2025b-sydney-2025-2030.1",
-    "generatedAt": "2025-03-24T00:00:00.000Z",
+    "packVersion": "2026c-sydney-2025-2030.1",
+    "generatedAt": "2026-07-19T06:09:07.000Z",
     "coverageStartsAt": "2025-01-01T00:00:00.000Z",
     "validUntil": "2030-12-31T23:59:59.000Z",
     "firstYear": 2025,

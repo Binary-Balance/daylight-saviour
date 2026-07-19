@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -32,10 +33,26 @@ interface StatusScreenProps {
   readonly now?: Date;
 }
 
-export default function StatusScreen({ now = new Date() }: StatusScreenProps) {
+function useCurrentInstant(fixedNow: Date | undefined) {
+  const [liveNow, setLiveNow] = useState(() => fixedNow ?? new Date());
+
+  useEffect(() => {
+    if (fixedNow !== undefined) {
+      return;
+    }
+
+    const timer = setInterval(() => setLiveNow(new Date()), 1_000);
+    return () => clearInterval(timer);
+  }, [fixedNow]);
+
+  return fixedNow ?? liveNow;
+}
+
+export default function StatusScreen({ now }: StatusScreenProps) {
   const appearance = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = palettes[appearance];
-  const viewModel = createSydneyStatusViewModel(now);
+  const currentInstant = useCurrentInstant(now);
+  const viewModel = createSydneyStatusViewModel(currentInstant);
 
   return (
     <SafeAreaView

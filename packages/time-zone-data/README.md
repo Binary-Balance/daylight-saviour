@@ -3,9 +3,9 @@
 `@daylight-saviour/time-zone-data` owns pinned IANA-derived inputs, deterministic
 generation, and bundled offline Time-Zone Data Packs.
 
-Sydney slice uses rules extracted from tzdb 2025b's `australasia` file. Source
+Sydney slice uses rules extracted from tzdb 2026c's `australasia` file. Source
 rule lines and generator configuration are reviewable in
-`source/tzdb-2025b-australia-sydney.json`. Generator interprets IANA's `s`
+`source/tzdb-2026c-australia-sydney.json`. Generator interprets IANA's `s`
 (standard-time) transition suffix with UTC calendar arithmetic and never asks
 host ICU or current clock for zone rules.
 

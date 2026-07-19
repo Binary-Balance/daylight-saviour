@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const defaultSourcePath = resolve(
   packageDirectory,
-  'source/tzdb-2025b-australia-sydney.json',
+  'source/tzdb-2026c-australia-sydney.json',
 );
 const defaultOutputPath = resolve(
   packageDirectory,
