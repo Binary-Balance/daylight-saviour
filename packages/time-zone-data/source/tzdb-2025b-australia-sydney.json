@@ -1,0 +1,54 @@
+{
+  "source": {
+    "name": "IANA Time Zone Database",
+    "version": "2025b",
+    "versionUrl": "https://data.iana.org/time-zones/releases/tzdata2025b.tar.gz",
+    "rulesFile": "australasia"
+  },
+  "provenance": {
+    "zoneLine": "Zone Australia/Sydney 10:04:52 - LMT 1895 Feb; 10:00 Aus AE%sT 1971; 10:00 AN AE%sT",
+    "ruleLines": [
+      "Rule AN 2008 max - Apr Sun>=1 2:00s 0 S",
+      "Rule AN 2008 max - Oct Sun>=1 2:00s 1:00 D"
+    ]
+  },
+  "generation": {
+    "schemaVersion": 1,
+    "packVersion": "2025b-sydney-2025-2030.1",
+    "generatedAt": "2025-03-24T00:00:00.000Z",
+    "coverageStartsAt": "2025-01-01T00:00:00.000Z",
+    "validUntil": "2030-12-31T23:59:59.000Z",
+    "firstYear": 2025,
+    "lastYear": 2030
+  },
+  "zone": {
+    "id": "Australia/Sydney",
+    "friendlyLabel": "Sydney, Canberra & most of NSW",
+    "standardOffsetSeconds": 36000,
+    "initial": {
+      "abbreviation": "AEDT",
+      "daylightSaving": true,
+      "utcOffsetSeconds": 39600
+    },
+    "rules": [
+      {
+        "month": 4,
+        "onOrAfterDay": 1,
+        "weekday": 0,
+        "atStandardSeconds": 7200,
+        "abbreviationAfter": "AEST",
+        "daylightSavingAfter": false,
+        "saveAfterSeconds": 0
+      },
+      {
+        "month": 10,
+        "onOrAfterDay": 1,
+        "weekday": 0,
+        "atStandardSeconds": 7200,
+        "abbreviationAfter": "AEDT",
+        "daylightSavingAfter": true,
+        "saveAfterSeconds": 3600
+      }
+    ]
+  }
+}

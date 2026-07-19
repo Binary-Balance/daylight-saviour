@@ -37,7 +37,7 @@
     "lint": "eslint .",
     "native:generate:android": "npm exec --workspace=@daylight-saviour/mobile -- expo prebuild --platform android --clean --no-install",
     "start": "npm run start --workspace @daylight-saviour/mobile",
-    "test": "npm run test --workspace @daylight-saviour/mobile -- --runInBand && npm run test --workspace @daylight-saviour/notifications",
+    "test": "npm run test --workspace @daylight-saviour/contracts && npm run test --workspace @daylight-saviour/time-zone-data && npm run test --workspace @daylight-saviour/domain && npm run test --workspace @daylight-saviour/mobile -- --runInBand && npm run test --workspace @daylight-saviour/notifications",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "web": "npm run web --workspace @daylight-saviour/mobile",
     "web:export": "npm exec --workspace=@daylight-saviour/mobile -- expo export --platform web"
