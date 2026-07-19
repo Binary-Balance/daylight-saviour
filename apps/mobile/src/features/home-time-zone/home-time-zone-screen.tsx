@@ -19,26 +19,11 @@ import {
 
 import StatusScreen from '../status/status-screen';
 import { createStatusViewModel } from '../status/status-view-model';
+import {
+  daylightSaviourPalettes,
+  type DaylightSaviourPalette,
+} from '../../theme';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
-
-const palettes = {
-  light: {
-    accent: '#E5482D',
-    background: '#F4EEDC',
-    ink: '#111B2C',
-    rule: '#A9A38F',
-    secondaryInk: '#596273',
-    surface: '#FFF9EA',
-  },
-  dark: {
-    accent: '#FF6A4D',
-    background: '#081426',
-    ink: '#F6F0DE',
-    rule: '#405067',
-    secondaryInk: '#B6C0CF',
-    surface: '#101F35',
-  },
-} as const;
 
 type FlowState =
   | { readonly kind: 'loading' }
@@ -69,7 +54,7 @@ interface ChooserProps {
   readonly notice?: string;
   readonly onCancel?: () => void;
   readonly onSelect: (zoneId: string) => void;
-  readonly palette: (typeof palettes)[keyof typeof palettes];
+  readonly palette: DaylightSaviourPalette;
   readonly saveError: string | null;
   readonly saving: boolean;
 }
@@ -204,7 +189,7 @@ export default function HomeTimeZoneScreen({
   now,
 }: HomeTimeZoneScreenProps) {
   const appearance = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const palette = palettes[appearance];
+  const palette = daylightSaviourPalettes[appearance];
   const [flow, setFlow] = useState<FlowState>({ kind: 'loading' });
   const [retry, setRetry] = useState(0);
   const [saving, setSaving] = useState(false);

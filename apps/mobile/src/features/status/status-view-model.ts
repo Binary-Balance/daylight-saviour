@@ -1,8 +1,9 @@
 import {
   activateAustralianTimeZoneDataPack,
   CivilTimeDecisionUnavailableError,
-  decideCivilTime,
+  decideLivingDossier,
   getAustralianZone,
+  type LivingDossierPhase,
   type LocalDateTime,
 } from '@daylight-saviour/domain';
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
@@ -55,10 +56,10 @@ function plural(value: number, unit: string) {
   return `${value} ${unit}${value === 1 ? '' : 's'}`;
 }
 
-function formatCountdown(totalSeconds: number) {
-  let remaining = Math.floor(totalSeconds);
+export function formatAbsoluteDuration(totalSeconds: number) {
+  let remaining = Math.floor(Math.abs(totalSeconds));
   if (remaining < 1) {
-    return 'less than one second';
+    return 'now';
   }
 
   const parts: string[] = [];
@@ -89,6 +90,39 @@ function formatDelta(offsetDeltaSeconds: number) {
   return plural(absoluteMinutes, 'minute');
 }
 
+const phasePresentation: Record<
+  LivingDossierPhase,
+  { readonly label: string; readonly secondaryLine: string }
+> = {
+  ordinary: {
+    label: 'ON FILE',
+    secondaryLine: 'Next adjustment recorded. Civil time continues meanwhile.',
+  },
+  approaching: {
+    label: 'APPROACHING',
+    secondaryLine: 'Clock adjustment approaching. Paperwork remains composed.',
+  },
+  'reminder-week': {
+    label: 'REMINDER WEEK',
+    secondaryLine: 'Change due within one week. The clock has been notified.',
+  },
+  'reminder-day': {
+    label: 'REMINDER DAY',
+    secondaryLine:
+      'Change due within 24 hours. Temporal administration is ready.',
+  },
+  aftermath: {
+    label: 'CHANGE RECORDED',
+    secondaryLine:
+      'New civil time now applies. The clock has filed its amendment.',
+  },
+  'no-event': {
+    label: 'NO CHANGE FILED',
+    secondaryLine:
+      'No clock adjustment is scheduled. Civil time may rest unbothered.',
+  },
+};
+
 const packDetails = {
   packVersion: activatedAustralianPack.packVersion,
   validUntil: activatedAustralianPack.coverage.validUntil,
@@ -101,15 +135,21 @@ export type StatusViewModel =
       readonly clock: string;
       readonly currentOffset: string;
       readonly event: {
-        readonly countdown: string;
+        readonly countdown: string | null;
         readonly date: string;
         readonly direction: 'Forward Change' | 'Backward Change';
+        readonly elapsed: string | null;
+        readonly instant: string;
         readonly offsetAmount: string;
         readonly offsetChange: string;
+        readonly relation: 'completed' | 'upcoming';
         readonly wallTimeChange: string;
       } | null;
       readonly friendlyZoneLabel: string;
       readonly packVersion: string;
+      readonly phase: LivingDossierPhase;
+      readonly phaseLabel: string;
+      readonly secondaryLine: string;
       readonly status: string;
       readonly validUntil: string;
       readonly zoneId: string;
@@ -129,8 +169,11 @@ export function createStatusViewModel(
   uses24hourClock = false,
 ): StatusViewModel {
   try {
-    const decision = decideCivilTime(activatedAustralianPack, zoneId, now);
-    const event = decision.nextChangeEvent;
+    const dossier = decideLivingDossier(activatedAustralianPack, zoneId, now);
+    const decision = dossier.civilTime;
+    const event = dossier.featuredEvent;
+    const presentation = phasePresentation[dossier.phase];
+    const completed = dossier.phase === 'aftermath';
 
     return {
       availability: 'ready',
@@ -141,15 +184,25 @@ export function createStatusViewModel(
         event === null
           ? null
           : {
-              countdown: formatCountdown(event.secondsUntil),
+              countdown: completed
+                ? null
+                : formatAbsoluteDuration(event.secondsUntil),
               date: formatDate(event.localAfter),
               direction: event.direction,
+              elapsed: completed
+                ? formatAbsoluteDuration(event.secondsUntil)
+                : null,
+              instant: event.at,
               offsetAmount: formatDelta(event.offsetDeltaSeconds),
               offsetChange: `${formatOffset(event.offsetBeforeSeconds)} → ${formatOffset(event.offsetAfterSeconds)}`,
+              relation: completed ? 'completed' : 'upcoming',
               wallTimeChange: `${formatTime(event.localBefore, uses24hourClock)} → ${formatTime(event.localAfter, uses24hourClock)}`,
             },
       friendlyZoneLabel: decision.friendlyZoneLabel,
       ...packDetails,
+      phase: dossier.phase,
+      phaseLabel: presentation.label,
+      secondaryLine: presentation.secondaryLine,
       status: decision.daylightSavingStatus,
       zoneId: decision.zoneId,
     };
@@ -164,7 +217,7 @@ export function createStatusViewModel(
         getAustralianZone(zoneId)?.friendlyLabel ??
         'Unsupported Home Time Zone',
       message:
-        'Time-zone data does not cover this instant. Refresh required before civil-time facts can be shown.',
+        'Time-zone data does not cover this instant. New verified data is required before civil-time facts can be shown.',
       ...packDetails,
       zoneId,
     };
