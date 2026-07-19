@@ -104,6 +104,7 @@ function ZoneChooser({
             accessibilityHint="Returns to the current Home Time Zone without saving"
             accessibilityLabel="Cancel Home Time Zone selection"
             accessibilityRole="button"
+            disabled={saving}
             onPress={onCancel}
             style={styles.cancelButton}
           >

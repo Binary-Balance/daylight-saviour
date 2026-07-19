@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -212,6 +213,56 @@ describe('HomeTimeZoneScreen', () => {
       }),
     ).toBeTruthy();
     expect(adapters.storage.save).not.toHaveBeenCalled();
+  });
+
+  it('prevents cancel from racing a pending zone save', async () => {
+    const adapters = createAdapters({ savedZone: 'Australia/Brisbane' });
+    let resolveSave: (() => void) | undefined;
+    jest.mocked(adapters.storage.save).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+
+    render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+
+    fireEvent.press(
+      await screen.findByRole('button', {
+        name: 'Home Time Zone, Brisbane & most of Queensland, Australia/Brisbane',
+      }),
+    );
+    fireEvent.changeText(
+      screen.getByLabelText('Search Australian Home Time Zones'),
+      'lord howe',
+    );
+    fireEvent.press(
+      screen.getByRole('button', {
+        name: 'Lord Howe Island, Australia/Lord_Howe',
+      }),
+    );
+
+    const cancel = screen.getByRole('button', {
+      name: 'Cancel Home Time Zone selection',
+    });
+    expect(cancel).toBeDisabled();
+    fireEvent.press(cancel);
+    expect(
+      screen.getByRole('header', { name: 'Choose Home Time Zone' }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByLabelText(
+        'Home Time Zone, Brisbane & most of Queensland, Australia/Brisbane',
+      ),
+    ).toBeNull();
+
+    await act(async () => resolveSave?.());
+
+    expect(
+      await screen.findByLabelText(
+        'Home Time Zone, Lord Howe Island, Australia/Lord_Howe',
+      ),
+    ).toBeTruthy();
   });
 
   it('shows literal load and save errors', async () => {
