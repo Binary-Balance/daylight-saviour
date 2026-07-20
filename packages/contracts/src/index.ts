@@ -1,7 +1,17 @@
-export const timeZoneDataPackSchemaVersion = 2 as const;
+import {
+  timeZoneDataPackSchemaVersion,
+  type TimeZoneDataPackSchemaVersion,
+} from './time-zone-data-pack-version.ts';
+import {
+  verifySignedTimeZoneDataPackBytes as verifySignedBytes,
+  type ActivatedSignedTimeZoneDataPackManifest,
+  type TrustedTimeZoneDataPackKeyRing,
+} from './signed-time-zone-data-pack.ts';
 
-export type TimeZoneDataPackSchemaVersion =
-  typeof timeZoneDataPackSchemaVersion;
+export {
+  timeZoneDataPackSchemaVersion,
+  type TimeZoneDataPackSchemaVersion,
+} from './time-zone-data-pack-version.ts';
 
 export interface TimeZoneState {
   readonly abbreviation: string;
@@ -372,4 +382,27 @@ export function assertActivatedTimeZoneDataPack(
       'Time-Zone Data Pack must be activated before domain calculation',
     );
   }
+}
+
+export {
+  activateSignedTimeZoneDataPackManifestBytes,
+  activateSignedTimeZoneDataPackManifest,
+  maximumTimeZoneDataPackBytes,
+  signedTimeZoneDataPackManifestVersion,
+  SignedTimeZoneDataPackValidationError,
+  type ActivatedSignedTimeZoneDataPackManifest,
+  type TrustedTimeZoneDataPackKeyRing,
+} from './signed-time-zone-data-pack.ts';
+
+export function verifySignedTimeZoneDataPackBytes(
+  manifest: ActivatedSignedTimeZoneDataPackManifest,
+  bytes: Uint8Array,
+  trustedKeys: TrustedTimeZoneDataPackKeyRing,
+): ActivatedTimeZoneDataPack {
+  return verifySignedBytes(
+    manifest,
+    bytes,
+    trustedKeys,
+    activateTimeZoneDataPack,
+  );
 }

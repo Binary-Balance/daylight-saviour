@@ -1,5 +1,4 @@
 import {
-  activateAustralianTimeZoneDataPack,
   CivilTimeDecisionUnavailableError,
   decideLivingDossier,
   getAustralianZone,
@@ -7,11 +6,10 @@ import {
   type LivingDossierPhase,
   type LocalDateTime,
 } from '@daylight-saviour/domain';
-import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
+import type { ActivatedTimeZoneDataPack } from '@daylight-saviour/contracts';
 
-const activatedAustralianPack = activateAustralianTimeZoneDataPack(
-  bundledAustralianDataPack,
-);
+import type { TimeZoneDataPackFreshness } from '../time-zone-data/time-zone-data-manager';
+
 const months = [
   'January',
   'February',
@@ -124,11 +122,6 @@ const phasePresentation: Record<
   },
 };
 
-const packDetails = {
-  packVersion: activatedAustralianPack.packVersion,
-  validUntil: activatedAustralianPack.coverage.validUntil,
-} as const;
-
 export type StatusViewModel =
   | {
       readonly availability: 'ready';
@@ -147,7 +140,7 @@ export type StatusViewModel =
         readonly wallTimeChange: string;
       } | null;
       readonly friendlyZoneLabel: string;
-      readonly freshness: 'current';
+      readonly freshness: TimeZoneDataPackFreshness;
       readonly packVersion: string;
       readonly phase: LivingDossierPhase;
       readonly phaseLabel: string;
@@ -168,13 +161,19 @@ export type StatusViewModel =
     };
 
 export function createStatusViewModel(
+  activePack: ActivatedTimeZoneDataPack,
+  dataFreshness: TimeZoneDataPackFreshness,
   zoneId: string,
   now: Date,
   uses24hourClock = false,
   acknowledgedEventAt: string | null = null,
 ): StatusViewModel {
+  const packDetails = {
+    packVersion: activePack.packVersion,
+    validUntil: activePack.coverage.validUntil,
+  } as const;
   try {
-    const dossier = decideLivingDossier(activatedAustralianPack, zoneId, now, {
+    const dossier = decideLivingDossier(activePack, zoneId, now, {
       acknowledgedEventAt,
     });
     const decision = dossier.civilTime;
@@ -206,7 +205,7 @@ export function createStatusViewModel(
               wallTimeChange: `${formatTime(event.localBefore, uses24hourClock)} → ${formatTime(event.localAfter, uses24hourClock)}`,
             },
       friendlyZoneLabel: decision.friendlyZoneLabel,
-      freshness: 'current',
+      freshness: dataFreshness,
       ...packDetails,
       phase: dossier.phase,
       phaseLabel: presentation.label,

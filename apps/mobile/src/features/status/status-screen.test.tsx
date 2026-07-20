@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import type { ComponentProps } from 'react';
 import * as ReactNative from 'react-native';
 import {
   activateAustralianTimeZoneDataPack,
@@ -8,7 +9,25 @@ import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
 import { daylightSaviourPalettes } from '../../theme';
 import { createStatusViewModel } from './status-view-model';
-import StatusScreen from './status-screen';
+import RawStatusScreen from './status-screen';
+
+const activatedBundledPack = activateAustralianTimeZoneDataPack(
+  bundledAustralianDataPack,
+);
+const bundledSnapshot = {
+  freshness: 'current',
+  lastCheckedAt: null,
+  lastError: null,
+  pack: activatedBundledPack,
+  remoteEnabled: false,
+  source: 'bundled',
+} as const;
+
+function StatusScreen(
+  props: Omit<ComponentProps<typeof RawStatusScreen>, 'dataPackSnapshot'>,
+) {
+  return <RawStatusScreen dataPackSnapshot={bundledSnapshot} {...props} />;
+}
 
 const initialWindowDimensions = ReactNative.Dimensions.get('window');
 const initialScreenDimensions = ReactNative.Dimensions.get('screen');
@@ -165,7 +184,12 @@ describe('StatusScreen', () => {
   it('agrees with domain-derived app output and uses bundled data offline', () => {
     const fetchSpy = jest.spyOn(globalThis, 'fetch');
     const now = new Date('2026-07-19T00:00:00.000Z');
-    const viewModel = createStatusViewModel('Australia/Sydney', now);
+    const viewModel = createStatusViewModel(
+      activatedBundledPack,
+      'current',
+      'Australia/Sydney',
+      now,
+    );
     const domainDecision = decideCivilTime(
       activateAustralianTimeZoneDataPack(bundledAustralianDataPack),
       'Australia/Sydney',
@@ -238,6 +262,79 @@ describe('StatusScreen', () => {
     expect(screen.getByTestId('expired-dossier')).toBeTruthy();
     expect(screen.queryByTestId('no-event-dossier')).toBeNull();
     expect(screen.getByLabelText(/validity expired/)).toBeTruthy();
+  });
+
+  it.each([
+    ['checking', 'Checking for verified data…'],
+    ['stale-valid', 'Verified data due for refresh'],
+    ['offline-valid', 'Offline · verified data remains valid'],
+    ['retry-failed', 'Refresh failed · verified data remains active'],
+  ] as const)(
+    'renders %s freshness without hiding valid facts',
+    (freshness, text) => {
+      render(
+        <RawStatusScreen
+          dataPackSnapshot={{
+            ...bundledSnapshot,
+            freshness,
+            remoteEnabled: true,
+          }}
+          now={new Date('2026-07-19T00:00:00.000Z')}
+          reducedMotion
+        />,
+      );
+
+      expect(screen.getByText(text)).toBeTruthy();
+      expect(
+        screen.getByRole('header', { name: 'Standard time applies' }),
+      ).toBeTruthy();
+    },
+  );
+
+  it('keeps manual retry focusable beside freshness facts', () => {
+    const retry = jest.fn();
+    render(
+      <RawStatusScreen
+        dataPackSnapshot={{
+          ...bundledSnapshot,
+          freshness: 'retry-failed',
+          remoteEnabled: true,
+        }}
+        now={new Date('2026-07-19T00:00:00.000Z')}
+        onRetryDataPack={retry}
+        reducedMotion
+      />,
+    );
+
+    const facts = screen.getByLabelText(/Time-Zone Data Pack .*refresh failed/);
+    const button = screen.getByRole('button', {
+      name: 'Retry Time-Zone Data Pack refresh',
+    });
+    expect(facts).toBeTruthy();
+    expect(button).toBeTruthy();
+    fireEvent.press(button);
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits inert retry control when remote refresh is unconfigured', () => {
+    render(
+      <RawStatusScreen
+        dataPackSnapshot={{
+          ...bundledSnapshot,
+          freshness: 'current',
+          remoteEnabled: false,
+        }}
+        now={new Date('2026-07-19T00:00:00.000Z')}
+        onRetryDataPack={jest.fn()}
+        reducedMotion
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', {
+        name: 'Retry Time-Zone Data Pack refresh',
+      }),
+    ).toBeNull();
   });
 
   it('does not misreport non-expiry decision failures as expired data', () => {

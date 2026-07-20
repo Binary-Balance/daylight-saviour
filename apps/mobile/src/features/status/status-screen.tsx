@@ -17,12 +17,15 @@ import type { ChangeDirection } from '@daylight-saviour/domain';
 import { daylightSaviourPalettes } from '../../theme';
 import { createDossierMotionRecipe } from './dossier-motion';
 import { createStatusViewModel } from './status-view-model';
+import type { TimeZoneDataPackSnapshot } from '../time-zone-data/time-zone-data-manager';
 
 interface StatusScreenProps {
   readonly acknowledgedEventAt?: string | null;
+  readonly dataPackSnapshot: TimeZoneDataPackSnapshot;
   readonly now?: Date;
   readonly onAcknowledgeAftermath?: (eventAt: string) => void;
   readonly onChooseZone?: () => void;
+  readonly onRetryDataPack?: () => void | Promise<void>;
   readonly reducedMotion?: boolean;
   readonly uses24hourClock?: boolean;
   readonly zoneId?: string;
@@ -178,9 +181,11 @@ function SemanticEventMotion({
 
 export default function StatusScreen({
   acknowledgedEventAt = null,
+  dataPackSnapshot,
   now,
   onAcknowledgeAftermath,
   onChooseZone,
+  onRetryDataPack,
   reducedMotion: reducedMotionOverride,
   uses24hourClock = false,
   zoneId = 'Australia/Sydney',
@@ -193,6 +198,8 @@ export default function StatusScreen({
   const { width } = useWindowDimensions();
   const clockSize = Math.min(104, Math.max(72, (width - 48) * 0.25));
   const viewModel = createStatusViewModel(
+    dataPackSnapshot.pack,
+    dataPackSnapshot.freshness,
     zoneId,
     currentInstant,
     uses24hourClock,
@@ -209,12 +216,26 @@ export default function StatusScreen({
     viewModel.availability === 'ready' && viewModel.phase === 'aftermath'
       ? (viewModel.event?.instant ?? null)
       : null;
+  const freshnessText =
+    viewModel.freshness === 'checking'
+      ? 'Checking for verified data…'
+      : viewModel.freshness === 'current'
+        ? dataPackSnapshot.source === 'bundled'
+          ? 'Bundled data current'
+          : 'Verified data current'
+        : viewModel.freshness === 'stale-valid'
+          ? 'Verified data due for refresh'
+          : viewModel.freshness === 'offline-valid'
+            ? 'Offline · verified data remains valid'
+            : viewModel.freshness === 'retry-failed'
+              ? 'Refresh failed · verified data remains active'
+              : viewModel.freshness === 'expired'
+                ? 'Validity Horizon passed · refresh required'
+                : 'Freshness not determined · decision unavailable';
   const freshnessDescription =
-    viewModel.freshness === 'current'
-      ? 'bundled data current'
-      : viewModel.freshness === 'expired'
-        ? 'validity expired'
-        : 'freshness not determined, civil-time decision unavailable';
+    viewModel.freshness === 'expired'
+      ? 'validity expired, refresh required'
+      : freshnessText.toLocaleLowerCase('en-AU');
 
   useEffect(() => {
     if (
@@ -537,24 +558,39 @@ export default function StatusScreen({
           </View>
         )}
 
-        <View
-          accessible
-          accessibilityLabel={`Time-Zone Data Pack ${viewModel.packVersion}, ${freshnessDescription}, valid until ${viewModel.validUntil}`}
-          style={[styles.footer, { borderTopColor: palette.rule }]}
-        >
-          <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
-            DATA FRESHNESS
-          </Text>
-          <Text style={[styles.body, { color: palette.ink }]}>
-            {viewModel.freshness === 'expired'
-              ? 'Validity Horizon passed'
-              : viewModel.freshness === 'decision-unavailable'
-                ? 'Freshness not determined · decision unavailable'
-                : 'Bundled data current'}
-          </Text>
-          <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
-            Pack {viewModel.packVersion} · Valid through {viewModel.validUntil}
-          </Text>
+        <View style={[styles.footer, { borderTopColor: palette.rule }]}>
+          <View
+            accessible
+            accessibilityLabel={`Time-Zone Data Pack ${viewModel.packVersion}, ${freshnessDescription}, valid until ${viewModel.validUntil}`}
+          >
+            <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
+              DATA FRESHNESS
+            </Text>
+            <Text style={[styles.body, { color: palette.ink }]}>
+              {freshnessText}
+            </Text>
+            <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
+              Pack {viewModel.packVersion} · Valid through{' '}
+              {viewModel.validUntil}
+            </Text>
+          </View>
+          {onRetryDataPack === undefined ||
+          !dataPackSnapshot.remoteEnabled ? null : (
+            <Pressable
+              accessibilityHint="Checks for a newer verified Time-Zone Data Pack"
+              accessibilityLabel="Retry Time-Zone Data Pack refresh"
+              accessibilityRole="button"
+              disabled={viewModel.freshness === 'checking'}
+              onPress={() => void onRetryDataPack()}
+              style={[styles.retryButton, { borderColor: palette.rule }]}
+            >
+              <Text style={[styles.buttonText, { color: palette.ink }]}>
+                {viewModel.freshness === 'checking'
+                  ? 'CHECKING…'
+                  : 'CHECK FOR VERIFIED DATA'}
+              </Text>
+            </Pressable>
+          )}
         </View>
 
         <Pressable
@@ -638,6 +674,11 @@ const styles = StyleSheet.create({
   body: {
     fontSize: 17,
     lineHeight: 25,
+  },
+  buttonText: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.8,
   },
   clock: {
     fontVariant: ['tabular-nums'],
@@ -752,6 +793,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.1,
     lineHeight: 18,
+  },
+  retryButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   modalBackdrop: {
     backgroundColor: 'rgba(8, 20, 38, 0.72)',
