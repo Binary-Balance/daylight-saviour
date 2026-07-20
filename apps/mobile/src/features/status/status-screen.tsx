@@ -198,6 +198,11 @@ export default function StatusScreen({
     uses24hourClock,
     openingAcknowledgedEventAt,
   );
+  const [clockValue, clockMeridiem = null] = uses24hourClock
+    ? [viewModel.availability === 'ready' ? viewModel.clock : '', null]
+    : viewModel.availability === 'ready'
+      ? viewModel.clock.split(' ')
+      : ['', null];
   const [settingsOpen, setSettingsOpen] = useState(false);
   const acknowledgedDuringOpening = useRef<string | null>(null);
   const aftermathEventAt =
@@ -281,19 +286,44 @@ export default function StatusScreen({
                 accessibilityLiveRegion="none"
                 accessible
               >
-                <Text
+                <View
                   accessible={false}
-                  style={[
-                    styles.clock,
-                    {
-                      color: palette.ink,
-                      fontSize: clockSize,
-                      lineHeight: clockSize * 1.05,
-                    },
-                  ]}
+                  style={styles.clockLine}
+                  testID="clock-line"
                 >
-                  {viewModel.clock}
-                </Text>
+                  <Text
+                    accessible={false}
+                    maxFontSizeMultiplier={1.2}
+                    style={[
+                      styles.clock,
+                      {
+                        color: palette.ink,
+                        fontSize: clockSize,
+                        lineHeight: clockSize * 1.05,
+                      },
+                    ]}
+                    testID="clock-value"
+                  >
+                    {clockValue}
+                  </Text>
+                  {clockMeridiem === null ? null : (
+                    <Text
+                      accessible={false}
+                      maxFontSizeMultiplier={1.2}
+                      style={[
+                        styles.clockMeridiem,
+                        {
+                          color: palette.ink,
+                          fontSize: clockSize * 0.3,
+                          lineHeight: clockSize * 0.42,
+                        },
+                      ]}
+                      testID="clock-meridiem"
+                    >
+                      {clockMeridiem}
+                    </Text>
+                  )}
+                </View>
                 <Text
                   accessible={false}
                   style={[styles.identifier, { color: palette.secondaryInk }]}
@@ -613,6 +643,16 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     fontWeight: '900',
     letterSpacing: -4,
+  },
+  clockLine: {
+    alignItems: 'baseline',
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 8,
+  },
+  clockMeridiem: {
+    fontWeight: '800',
   },
   closeButton: {
     alignItems: 'center',

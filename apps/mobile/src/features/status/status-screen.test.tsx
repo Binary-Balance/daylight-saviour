@@ -10,6 +10,9 @@ import { daylightSaviourPalettes } from '../../theme';
 import { createStatusViewModel } from './status-view-model';
 import StatusScreen from './status-screen';
 
+const initialWindowDimensions = ReactNative.Dimensions.get('window');
+const initialScreenDimensions = ReactNative.Dimensions.get('screen');
+
 type RenderNode = {
   readonly children?: readonly (RenderNode | string)[];
   readonly props?: {
@@ -43,6 +46,12 @@ function explicitAccessibilityOrder(node: RenderNode | string | null) {
 
 describe('StatusScreen', () => {
   afterEach(() => {
+    act(() => {
+      ReactNative.Dimensions.set({
+        screen: initialScreenDimensions,
+        window: initialWindowDimensions,
+      });
+    });
     jest.restoreAllMocks();
     jest.useRealTimers();
   });
@@ -81,21 +90,75 @@ describe('StatusScreen', () => {
   );
 
   it.each([
-    [false, '2:59 am', '3:00 am → 2:00 am'],
-    [true, '02:59', '03:00 → 02:00'],
+    ['light', 430, false, '10:17', 'pm', '2:00 am → 3:00 am', 95.5],
+    ['light', 430, true, '22:17', null, '02:00 → 03:00', 95.5],
+    ['dark', 430, false, '10:17', 'pm', '2:00 am → 3:00 am', 95.5],
+    ['dark', 430, true, '22:17', null, '02:00 → 03:00', 95.5],
+    ['light', 320, false, '10:17', 'pm', '2:00 am → 3:00 am', 72],
+    ['light', 320, true, '22:17', null, '02:00 → 03:00', 72],
+    ['dark', 320, false, '10:17', 'pm', '2:00 am → 3:00 am', 72],
+    ['dark', 320, true, '22:17', null, '02:00 → 03:00', 72],
   ] as const)(
-    'formats current and event times for uses24hourClock=%s',
-    (uses24hourClock, expectedClock, expectedChange) => {
+    'keeps %s %ipx %s-hour clock as one responsive unit',
+    (
+      appearance,
+      width,
+      uses24hourClock,
+      expectedClock,
+      expectedMeridiem,
+      expectedEventChange,
+      expectedClockSize,
+    ) => {
+      jest.spyOn(ReactNative, 'useColorScheme').mockReturnValue(appearance);
+      ReactNative.Dimensions.set({
+        screen: { fontScale: 1, height: 789, scale: 1, width },
+        window: { fontScale: 1, height: 789, scale: 1, width },
+      });
+
       render(
         <StatusScreen
-          now={new Date('2026-04-04T15:59:59.000Z')}
+          now={new Date('2026-07-19T12:17:00.000Z')}
           reducedMotion
           uses24hourClock={uses24hourClock}
         />,
       );
 
-      expect(screen.getByText(expectedClock)).toBeTruthy();
-      expect(screen.getByText(expectedChange)).toBeTruthy();
+      const clockLineStyle = ReactNative.StyleSheet.flatten(
+        screen.getByTestId('clock-line').props.style,
+      );
+      const clock = screen.getByTestId('clock-value');
+      const clockStyle = ReactNative.StyleSheet.flatten(clock.props.style);
+      expect(clockLineStyle).toMatchObject({
+        alignItems: 'baseline',
+        flexDirection: 'row',
+        flexWrap: 'nowrap',
+      });
+      expect(clock.props.children).toBe(expectedClock);
+      expect(clock.props.maxFontSizeMultiplier).toBe(1.2);
+      expect(clockStyle.fontSize).toBe(expectedClockSize);
+      expect(clockStyle.color).toBe(daylightSaviourPalettes[appearance].ink);
+      expect(screen.getByText(expectedEventChange)).toBeTruthy();
+
+      if (expectedMeridiem === null) {
+        expect(screen.queryByTestId('clock-meridiem')).toBeNull();
+      } else {
+        const meridiem = screen.getByTestId('clock-meridiem');
+        expect(meridiem.props.children).toBe(expectedMeridiem);
+        expect(meridiem.props.maxFontSizeMultiplier).toBe(1.2);
+        expect(
+          ReactNative.StyleSheet.flatten(meridiem.props.style),
+        ).toMatchObject({
+          color: daylightSaviourPalettes[appearance].ink,
+          fontSize: expectedClockSize * 0.3,
+        });
+      }
+
+      const accessibleClock = uses24hourClock ? '22:17' : '10:17 pm';
+      expect(
+        screen.getByLabelText(
+          `Home Time Zone current time, ${accessibleClock}, AEST, UTC+10:00`,
+        ),
+      ).toBeTruthy();
     },
   );
 

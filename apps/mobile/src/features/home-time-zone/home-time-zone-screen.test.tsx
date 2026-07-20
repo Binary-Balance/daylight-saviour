@@ -160,12 +160,13 @@ describe('HomeTimeZoneScreen', () => {
       fireEvent.press(
         screen.getByRole('button', { name: 'Use this Home Time Zone' }),
       );
-      expect(await screen.findByText(expectedClock)).toBeTruthy();
+      const clockLabel = `Home Time Zone current time, ${expectedClock}, AEST, UTC+10:00`;
+      expect(await screen.findByLabelText(clockLabel)).toBeTruthy();
 
       first.unmount();
       render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
 
-      expect(await screen.findByText(expectedClock)).toBeTruthy();
+      expect(await screen.findByLabelText(clockLabel)).toBeTruthy();
       expect(adapters.localization.read).toHaveBeenCalledTimes(2);
     },
   );
