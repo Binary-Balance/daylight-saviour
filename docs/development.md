@@ -148,7 +148,7 @@ npm run web --workspace @daylight-saviour/mobile -- --port 8087 --localhost
 Use `http://localhost:8087` for automation. On this Linux workbench, Expo has
 been observed listening on IPv6 localhost while `127.0.0.1` did not connect.
 The following disposable example opens the same-origin page before seeding the
-persisted Home Time Zone, refreshes into the dossier, waits for semantic UI
+persisted Home Time Zone, refreshes into the Civil Time Report, waits for semantic UI
 content, and captures a mobile-sized screenshot:
 
 ```sh

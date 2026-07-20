@@ -11,7 +11,7 @@ The package exports one immutable value, `australianEnglish`. Mobile code
 imports it as `copy`. Its stable semantic paths follow user concepts:
 
 - `copy.homeTimeZone`
-- `copy.livingDossier`
+- `copy.civilTimeReport`
 - `copy.dataFreshness`
 - `copy.settings`
 
@@ -43,7 +43,7 @@ never passed to a rendered copy function.
 ## Deterministic secondary copy
 
 Secondary selection receives an opaque installation seed, Home Time Zone local
-date, canonical zone ID, Daylight Saving Status, Living Dossier phase, and
+date, canonical zone ID, Daylight Saving Status, Civil Time Report phase, and
 optional Change Event identity. Ordinary and no-event pools contain at least 30
 broad-status variants plus eligible regional supplements. Cycling by Home Time
 Zone date guarantees no repetition during 30 consecutive ordinary days while

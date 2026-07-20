@@ -13,11 +13,11 @@ Use one safe-area-aware column on an 8-point grid with roughly 20–24 logical p
 1. **Utility header:** small `DAYLIGHT SAVIOUR` document label, subtle rule/reference mark, and accessible settings control.
 2. **Home Time Zone:** full-width control showing friendly geography first and IANA identifier as metadata.
 3. **Status hero:** large Home Time Zone clock without seconds, literal Daylight Saving Status, restrained fictional stamp, then one humorous line.
-4. **Change Event dossier:** unambiguous date, local-time transformation, direction word and arrow, UTC offset equation, explicit offset amount, countdown, and Home Time Zone qualifier.
+4. **Change Event section:** unambiguous date, local-time transformation, direction word and arrow, UTC offset equation, explicit offset amount, countdown, and Home Time Zone qualifier.
 5. **Change Reminders:** compact state card showing both timing preferences or contextual opt-in action.
 6. **Freshness footer:** plain verified/checking/stale state opening pack details and manual retry.
 
-No-event zones receive an intentional dossier stating that no Change Event is scheduled within current verified data. Never show an empty countdown. Expired data replaces affected claims with a prominent refresh-required state rather than claiming no event exists.
+No-event zones receive an intentional Change Event record stating that no event is scheduled within current verified data. Never show an empty countdown. Expired data replaces affected claims with a prominent refresh-required state rather than claiming no event exists.
 
 Reminder controls remain available in no-event zones. Explain: “No change scheduled. Keep reminders on and we’ll warn you if that changes.” Enabled subscriptions remain visibly dormant rather than appearing broken or pending.
 
@@ -79,7 +79,7 @@ Errors remain literal and preserve last known-good facts. Each offers one clear 
 
 ## Ethical Engagement
 
-Treat the screen as a Living Dossier whose hierarchy, copy, and one-shot motion change only when civil time meaningfully changes. This is internal design shorthand for the single structured report, never user-facing terminology.
+Treat the screen as a Civil Time Report whose hierarchy, copy, and one-shot motion change only when civil time meaningfully changes.
 
 - **Ordinary:** more than 28 days before Change Event.
 - **Approaching:** 28 days through 7 days before.
@@ -87,7 +87,7 @@ Treat the screen as a Living Dossier whose hierarchy, copy, and one-shot motion 
 - **Reminder Day:** final 24 hours.
 - **Event instant:** facts replace atomically; play one semantic animation only if app is open.
 - **Aftermath:** first opening within 48 hours briefly confirms what changed.
-- **New Event:** normal dossier resumes after 48 hours.
+- **New Event:** normal report resumes after 48 hours.
 
 No persistent “underway” phase exists because Change Event is instantaneous.
 
@@ -110,4 +110,4 @@ Focus order follows zone, status, event, countdown, reminders, freshness, settin
 - After pack validity expiry, retain zone name, reminder configuration, pack details, and retry controls; suppress all potentially wrong civil-time facts and omit humour until recovery.
 - Engagement follows genuine event phases. Ordinary humour changes once per Home Time Zone day; no habit mechanics or promotional notifications are used.
 - Zone selection uses reviewed geographic labels as primary text, canonical IANA identifiers as secondary text, and separate mainland/state versus island/territory groups.
-- Living Dossier phases use fixed 28-day, 7-day, 24-hour, event-instant, and 48-hour boundaries; Change Event itself has no durable underway state.
+- Civil Time Report phases use fixed 28-day, 7-day, 24-hour, event-instant, and 48-hour boundaries; Change Event itself has no durable underway state.

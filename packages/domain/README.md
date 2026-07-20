@@ -16,7 +16,7 @@ result, and activate packs with `activateAustralianTimeZoneDataPack` before
 calculation. Unsupported identifiers return `null`; offset similarity never
 selects a zone.
 
-`decideLivingDossier` derives presentation phase and featured transition from
+`createCivilTimeReport` derives presentation phase and featured transition from
 an activated pack. Upcoming events are Ordinary beyond 28 days, Approaching at
 28 days through more than 7 days, Reminder Week at 7 days through more than 24
 hours, and Reminder Day at 24 hours through the final positive instant. The

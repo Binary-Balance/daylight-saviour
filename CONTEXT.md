@@ -58,6 +58,6 @@ _Avoid_: Retry window, notification window
 The absolute elapsed duration from now until a Change Event, calculated between UTC instants and displayed using its largest two useful units.
 _Avoid_: Calendar countdown, wall-clock difference
 
-**Living Dossier**:
-Internal design term for the single structured home report whose hierarchy, reviewed copy, and semantic motion respond to genuine Change Event phases.
-_Avoid in user-facing copy_: Dossier, dashboard mode, feed
+**Civil Time Report**:
+The app's main structured home/status report, presenting Home Time Zone facts, current time, Daylight Saving Status, relevant Change Event details, Countdown, and data freshness. Its structure, reviewed copy, and semantic motion respond to genuine Change Event phases.
+_Avoid_: Dashboard, feed, metaphorical internal names

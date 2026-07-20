@@ -31,7 +31,7 @@ describe('Australian-English copy catalogue', () => {
     assert.deepEqual(Object.keys(copyModule), ['australianEnglish']);
     assert.equal(Object.isFrozen(australianEnglish), true);
     assert.equal(Object.isFrozen(australianEnglish.homeTimeZone), true);
-    assert.equal(Object.isFrozen(australianEnglish.livingDossier), true);
+    assert.equal(Object.isFrozen(australianEnglish.civilTimeReport), true);
     assert.equal(Object.isFrozen(australianEnglish.dataFreshness), true);
     assert.equal(Object.isFrozen(australianEnglish.settings), true);
     assert.equal('notifications' in australianEnglish, false);
@@ -66,7 +66,7 @@ describe('Australian-English copy catalogue', () => {
   });
 
   it('formats Home Time Zone dates and times without ambient locale or zone', () => {
-    const { changeEvent, clock } = australianEnglish.livingDossier;
+    const { changeEvent, clock } = australianEnglish.civilTimeReport;
     const midnight = { day: 5, hour: 0, minute: 4, month: 4, year: 2026 };
     const midday = { ...midnight, hour: 12 };
     const evening = { ...midnight, hour: 22, minute: 17 };
@@ -111,7 +111,7 @@ describe('Australian-English copy catalogue', () => {
   });
 
   it('owns duration pluralisation, punctuation, and complete relative wording', () => {
-    const { accessibility, changeEvent } = australianEnglish.livingDossier;
+    const { accessibility, changeEvent } = australianEnglish.civilTimeReport;
     assert.equal(changeEvent.countdown(1), 'In 1 second');
     assert.equal(changeEvent.countdown(61), 'In 1 minute, 1 second');
     assert.equal(changeEvent.countdown(90_061), 'In 1 day, 1 hour');
@@ -128,7 +128,7 @@ describe('Australian-English copy catalogue', () => {
   });
 
   it('maps every known unavailable reason and unknown runtime values safely', () => {
-    const decision = australianEnglish.livingDossier.decisionUnavailable;
+    const decision = australianEnglish.civilTimeReport.decisionUnavailable;
     const expected = {
       'before-coverage':
         'The selected instant precedes this Time-Zone Data Pack coverage.',
@@ -219,7 +219,7 @@ describe('Australian-English copy catalogue', () => {
   });
 
   it('contains 152 unique reviewed secondary variants at required counts', () => {
-    const { catalogue } = australianEnglish.livingDossier.secondary;
+    const { catalogue } = australianEnglish.civilTimeReport.secondary;
     const broadCounts = Object.fromEntries(
       Object.entries(catalogue.broad).map(([name, variants]) => [
         name,
@@ -261,7 +261,7 @@ describe('Australian-English copy catalogue', () => {
   });
 
   it('selects deterministically and avoids repetition across 30 ordinary days', () => {
-    const select = australianEnglish.livingDossier.secondary.select;
+    const select = australianEnglish.civilTimeReport.secondary.select;
     assert.equal(select(ordinaryInput), select(structuredClone(ordinaryInput)));
     assert.equal(
       select(ordinaryInput),
@@ -275,7 +275,7 @@ describe('Australian-English copy catalogue', () => {
   });
 
   it('applies regional eligibility and keeps event copy stable for its phase', () => {
-    const { catalogue, select } = australianEnglish.livingDossier.secondary;
+    const { catalogue, select } = australianEnglish.civilTimeReport.secondary;
     const lordHoweLine = select({
       ...ordinaryInput,
       localDate: localDate(7),

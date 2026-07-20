@@ -34,7 +34,7 @@ These zones may still enable Change Reminders. Their subscription remains dorman
 
 Countdowns measure absolute elapsed time between UTC instants, never subtraction between local wall-clock fields. They show the largest two useful units, including the hour removed or repeated by a Change Event; the exact local event date and time remain visible beside them.
 
-The single screen behaves as a Living Dossier rather than a static annual lookup. This internal design term means one structured report whose hierarchy, reviewed copy, and one-shot semantic motion respond to genuine civil-time state; it is not user-facing language, a feed, or a collection of screens.
+The single screen presents a Civil Time Report rather than a static annual lookup. This structured report's hierarchy, reviewed copy, and one-shot semantic motion respond to genuine civil-time state; it is not a feed or a collection of screens.
 
 Phases are deterministic: Ordinary more than 28 days before an event; Approaching from 28 days through 7 days; Reminder Week from 7 days through 24 hours; Reminder Day during the final 24 hours; atomic status replacement at the event instant; Aftermath on the first opening within 48 hours; then New Event. A Change Event is instantaneous, so no persistent “underway” state exists. No artificial milestone, unread state, or invented urgency is added.
 

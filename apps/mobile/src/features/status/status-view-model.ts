@@ -1,11 +1,11 @@
 import {
   CivilTimeDecisionUnavailableError,
-  decideLivingDossier,
+  createCivilTimeReport,
   getAustralianZone,
   type ChangeDirection,
   type CivilTimeDecisionUnavailableReason,
   type DaylightSavingStatus,
-  type LivingDossierPhase,
+  type CivilTimeReportPhase,
 } from '@daylight-saviour/domain';
 import type { ActivatedTimeZoneDataPack } from '@daylight-saviour/contracts';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
@@ -33,7 +33,7 @@ export type StatusViewModel =
       readonly friendlyZoneLabel: string;
       readonly freshness: TimeZoneDataPackFreshness;
       readonly packVersion: string;
-      readonly phase: LivingDossierPhase;
+      readonly phase: CivilTimeReportPhase;
       readonly phaseLabel: string;
       readonly secondaryLine: string;
       readonly status: DaylightSavingStatus;
@@ -65,12 +65,12 @@ export function createStatusViewModel(
     validUntil: activePack.coverage.validUntil,
   } as const;
   try {
-    const dossier = decideLivingDossier(activePack, zoneId, now, {
+    const report = createCivilTimeReport(activePack, zoneId, now, {
       acknowledgedEventAt,
     });
-    const decision = dossier.civilTime;
-    const event = dossier.featuredEvent;
-    const completed = dossier.phase === 'aftermath';
+    const decision = report.civilTime;
+    const event = report.featuredEvent;
+    const completed = report.phase === 'aftermath';
     const hourCycleContext = {
       homeTimeZone: decision.zoneId,
       uses24hourClock,
@@ -79,11 +79,11 @@ export function createStatusViewModel(
     return {
       availability: 'ready',
       abbreviation: decision.abbreviation,
-      clock: copy.livingDossier.clock.format({
+      clock: copy.civilTimeReport.clock.format({
         context: hourCycleContext,
         localDateTime: decision.localDateTime,
       }),
-      currentOffset: copy.livingDossier.clock.utcOffset(
+      currentOffset: copy.civilTimeReport.clock.utcOffset(
         decision.utcOffsetSeconds,
       ),
       event:
@@ -92,27 +92,29 @@ export function createStatusViewModel(
           : {
               countdown: completed
                 ? null
-                : copy.livingDossier.changeEvent.countdown(event.secondsUntil),
-              countdownAccessibilityLabel: completed
-                ? null
-                : copy.livingDossier.accessibility.countdown(
+                : copy.civilTimeReport.changeEvent.countdown(
                     event.secondsUntil,
                   ),
-              date: copy.livingDossier.changeEvent.date(event.localAfter),
+              countdownAccessibilityLabel: completed
+                ? null
+                : copy.civilTimeReport.accessibility.countdown(
+                    event.secondsUntil,
+                  ),
+              date: copy.civilTimeReport.changeEvent.date(event.localAfter),
               direction: event.direction,
               elapsed: completed
-                ? copy.livingDossier.changeEvent.elapsed(event.secondsUntil)
+                ? copy.civilTimeReport.changeEvent.elapsed(event.secondsUntil)
                 : null,
               instant: event.at,
-              clockMovement: copy.livingDossier.changeEvent.clocksMove(
+              clockMovement: copy.civilTimeReport.changeEvent.clocksMove(
                 event.offsetDeltaSeconds,
               ),
-              offsetChange: copy.livingDossier.changeEvent.offsetChange({
+              offsetChange: copy.civilTimeReport.changeEvent.offsetChange({
                 afterSeconds: event.offsetAfterSeconds,
                 beforeSeconds: event.offsetBeforeSeconds,
               }),
               relation: completed ? 'completed' : 'upcoming',
-              wallTimeChange: copy.livingDossier.changeEvent.localTimeChange({
+              wallTimeChange: copy.civilTimeReport.changeEvent.localTimeChange({
                 after: event.localAfter,
                 before: event.localBefore,
                 context: hourCycleContext,
@@ -121,16 +123,16 @@ export function createStatusViewModel(
       friendlyZoneLabel: decision.friendlyZoneLabel,
       freshness: dataFreshness,
       ...packDetails,
-      phase: dossier.phase,
-      phaseLabel: copy.livingDossier.phaseLabel(dossier.phase),
-      secondaryLine: copy.livingDossier.secondary.select({
+      phase: report.phase,
+      phaseLabel: copy.civilTimeReport.phaseLabel(report.phase),
+      secondaryLine: copy.civilTimeReport.secondary.select({
         event:
           event === null
             ? null
             : { direction: event.direction, instant: event.at },
         installationSeed,
         localDate: decision.localDateTime,
-        phase: dossier.phase,
+        phase: report.phase,
         status: decision.daylightSavingStatus,
         zoneId: decision.zoneId,
       }),
@@ -157,9 +159,9 @@ export function createStatusViewModel(
       availability: 'unavailable',
       friendlyZoneLabel:
         getAustralianZone(zoneId)?.friendlyLabel ??
-        copy.livingDossier.decisionUnavailable.fallbackZoneLabel,
+        copy.civilTimeReport.decisionUnavailable.fallbackZoneLabel,
       freshness,
-      message: copy.livingDossier.decisionUnavailable.message(error.reason),
+      message: copy.civilTimeReport.decisionUnavailable.message(error.reason),
       ...packDetails,
       unavailabilityReason: error.reason,
       zoneId,

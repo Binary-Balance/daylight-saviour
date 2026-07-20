@@ -1,6 +1,6 @@
 import type { ChangeDirection } from '@daylight-saviour/domain';
 
-export interface DossierMotionRecipe {
+export interface CivilTimeReportMotionRecipe {
   readonly decorativeEcho: boolean;
   readonly durationMs: number;
   readonly kind: 'advance-grid-skip' | 'reverse-fading-echo' | 'short-fade';
@@ -8,10 +8,10 @@ export interface DossierMotionRecipe {
   readonly travel: number;
 }
 
-export function createDossierMotionRecipe(
+export function createCivilTimeReportMotionRecipe(
   direction: ChangeDirection,
   reducedMotion: boolean,
-): DossierMotionRecipe {
+): CivilTimeReportMotionRecipe {
   if (reducedMotion) {
     return {
       decorativeEcho: false,

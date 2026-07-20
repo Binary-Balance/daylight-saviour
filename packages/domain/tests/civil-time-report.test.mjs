@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 
 import {
   activateAustralianTimeZoneDataPack,
-  decideLivingDossier,
+  createCivilTimeReport,
 } from '../src/index.ts';
 
 const packJson = JSON.parse(
@@ -21,7 +21,7 @@ const eventMs = Date.parse('2026-10-03T16:00:00.000Z');
 const atSecondsBefore = (seconds) => new Date(eventMs - seconds * 1_000);
 const atSecondsAfter = (seconds) => new Date(eventMs + seconds * 1_000);
 
-describe('decideLivingDossier', () => {
+describe('createCivilTimeReport', () => {
   for (const [description, secondsBefore, expected] of [
     ['ordinary beyond 28 days', 28 * 86_400 + 1, 'ordinary'],
     ['approaching at exactly 28 days', 28 * 86_400, 'approaching'],
@@ -33,7 +33,7 @@ describe('decideLivingDossier', () => {
   ]) {
     it(description, () => {
       assert.equal(
-        decideLivingDossier(
+        createCivilTimeReport(
           pack,
           'Australia/Sydney',
           atSecondsBefore(secondsBefore),
@@ -44,12 +44,12 @@ describe('decideLivingDossier', () => {
   }
 
   it('replaces facts atomically and begins aftermath at the event instant', () => {
-    const before = decideLivingDossier(
+    const before = createCivilTimeReport(
       pack,
       'Australia/Sydney',
       atSecondsBefore(0.001),
     );
-    const exact = decideLivingDossier(
+    const exact = createCivilTimeReport(
       pack,
       'Australia/Sydney',
       atSecondsAfter(0),
@@ -72,14 +72,18 @@ describe('decideLivingDossier', () => {
 
   it('shows aftermath only for the first unacknowledged opening', () => {
     const instant = atSecondsAfter(3_600);
-    const firstOpening = decideLivingDossier(pack, 'Australia/Sydney', instant);
-    const repeatOpening = decideLivingDossier(
+    const firstOpening = createCivilTimeReport(
+      pack,
+      'Australia/Sydney',
+      instant,
+    );
+    const repeatOpening = createCivilTimeReport(
       pack,
       'Australia/Sydney',
       instant,
       { acknowledgedEventAt: '2026-10-03T16:00:00.000Z' },
     );
-    const staleAcknowledgement = decideLivingDossier(
+    const staleAcknowledgement = createCivilTimeReport(
       pack,
       'Australia/Sydney',
       instant,
@@ -93,9 +97,9 @@ describe('decideLivingDossier', () => {
     assert.equal(staleAcknowledgement.phase, 'aftermath');
   });
 
-  it('keeps aftermath inside 48 hours and resumes normal dossier at 48 hours', () => {
+  it('keeps aftermath inside 48 hours and resumes normal report at 48 hours', () => {
     assert.equal(
-      decideLivingDossier(
+      createCivilTimeReport(
         pack,
         'Australia/Sydney',
         atSecondsAfter(48 * 3_600 - 0.001),
@@ -103,29 +107,32 @@ describe('decideLivingDossier', () => {
       'aftermath',
     );
     assert.equal(
-      decideLivingDossier(pack, 'Australia/Sydney', atSecondsAfter(48 * 3_600))
-        .phase,
+      createCivilTimeReport(
+        pack,
+        'Australia/Sydney',
+        atSecondsAfter(48 * 3_600),
+      ).phase,
       'ordinary',
     );
   });
 
   it('derives Forward, Backward, Lord Howe, and no-event phases from pack data', () => {
-    const forward = decideLivingDossier(
+    const forward = createCivilTimeReport(
       pack,
       'Australia/Sydney',
       atSecondsBefore(86_400),
     );
-    const backward = decideLivingDossier(
+    const backward = createCivilTimeReport(
       pack,
       'Australia/Sydney',
       new Date('2026-04-03T16:00:00.000Z'),
     );
-    const lordHowe = decideLivingDossier(
+    const lordHowe = createCivilTimeReport(
       pack,
       'Australia/Lord_Howe',
       new Date('2026-10-02T15:30:00.000Z'),
     );
-    const noEvent = decideLivingDossier(
+    const noEvent = createCivilTimeReport(
       pack,
       'Australia/Brisbane',
       new Date('2026-07-19T00:00:00.000Z'),

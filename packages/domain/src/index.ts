@@ -43,7 +43,7 @@ export interface ChangeEvent {
   readonly secondsUntil: number;
 }
 
-export type LivingDossierPhase =
+export type CivilTimeReportPhase =
   | 'ordinary'
   | 'approaching'
   | 'reminder-week'
@@ -51,13 +51,13 @@ export type LivingDossierPhase =
   | 'aftermath'
   | 'no-event';
 
-export interface LivingDossierDecision {
+export interface CivilTimeReport {
   readonly civilTime: CivilTimeDecision;
   readonly featuredEvent: ChangeEvent | null;
-  readonly phase: LivingDossierPhase;
+  readonly phase: CivilTimeReportPhase;
 }
 
-export interface LivingDossierContext {
+export interface CivilTimeReportContext {
   readonly acknowledgedEventAt?: string | null;
 }
 
@@ -223,21 +223,21 @@ const approachingSeconds = 28 * daySeconds;
 const reminderWeekSeconds = 7 * daySeconds;
 
 /**
- * Selects one Living Dossier phase from activated pack transitions.
+ * Selects one Civil Time Report phase from activated pack transitions.
  *
  * Boundaries are deliberately asymmetric: an event is upcoming only while
  * secondsUntil is positive; 28 days, 7 days, and 24 hours belong to the phase
  * beginning at that boundary. The event instant begins aftermath, which lasts
  * on the first unacknowledged opening while elapsed time is less than 48
  * hours. Acknowledged events and the exact 48-hour boundary resume the normal
- * next-event dossier. There is no interval or "underway" phase.
+ * next-event report. There is no interval or "underway" phase.
  */
-export function decideLivingDossier(
+export function createCivilTimeReport(
   pack: ActivatedTimeZoneDataPack,
   zoneId: string,
   now: Date,
-  context: LivingDossierContext = {},
-): LivingDossierDecision {
+  context: CivilTimeReportContext = {},
+): CivilTimeReport {
   const civilTime = decideCivilTime(pack, zoneId, now);
   const instantMilliseconds = now.getTime();
   const zone = pack.zones.find(
@@ -271,7 +271,7 @@ export function decideLivingDossier(
     return { civilTime, featuredEvent: null, phase: 'no-event' };
   }
 
-  const phase: LivingDossierPhase =
+  const phase: CivilTimeReportPhase =
     event.secondsUntil <= daySeconds
       ? 'reminder-day'
       : event.secondsUntil <= reminderWeekSeconds
