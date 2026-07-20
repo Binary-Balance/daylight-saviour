@@ -10,9 +10,18 @@ import {
 } from '../time-zone-data/time-zone-data-manager';
 
 const storageKey = 'home-time-zone';
+const secondaryCopySeedStorageKey = 'secondary-copy-seed-v1';
 const aftermathStorageKey = (canonicalZoneId: string) =>
   `living-dossier-aftermath:${canonicalZoneId}`;
 const timeZoneDataPackStorageKey = 'time-zone-data-pack-cache-v1';
+
+function createOpaqueSecondaryCopySeed() {
+  return [Math.random(), Math.random(), Math.random(), Math.random()]
+    .map((value) => value.toString(36).slice(2))
+    .join('-');
+}
+
+const sessionSecondaryCopySeed = createOpaqueSecondaryCopySeed();
 
 const timeZoneDataPacks = createTimeZoneDataPackManager({
   bundledPack: bundledAustralianDataPack,
@@ -45,6 +54,23 @@ export const productionHomeTimeZoneAdapters: HomeTimeZoneAdapters = {
         uses24hourClock: calendar?.uses24hourClock ?? false,
       };
     },
+  },
+  secondaryCopySeed: {
+    loadOrCreate: async () => {
+      try {
+        const saved = await AsyncStorage.getItem(secondaryCopySeedStorageKey);
+        if (saved !== null && saved.length >= 16) return saved;
+        await AsyncStorage.setItem(
+          secondaryCopySeedStorageKey,
+          sessionSecondaryCopySeed,
+        );
+      } catch {
+        // Secondary copy variety cannot block saved Home Time Zone data.
+        // Fallback stays local to this app session and is never transmitted.
+      }
+      return sessionSecondaryCopySeed;
+    },
+    sessionFallback: sessionSecondaryCopySeed,
   },
   storage: {
     load: () => AsyncStorage.getItem(storageKey),

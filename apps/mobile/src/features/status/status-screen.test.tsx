@@ -24,9 +24,18 @@ const bundledSnapshot = {
 } as const;
 
 function StatusScreen(
-  props: Omit<ComponentProps<typeof RawStatusScreen>, 'dataPackSnapshot'>,
+  props: Omit<
+    ComponentProps<typeof RawStatusScreen>,
+    'dataPackSnapshot' | 'secondaryCopySeed'
+  >,
 ) {
-  return <RawStatusScreen dataPackSnapshot={bundledSnapshot} {...props} />;
+  return (
+    <RawStatusScreen
+      dataPackSnapshot={bundledSnapshot}
+      secondaryCopySeed="test-installation"
+      {...props}
+    />
+  );
 }
 
 const initialWindowDimensions = ReactNative.Dimensions.get('window');
@@ -189,6 +198,8 @@ describe('StatusScreen', () => {
       'current',
       'Australia/Sydney',
       now,
+      false,
+      'test-installation',
     );
     const domainDecision = decideCivilTime(
       activateAustralianTimeZoneDataPack(bundledAustralianDataPack),
@@ -281,6 +292,7 @@ describe('StatusScreen', () => {
           }}
           now={new Date('2026-07-19T00:00:00.000Z')}
           reducedMotion
+          secondaryCopySeed="test-installation"
         />,
       );
 
@@ -303,6 +315,7 @@ describe('StatusScreen', () => {
         now={new Date('2026-07-19T00:00:00.000Z')}
         onRetryDataPack={retry}
         reducedMotion
+        secondaryCopySeed="test-installation"
       />,
     );
 
@@ -327,6 +340,7 @@ describe('StatusScreen', () => {
         now={new Date('2026-07-19T00:00:00.000Z')}
         onRetryDataPack={jest.fn()}
         reducedMotion
+        secondaryCopySeed="test-installation"
       />,
     );
 

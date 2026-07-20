@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { australianEnglish as copy } from '@daylight-saviour/copy';
 import type { ChangeDirection } from '@daylight-saviour/domain';
 
 import { daylightSaviourPalettes } from '../../theme';
@@ -27,6 +28,7 @@ interface StatusScreenProps {
   readonly onChooseZone?: () => void;
   readonly onRetryDataPack?: () => void | Promise<void>;
   readonly reducedMotion?: boolean;
+  readonly secondaryCopySeed: string;
   readonly uses24hourClock?: boolean;
   readonly zoneId?: string;
 }
@@ -187,6 +189,7 @@ export default function StatusScreen({
   onChooseZone,
   onRetryDataPack,
   reducedMotion: reducedMotionOverride,
+  secondaryCopySeed,
   uses24hourClock = false,
   zoneId = 'Australia/Sydney',
 }: StatusScreenProps) {
@@ -203,6 +206,7 @@ export default function StatusScreen({
     zoneId,
     currentInstant,
     uses24hourClock,
+    secondaryCopySeed,
     openingAcknowledgedEventAt,
   );
   const [clockValue, clockMeridiem = null] = uses24hourClock
@@ -216,26 +220,11 @@ export default function StatusScreen({
     viewModel.availability === 'ready' && viewModel.phase === 'aftermath'
       ? (viewModel.event?.instant ?? null)
       : null;
-  const freshnessText =
-    viewModel.freshness === 'checking'
-      ? 'Checking for verified data…'
-      : viewModel.freshness === 'current'
-        ? dataPackSnapshot.source === 'bundled'
-          ? 'Bundled data current'
-          : 'Verified data current'
-        : viewModel.freshness === 'stale-valid'
-          ? 'Verified data due for refresh'
-          : viewModel.freshness === 'offline-valid'
-            ? 'Offline · verified data remains valid'
-            : viewModel.freshness === 'retry-failed'
-              ? 'Refresh failed · verified data remains active'
-              : viewModel.freshness === 'expired'
-                ? 'Validity Horizon passed · refresh required'
-                : 'Freshness not determined · decision unavailable';
-  const freshnessDescription =
-    viewModel.freshness === 'expired'
-      ? 'validity expired, refresh required'
-      : freshnessText.toLocaleLowerCase('en-AU');
+  const freshnessFacts = {
+    freshness: viewModel.freshness,
+    source: dataPackSnapshot.source,
+  } as const;
+  const freshnessText = copy.dataFreshness.status(freshnessFacts);
 
   useEffect(() => {
     if (
@@ -262,10 +251,10 @@ export default function StatusScreen({
           style={[styles.utilityHeader, { borderBottomColor: palette.rule }]}
         >
           <Text style={[styles.documentLabel, { color: palette.secondaryInk }]}>
-            DAYLIGHT SAVIOUR · CIVIL TIME RECORD
+            {copy.livingDossier.document.label}
           </Text>
           <Text style={[styles.reference, { color: palette.accent }]}>
-            DS—04
+            {copy.livingDossier.document.reference}
           </Text>
         </View>
 
@@ -273,9 +262,12 @@ export default function StatusScreen({
           accessibilityHint={
             onChooseZone === undefined
               ? undefined
-              : 'Opens Australian Home Time Zone selection'
+              : copy.livingDossier.accessibility.openZoneSelectionHint
           }
-          accessibilityLabel={`Home Time Zone, ${viewModel.friendlyZoneLabel}, ${viewModel.zoneId}`}
+          accessibilityLabel={copy.livingDossier.accessibility.homeTimeZone({
+            friendlyLabel: viewModel.friendlyZoneLabel,
+            zoneId: viewModel.zoneId,
+          })}
           accessibilityRole={onChooseZone === undefined ? undefined : 'button'}
           disabled={onChooseZone === undefined}
           onPress={onChooseZone}
@@ -289,7 +281,7 @@ export default function StatusScreen({
           ]}
         >
           <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
-            HOME TIME ZONE
+            {copy.livingDossier.homeTimeZoneHeading}
           </Text>
           <Text style={[styles.zone, { color: palette.ink }]}>
             {viewModel.friendlyZoneLabel}
@@ -303,7 +295,11 @@ export default function StatusScreen({
           <>
             <View style={styles.statusSection}>
               <View
-                accessibilityLabel={`Home Time Zone current time, ${viewModel.clock}, ${viewModel.abbreviation}, ${viewModel.currentOffset}`}
+                accessibilityLabel={copy.livingDossier.accessibility.clock({
+                  abbreviation: viewModel.abbreviation,
+                  clock: viewModel.clock,
+                  currentOffset: viewModel.currentOffset,
+                })}
                 accessibilityLiveRegion="none"
                 accessible
               >
@@ -349,12 +345,14 @@ export default function StatusScreen({
                   accessible={false}
                   style={[styles.identifier, { color: palette.secondaryInk }]}
                 >
-                  {viewModel.abbreviation} · {viewModel.currentOffset} · HOME
-                  TIME ZONE
+                  {copy.livingDossier.clock.currentMetadata({
+                    abbreviation: viewModel.abbreviation,
+                    currentOffset: viewModel.currentOffset,
+                  })}
                 </Text>
               </View>
               <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
-                DAYLIGHT SAVING STATUS
+                {copy.livingDossier.daylightSavingStatusHeading}
               </Text>
               <Text
                 accessibilityRole="header"
@@ -400,24 +398,23 @@ export default function StatusScreen({
                 <Text
                   style={[styles.metadata, { color: palette.secondaryInk }]}
                 >
-                  CHANGE EVENT RECORD
+                  {copy.livingDossier.noEvent.label}
                 </Text>
                 <Text
                   accessibilityRole="header"
                   style={[styles.eventDate, { color: palette.ink }]}
                 >
-                  No Change Event scheduled within verified data
+                  {copy.livingDossier.noEvent.heading}
                 </Text>
                 <Text style={[styles.body, { color: palette.ink }]}>
-                  No countdown required. Your Home Time Zone remains on its
-                  recorded offset.
+                  {copy.livingDossier.noEvent.body}
                 </Text>
                 <Text
                   accessibilityElementsHidden
                   importantForAccessibility="no-hide-descendants"
                   style={[styles.noEventMark, { color: palette.accent }]}
                 >
-                  ✓ CIVIL TIME LEFT IN PEACE
+                  {copy.livingDossier.noEvent.mark}
                 </Text>
               </View>
             ) : (
@@ -435,9 +432,9 @@ export default function StatusScreen({
                   <Text
                     style={[styles.metadata, { color: palette.secondaryInk }]}
                   >
-                    {viewModel.event.relation === 'completed'
-                      ? 'RECENT CHANGE EVENT'
-                      : 'NEXT CHANGE EVENT'}
+                    {copy.livingDossier.changeEvent.heading(
+                      viewModel.event.relation,
+                    )}
                   </Text>
                   <Text
                     accessibilityRole="header"
@@ -454,9 +451,9 @@ export default function StatusScreen({
                       importantForAccessibility="no-hide-descendants"
                       style={[styles.direction, { color: palette.accent }]}
                     >
-                      {viewModel.event.direction === 'Forward Change'
-                        ? '→'
-                        : '←'}
+                      {copy.livingDossier.changeEvent.directionArrow(
+                        viewModel.event.direction,
+                      )}
                     </Text>
                   </View>
                   <View style={styles.equationGroup}>
@@ -466,7 +463,7 @@ export default function StatusScreen({
                         { color: palette.secondaryInk },
                       ]}
                     >
-                      LOCAL TIME
+                      {copy.livingDossier.changeEvent.localTimeHeading}
                     </Text>
                     <Text style={[styles.eventFact, { color: palette.ink }]}>
                       {viewModel.event.wallTimeChange}
@@ -477,7 +474,7 @@ export default function StatusScreen({
                         { color: palette.secondaryInk },
                       ]}
                     >
-                      UTC OFFSET
+                      {copy.livingDossier.changeEvent.utcOffsetHeading}
                     </Text>
                     <Text style={[styles.eventFact, { color: palette.ink }]}>
                       {viewModel.event.offsetChange}
@@ -485,8 +482,7 @@ export default function StatusScreen({
                     <Text
                       style={[styles.body, { color: palette.secondaryInk }]}
                     >
-                      Clocks move {viewModel.event.offsetAmount.toLowerCase()} ·
-                      Home Time Zone
+                      {viewModel.event.clockMovement}
                     </Text>
                   </View>
                   {viewModel.event.countdown === null ? (
@@ -497,12 +493,10 @@ export default function StatusScreen({
                           { color: palette.secondaryInk },
                         ]}
                       >
-                        CHANGE COMPLETED
+                        {copy.livingDossier.changeEvent.completedHeading}
                       </Text>
                       <Text style={[styles.countdown, { color: palette.ink }]}>
-                        {viewModel.event.elapsed === 'now'
-                          ? 'Applied now'
-                          : `${viewModel.event.elapsed} ago`}
+                        {viewModel.event.elapsed}
                       </Text>
                     </View>
                   ) : (
@@ -514,13 +508,16 @@ export default function StatusScreen({
                           { color: palette.secondaryInk },
                         ]}
                       >
-                        COUNTDOWN
+                        {copy.livingDossier.changeEvent.countdownHeading}
                       </Text>
                       <Text
-                        accessibilityLabel={`Countdown, ${viewModel.event.countdown} until Change Event`}
+                        accessibilityLabel={
+                          viewModel.event.countdownAccessibilityLabel ??
+                          undefined
+                        }
                         style={[styles.countdown, { color: palette.ink }]}
                       >
-                        In {viewModel.event.countdown}
+                        {viewModel.event.countdown}
                       </Text>
                     </View>
                   )}
@@ -542,15 +539,15 @@ export default function StatusScreen({
             }
           >
             <Text style={[styles.metadata, { color: palette.accent }]}>
-              {viewModel.freshness === 'expired'
-                ? 'REFRESH REQUIRED'
-                : 'DECISION UNAVAILABLE'}
+              {copy.livingDossier.decisionUnavailable.label(
+                viewModel.freshness,
+              )}
             </Text>
             <Text
               accessibilityRole="header"
               style={[styles.status, { color: palette.ink }]}
             >
-              Civil-time decision unavailable
+              {copy.livingDossier.decisionUnavailable.heading}
             </Text>
             <Text style={[styles.body, { color: palette.ink }]}>
               {viewModel.message}
@@ -561,24 +558,32 @@ export default function StatusScreen({
         <View style={[styles.footer, { borderTopColor: palette.rule }]}>
           <View
             accessible
-            accessibilityLabel={`Time-Zone Data Pack ${viewModel.packVersion}, ${freshnessDescription}, valid until ${viewModel.validUntil}`}
+            accessibilityLabel={copy.dataFreshness.accessibility.pack({
+              ...freshnessFacts,
+              packVersion: viewModel.packVersion,
+              uses24hourClock,
+              validUntil: viewModel.validUntil,
+            })}
           >
             <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
-              DATA FRESHNESS
+              {copy.dataFreshness.heading}
             </Text>
             <Text style={[styles.body, { color: palette.ink }]}>
               {freshnessText}
             </Text>
             <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
-              Pack {viewModel.packVersion} · Valid through{' '}
-              {viewModel.validUntil}
+              {copy.dataFreshness.packDetails({
+                packVersion: viewModel.packVersion,
+                uses24hourClock,
+                validUntil: viewModel.validUntil,
+              })}
             </Text>
           </View>
           {onRetryDataPack === undefined ||
           !dataPackSnapshot.remoteEnabled ? null : (
             <Pressable
-              accessibilityHint="Checks for a newer verified Time-Zone Data Pack"
-              accessibilityLabel="Retry Time-Zone Data Pack refresh"
+              accessibilityHint={copy.dataFreshness.accessibility.retryHint}
+              accessibilityLabel={copy.dataFreshness.accessibility.retryLabel}
               accessibilityRole="button"
               disabled={viewModel.freshness === 'checking'}
               onPress={() => void onRetryDataPack()}
@@ -586,16 +591,16 @@ export default function StatusScreen({
             >
               <Text style={[styles.buttonText, { color: palette.ink }]}>
                 {viewModel.freshness === 'checking'
-                  ? 'CHECKING…'
-                  : 'CHECK FOR VERIFIED DATA'}
+                  ? copy.dataFreshness.retry.checkingButton
+                  : copy.dataFreshness.retry.checkButton}
               </Text>
             </Pressable>
           )}
         </View>
 
         <Pressable
-          accessibilityHint="Opens compact app and data details"
-          accessibilityLabel="Settings"
+          accessibilityHint={copy.settings.accessibility.openHint}
+          accessibilityLabel={copy.settings.accessibility.openLabel}
           accessibilityRole="button"
           onPress={() => setSettingsOpen(true)}
           style={({ pressed }) => [
@@ -608,7 +613,7 @@ export default function StatusScreen({
           ]}
         >
           <Text style={[styles.settingsButtonText, { color: palette.ink }]}>
-            SETTINGS
+            {copy.settings.openButton}
           </Text>
         </Pressable>
       </ScrollView>
@@ -633,19 +638,19 @@ export default function StatusScreen({
               ]}
             >
               <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
-                APP DETAILS
+                {copy.settings.appDetailsHeading}
               </Text>
               <Text
                 accessibilityRole="header"
                 style={[styles.eventDate, { color: palette.ink }]}
               >
-                Settings
+                {copy.settings.heading}
               </Text>
               <Text style={[styles.body, { color: palette.ink }]}>
-                Home Time Zone: {viewModel.friendlyZoneLabel}
+                {copy.settings.homeTimeZone(viewModel.friendlyZoneLabel)}
               </Text>
               <Text style={[styles.body, { color: palette.ink }]}>
-                Time-Zone Data Pack: {viewModel.packVersion}
+                {copy.settings.timeZoneDataPack(viewModel.packVersion)}
               </Text>
               <Pressable
                 accessibilityRole="button"
@@ -655,7 +660,9 @@ export default function StatusScreen({
                   { backgroundColor: palette.accent },
                 ]}
               >
-                <Text style={styles.closeButtonText}>Close settings</Text>
+                <Text style={styles.closeButtonText}>
+                  {copy.settings.closeButton}
+                </Text>
               </Pressable>
             </View>
           </View>

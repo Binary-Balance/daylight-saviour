@@ -19,9 +19,15 @@ export interface DeviceLocalizationReader {
   readonly read: () => DeviceLocalization;
 }
 
+export interface SecondaryCopySeedProvider {
+  readonly loadOrCreate: () => Promise<string>;
+  readonly sessionFallback: string;
+}
+
 export interface HomeTimeZoneAdapters {
   readonly aftermathAcknowledgements: AftermathAcknowledgementStorage;
   readonly localization: DeviceLocalizationReader;
+  readonly secondaryCopySeed: SecondaryCopySeedProvider;
   readonly storage: HomeTimeZoneStorage;
   readonly timeZoneDataPacks: TimeZoneDataPackManager;
 }

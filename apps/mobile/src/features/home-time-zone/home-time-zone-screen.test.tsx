@@ -42,6 +42,10 @@ function createAdapters({
     localization: {
       read: jest.fn(() => ({ timeZone: deviceZone, uses24hourClock })),
     },
+    secondaryCopySeed: {
+      loadOrCreate: jest.fn(async () => 'test-installation-seed'),
+      sessionFallback: 'test-session-seed',
+    },
     storage: {
       load: jest.fn(async () => stored),
       save: jest.fn(async (canonicalZoneId) => {
@@ -174,6 +178,28 @@ describe('HomeTimeZoneScreen', () => {
     ).toBeTruthy();
     expect(screen.queryByText('SUGGESTED HOME TIME ZONE')).toBeNull();
     expect(adapters.localization.read).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses session-only secondary copy when seed persistence fails', async () => {
+    const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+    jest
+      .mocked(adapters.secondaryCopySeed.loadOrCreate)
+      .mockRejectedValue(new Error('seed storage unavailable'));
+
+    const first = render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+    expect(
+      await screen.findByRole('header', { name: 'Standard time applies' }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText('Could not load saved Home Time Zone.'),
+    ).toBeNull();
+
+    first.unmount();
+    render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+    expect(
+      await screen.findByRole('header', { name: 'Standard time applies' }),
+    ).toBeTruthy();
+    expect(adapters.secondaryCopySeed.loadOrCreate).toHaveBeenCalledTimes(2);
   });
 
   it.each([

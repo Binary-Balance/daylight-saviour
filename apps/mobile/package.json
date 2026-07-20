@@ -3,6 +3,7 @@
   "main": "expo-router/entry",
   "version": "0.0.0",
   "dependencies": {
+    "@daylight-saviour/copy": "*",
     "@daylight-saviour/contracts": "*",
     "@daylight-saviour/domain": "*",
     "@daylight-saviour/time-zone-data": "*",
