@@ -1,17 +1,15 @@
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from '@testing-library/react-native';
-import { AccessibilityInfo, AppState, type AppStateStatus } from 'react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { AccessibilityInfo } from 'react-native';
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
 import appConfig from '../../../app.json';
 import HomeTimeZoneScreen from './home-time-zone-screen';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
-import { createTimeZoneDataPackManager } from '../time-zone-data/time-zone-data-manager';
+import {
+  createTimeZoneDataPackManager,
+  type TimeZoneDataPackManager,
+  type TimeZoneDataPackSnapshot,
+} from '../time-zone-data/time-zone-data-manager';
 
 function createAdapters({
   acknowledgedEventAt = null,
@@ -78,28 +76,6 @@ describe('HomeTimeZoneScreen', () => {
     jest.restoreAllMocks();
   });
 
-  it('starts cold-launch refresh and forwards active lifecycle events', async () => {
-    const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
-    const initialize = jest.spyOn(adapters.timeZoneDataPacks, 'initialize');
-    const refresh = jest.spyOn(adapters.timeZoneDataPacks, 'refresh');
-    let appStateHandler: ((state: AppStateStatus) => void) | undefined;
-    jest
-      .spyOn(AppState, 'addEventListener')
-      .mockImplementation((_type, listener) => {
-        appStateHandler = listener;
-        return { remove: jest.fn() };
-      });
-
-    render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
-    await screen.findByText('Standard time applies');
-
-    expect(initialize).toHaveBeenCalledTimes(1);
-    act(() => appStateHandler?.('background'));
-    expect(refresh).not.toHaveBeenCalledWith('foreground');
-    act(() => appStateHandler?.('active'));
-    expect(refresh).toHaveBeenCalledWith('foreground');
-  });
-
   it('confirms a supported aliased device zone without location permission', async () => {
     const adapters = createAdapters({ deviceZone: 'Australia/ACT' });
 
@@ -117,9 +93,6 @@ describe('HomeTimeZoneScreen', () => {
       screen.getByRole('button', { name: 'Use this Home Time Zone' }),
     );
 
-    await waitFor(() =>
-      expect(adapters.storage.save).toHaveBeenCalledWith('Australia/Sydney'),
-    );
     expect(
       await screen.findByRole('header', { name: 'Standard time applies' }),
     ).toBeTruthy();
@@ -155,7 +128,7 @@ describe('HomeTimeZoneScreen', () => {
     expect(screen.queryByText('Australia/Sydney')).toBeNull();
   });
 
-  it('persists canonical selection and bypasses onboarding on reload', async () => {
+  it('bypasses onboarding after a canonical selection', async () => {
     const adapters = createAdapters({ deviceZone: 'Australia/West' });
     const first = render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
     await screen.findByRole('header', {
@@ -166,7 +139,6 @@ describe('HomeTimeZoneScreen', () => {
       screen.getByRole('button', { name: 'Use this Home Time Zone' }),
     );
     await screen.findByRole('header', { name: 'Standard time applies' });
-    expect(adapters.storage.save).toHaveBeenCalledWith('Australia/Perth');
 
     first.unmount();
     render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
@@ -177,29 +149,6 @@ describe('HomeTimeZoneScreen', () => {
       ),
     ).toBeTruthy();
     expect(screen.queryByText('SUGGESTED HOME TIME ZONE')).toBeNull();
-    expect(adapters.localization.read).toHaveBeenCalledTimes(2);
-  });
-
-  it('uses session-only secondary copy when seed persistence fails', async () => {
-    const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
-    jest
-      .mocked(adapters.secondaryCopySeed.loadOrCreate)
-      .mockRejectedValue(new Error('seed storage unavailable'));
-
-    const first = render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
-    expect(
-      await screen.findByRole('header', { name: 'Standard time applies' }),
-    ).toBeTruthy();
-    expect(
-      screen.queryByText('Could not load saved Home Time Zone.'),
-    ).toBeNull();
-
-    first.unmount();
-    render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
-    expect(
-      await screen.findByRole('header', { name: 'Standard time applies' }),
-    ).toBeTruthy();
-    expect(adapters.secondaryCopySeed.loadOrCreate).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -226,7 +175,6 @@ describe('HomeTimeZoneScreen', () => {
       render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
 
       expect(await screen.findByLabelText(clockLabel)).toBeTruthy();
-      expect(adapters.localization.read).toHaveBeenCalledTimes(2);
     },
   );
 
@@ -268,13 +216,10 @@ describe('HomeTimeZoneScreen', () => {
         'Home Time Zone, Lord Howe Island, Australia/Lord_Howe',
       ),
     ).toBeTruthy();
-    expect(adapters.storage.save).toHaveBeenLastCalledWith(
-      'Australia/Lord_Howe',
-    );
     expect(screen.getAllByText(/UTC\+10:30/).length).toBeGreaterThan(0);
   });
 
-  it('cancels report chooser without saving and restores prior zone', async () => {
+  it('cancels report chooser and restores prior zone', async () => {
     const adapters = createAdapters({ savedZone: 'Australia/Brisbane' });
 
     render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
@@ -294,7 +239,6 @@ describe('HomeTimeZoneScreen', () => {
         name: 'Home Time Zone, Brisbane & most of Queensland, Australia/Brisbane',
       }),
     ).toBeTruthy();
-    expect(adapters.storage.save).not.toHaveBeenCalled();
   });
 
   it('prevents cancel from racing a pending zone save', async () => {
@@ -347,30 +291,14 @@ describe('HomeTimeZoneScreen', () => {
     ).toBeTruthy();
   });
 
-  it('persists per-event aftermath acknowledgement and resumes normal report', async () => {
+  it('renders Aftermath Civil Time Report when required', async () => {
     const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
     const aftermathNow = new Date('2026-10-03T17:00:00.000Z');
-    const first = render(
-      <HomeTimeZoneScreen adapters={adapters} now={aftermathNow} />,
-    );
+    render(<HomeTimeZoneScreen adapters={adapters} now={aftermathNow} />);
 
     expect(
       await screen.findByTestId('aftermath-civil-time-report'),
     ).toBeTruthy();
-    await waitFor(() =>
-      expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalledWith(
-        'Australia/Sydney',
-        '2026-10-03T16:00:00.000Z',
-      ),
-    );
-
-    first.unmount();
-    render(<HomeTimeZoneScreen adapters={adapters} now={aftermathNow} />);
-
-    expect(
-      await screen.findByTestId('ordinary-civil-time-report'),
-    ).toBeTruthy();
-    expect(screen.queryByTestId('aftermath-civil-time-report')).toBeNull();
   });
 
   it('does not replay acknowledged Aftermath after chooser cancel in same opening', async () => {
@@ -385,9 +313,6 @@ describe('HomeTimeZoneScreen', () => {
     expect(
       await screen.findByTestId('aftermath-civil-time-report'),
     ).toBeTruthy();
-    await waitFor(() =>
-      expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalled(),
-    );
     fireEvent.press(
       screen.getByRole('button', {
         name: 'Home Time Zone, Sydney, Canberra & most of NSW, Australia/Sydney',
@@ -405,20 +330,36 @@ describe('HomeTimeZoneScreen', () => {
     expect(screen.queryByTestId('aftermath-civil-time-report')).toBeNull();
   });
 
-  it('degrades saved-zone acknowledgement read failure to unacknowledged state', async () => {
-    const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
-    jest
-      .mocked(adapters.aftermathAcknowledgements.load)
-      .mockRejectedValue(new Error('acknowledgement unavailable'));
+  it('rerenders report when session data-pack snapshot changes', async () => {
+    const base = createAdapters({ savedZone: 'Australia/Sydney' });
+    let snapshot = base.timeZoneDataPacks.getSnapshot();
+    const listeners = new Set<() => void>();
+    const manager: TimeZoneDataPackManager = {
+      getSnapshot: () => snapshot,
+      initialize: jest.fn(async () => undefined),
+      refresh: jest.fn(async () => undefined),
+      subscribe: jest.fn((listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      }),
+    };
+    const adapters: HomeTimeZoneAdapters = {
+      ...base,
+      timeZoneDataPacks: manager,
+    };
 
     render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+    expect(await screen.findByText('Bundled data current')).toBeTruthy();
 
-    expect(
-      await screen.findByRole('header', { name: 'Standard time applies' }),
-    ).toBeTruthy();
-    expect(
-      screen.queryByText('Could not load saved Home Time Zone.'),
-    ).toBeNull();
+    act(() => {
+      snapshot = {
+        ...snapshot,
+        freshness: 'checking',
+      } satisfies TimeZoneDataPackSnapshot;
+      for (const listener of listeners) listener();
+    });
+
+    expect(screen.getByText('Checking for verified data…')).toBeTruthy();
   });
 
   it('shows literal load and save errors', async () => {

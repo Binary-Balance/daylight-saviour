@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   AppState,
   Pressable,
@@ -17,44 +17,17 @@ import {
 } from '@daylight-saviour/copy';
 import {
   australianZoneGroups,
-  getAustralianZone,
-  normalizeAustralianZoneId,
   searchAustralianZones,
   type AustralianZone,
 } from '@daylight-saviour/domain';
 
 import StatusScreen from '../status/status-screen';
-import { createStatusViewModel } from '../status/status-view-model';
 import {
   daylightSaviourPalettes,
   type DaylightSaviourPalette,
 } from '../../theme';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
-
-type FlowState =
-  | { readonly kind: 'loading' }
-  | { readonly kind: 'load-error' }
-  | {
-      readonly kind: 'confirm';
-      readonly secondaryCopySeed: string;
-      readonly uses24hourClock: boolean;
-      readonly zoneId: string;
-    }
-  | {
-      readonly kind: 'choose';
-      readonly notice?: HomeTimeZoneNoticeCode;
-      readonly returnAcknowledgedEventAt?: string | null;
-      readonly returnZoneId?: string;
-      readonly secondaryCopySeed: string;
-      readonly uses24hourClock: boolean;
-    }
-  | {
-      readonly acknowledgedEventAt: string | null;
-      readonly kind: 'ready';
-      readonly secondaryCopySeed: string;
-      readonly uses24hourClock: boolean;
-      readonly zoneId: string;
-    };
+import { createHomeTimeZoneSession } from './home-time-zone-session';
 
 interface HomeTimeZoneScreenProps {
   readonly adapters: HomeTimeZoneAdapters;
@@ -62,7 +35,7 @@ interface HomeTimeZoneScreenProps {
 }
 
 interface ChooserProps {
-  readonly notice?: HomeTimeZoneNoticeCode;
+  readonly notice: HomeTimeZoneNoticeCode | null;
   readonly onCancel?: () => void;
   readonly onSelect: (zoneId: string) => void;
   readonly palette: DaylightSaviourPalette;
@@ -118,7 +91,7 @@ function ZoneChooser({
         <Text style={[styles.body, { color: palette.secondaryInk }]}>
           {copy.homeTimeZone.chooser.introduction}
         </Text>
-        {notice === undefined ? null : (
+        {notice === null ? null : (
           <Text
             accessibilityRole="alert"
             style={[styles.body, { color: palette.ink }]}
@@ -203,220 +176,70 @@ export default function HomeTimeZoneScreen({
 }: HomeTimeZoneScreenProps) {
   const appearance = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = daylightSaviourPalettes[appearance];
-  const [flow, setFlow] = useState<FlowState>({ kind: 'loading' });
-  const [retry, setRetry] = useState(0);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<HomeTimeZoneErrorCode | null>(
-    null,
+  const session = useMemo(
+    () =>
+      createHomeTimeZoneSession(
+        now === undefined ? { adapters } : { adapters, now: () => now },
+      ),
+    [adapters, now],
   );
-  const [dataPackSnapshot, setDataPackSnapshot] = useState(() =>
-    adapters.timeZoneDataPacks.getSnapshot(),
+  const snapshot = useSyncExternalStore(
+    session.subscribe,
+    session.getSnapshot,
+    session.getSnapshot,
   );
 
   useEffect(() => {
-    const updateDataPack = () =>
-      setDataPackSnapshot(adapters.timeZoneDataPacks.getSnapshot());
-    const unsubscribe = adapters.timeZoneDataPacks.subscribe(updateDataPack);
+    const stop = session.start();
     const appStateSubscription = AppState.addEventListener(
       'change',
       (nextState) => {
-        if (nextState === 'active') {
-          void adapters.timeZoneDataPacks.refresh('foreground');
-        }
+        if (nextState === 'active') session.dispatch({ type: 'foreground' });
       },
     );
-    void adapters.timeZoneDataPacks.initialize();
     return () => {
       appStateSubscription.remove();
-      unsubscribe();
+      stop();
     };
-  }, [adapters]);
+  }, [session]);
 
-  useEffect(() => {
-    let active = true;
-
-    void (async () => {
-      try {
-        const saved = await adapters.storage.load();
-        if (!active) return;
-        const localization = adapters.localization.read();
-        const secondaryCopySeed = await adapters.secondaryCopySeed
-          .loadOrCreate()
-          .catch(() => adapters.secondaryCopySeed.sessionFallback);
-        if (!active) return;
-
-        if (saved !== null) {
-          const canonical = normalizeAustralianZoneId(saved);
-          if (canonical === saved) {
-            let acknowledgedEventAt: string | null = null;
-            try {
-              acknowledgedEventAt =
-                await adapters.aftermathAcknowledgements.load(canonical);
-            } catch {
-              // Acknowledgement is noncritical. Missing it may repeat one
-              // factual aftermath opening but cannot block the home screen.
-            }
-            if (!active) return;
-            setFlow({
-              acknowledgedEventAt,
-              kind: 'ready',
-              secondaryCopySeed,
-              uses24hourClock: localization.uses24hourClock,
-              zoneId: canonical,
-            });
-          } else {
-            setFlow({
-              kind: 'choose',
-              notice: 'saved-zone-invalid',
-              secondaryCopySeed,
-              uses24hourClock: localization.uses24hourClock,
-            });
-          }
-          return;
-        }
-
-        const suggested = localization.timeZone;
-        const canonical =
-          suggested === null ? null : normalizeAustralianZoneId(suggested);
-        setFlow(
-          canonical === null
-            ? {
-                kind: 'choose',
-                notice: 'device-zone-outside-coverage',
-                secondaryCopySeed,
-                uses24hourClock: localization.uses24hourClock,
-              }
-            : {
-                kind: 'confirm',
-                secondaryCopySeed,
-                uses24hourClock: localization.uses24hourClock,
-                zoneId: canonical,
-              },
-        );
-      } catch {
-        if (active) setFlow({ kind: 'load-error' });
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [adapters, retry]);
-
-  async function selectZone(
-    zoneId: string,
-    uses24hourClock: boolean,
-    secondaryCopySeed: string,
-  ) {
-    const zone = getAustralianZone(zoneId);
-    if (zone === null || zone.id !== zoneId) return;
-
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await adapters.storage.save(zone.id);
-      let acknowledgedEventAt: string | null = null;
-      try {
-        acknowledgedEventAt = await adapters.aftermathAcknowledgements.load(
-          zone.id,
-        );
-      } catch {
-        // A missing acknowledgement may repeat one factual aftermath opening,
-        // but must not make a successfully saved Home Time Zone unusable.
-      }
-      setFlow({
-        acknowledgedEventAt,
-        kind: 'ready',
-        secondaryCopySeed,
-        uses24hourClock,
-        zoneId: zone.id,
-      });
-    } catch {
-      setSaveError('save-failed');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (flow.kind === 'ready') {
+  if (snapshot.kind === 'ready') {
     return (
       <StatusScreen
-        acknowledgedEventAt={flow.acknowledgedEventAt}
-        dataPackSnapshot={dataPackSnapshot}
-        key={flow.zoneId}
+        acknowledgedEventAt={snapshot.acknowledgedEventAt}
+        dataPackSnapshot={snapshot.dataPackSnapshot}
+        key={snapshot.zoneId}
         now={now}
-        onAcknowledgeAftermath={(eventAt) => {
-          setFlow((current) => {
-            if (current.kind === 'ready' && current.zoneId === flow.zoneId) {
-              return { ...current, acknowledgedEventAt: eventAt };
-            }
-            if (
-              current.kind === 'choose' &&
-              current.returnZoneId === flow.zoneId
-            ) {
-              return { ...current, returnAcknowledgedEventAt: eventAt };
-            }
-            return current;
-          });
-          void adapters.aftermathAcknowledgements
-            .save(flow.zoneId, eventAt)
-            .catch(() => undefined);
-        }}
-        onChooseZone={() => {
-          setSaveError(null);
-          setFlow({
-            kind: 'choose',
-            returnAcknowledgedEventAt: flow.acknowledgedEventAt,
-            returnZoneId: flow.zoneId,
-            secondaryCopySeed: flow.secondaryCopySeed,
-            uses24hourClock: flow.uses24hourClock,
-          });
-        }}
-        onRetryDataPack={() => adapters.timeZoneDataPacks.refresh('manual')}
-        secondaryCopySeed={flow.secondaryCopySeed}
-        uses24hourClock={flow.uses24hourClock}
-        zoneId={flow.zoneId}
+        onAcknowledgeAftermath={(eventAt) =>
+          session.dispatch({ eventAt, type: 'acknowledge-aftermath' })
+        }
+        onChooseZone={() => session.dispatch({ type: 'choose-zone' })}
+        onRetryDataPack={() => session.dispatch({ type: 'manual-refresh' })}
+        secondaryCopySeed={snapshot.secondaryCopySeed}
+        uses24hourClock={snapshot.uses24hourClock}
+        zoneId={snapshot.zoneId}
       />
     );
   }
 
-  if (flow.kind === 'choose') {
-    const returnZoneId = flow.returnZoneId;
+  if (snapshot.kind === 'choose') {
     return (
       <ZoneChooser
-        notice={flow.notice}
+        notice={snapshot.notice}
         onCancel={
-          returnZoneId === undefined
+          !snapshot.canCancel
             ? undefined
-            : () =>
-                setFlow({
-                  acknowledgedEventAt: flow.returnAcknowledgedEventAt ?? null,
-                  kind: 'ready',
-                  secondaryCopySeed: flow.secondaryCopySeed,
-                  uses24hourClock: flow.uses24hourClock,
-                  zoneId: returnZoneId,
-                })
+            : () => session.dispatch({ type: 'cancel-selection' })
         }
-        onSelect={(zoneId) =>
-          void selectZone(zoneId, flow.uses24hourClock, flow.secondaryCopySeed)
-        }
+        onSelect={(zoneId) => session.dispatch({ type: 'select-zone', zoneId })}
         palette={palette}
-        saveError={saveError}
-        saving={saving}
+        saveError={snapshot.saveError}
+        saving={snapshot.saving}
       />
     );
   }
 
-  if (flow.kind === 'confirm') {
-    const zone = getAustralianZone(flow.zoneId)!;
-    const status = createStatusViewModel(
-      dataPackSnapshot.pack,
-      dataPackSnapshot.freshness,
-      flow.zoneId,
-      now ?? new Date(),
-      flow.uses24hourClock,
-      flow.secondaryCopySeed,
-    );
+  if (snapshot.kind === 'confirm') {
     return (
       <SafeAreaView
         edges={['top', 'right', 'bottom', 'left']}
@@ -430,42 +253,41 @@ export default function HomeTimeZoneScreen({
             accessibilityRole="header"
             style={[styles.title, { color: palette.ink }]}
           >
-            {zone.friendlyLabel}
+            {snapshot.friendlyZoneLabel}
           </Text>
           <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
-            {zone.id}
+            {snapshot.zoneId}
           </Text>
-          {status.availability === 'ready' ? (
+          {snapshot.currentTime === null ? null : (
             <Text
               accessibilityLabel={copy.homeTimeZone.accessibility.currentTime({
-                abbreviation: status.abbreviation,
-                clock: status.clock,
+                abbreviation: snapshot.currentTime.abbreviation,
+                clock: snapshot.currentTime.clock,
               })}
               style={[styles.suggestedTime, { color: palette.ink }]}
             >
-              {status.clock} {status.abbreviation}
+              {snapshot.currentTime.clock} {snapshot.currentTime.abbreviation}
             </Text>
-          ) : null}
+          )}
           <Text style={[styles.body, { color: palette.ink }]}>
             {copy.homeTimeZone.confirmation.explanation}
           </Text>
-          {saveError === null ? null : (
+          {snapshot.saveError === null ? null : (
             <Text
               accessibilityRole="alert"
               style={[styles.body, { color: palette.ink }]}
             >
-              {copy.homeTimeZone.errorMessage(saveError)}
+              {copy.homeTimeZone.errorMessage(snapshot.saveError)}
             </Text>
           )}
           <Pressable
             accessibilityRole="button"
-            disabled={saving}
+            disabled={snapshot.saving}
             onPress={() =>
-              void selectZone(
-                zone.id,
-                flow.uses24hourClock,
-                flow.secondaryCopySeed,
-              )
+              session.dispatch({
+                type: 'select-zone',
+                zoneId: snapshot.zoneId,
+              })
             }
             style={[styles.primaryButton, { backgroundColor: palette.accent }]}
           >
@@ -475,14 +297,8 @@ export default function HomeTimeZoneScreen({
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            disabled={saving}
-            onPress={() =>
-              setFlow({
-                kind: 'choose',
-                secondaryCopySeed: flow.secondaryCopySeed,
-                uses24hourClock: flow.uses24hourClock,
-              })
-            }
+            disabled={snapshot.saving}
+            onPress={() => session.dispatch({ type: 'choose-zone' })}
             style={[styles.secondaryButton, { borderColor: palette.rule }]}
           >
             <Text style={[styles.buttonText, { color: palette.ink }]}>
@@ -501,20 +317,19 @@ export default function HomeTimeZoneScreen({
     >
       <View style={styles.confirmation}>
         <Text
-          accessibilityRole={flow.kind === 'load-error' ? 'alert' : undefined}
+          accessibilityRole={
+            snapshot.kind === 'load-error' ? 'alert' : undefined
+          }
           style={[styles.body, { color: palette.ink }]}
         >
-          {flow.kind === 'load-error'
+          {snapshot.kind === 'load-error'
             ? copy.homeTimeZone.errorMessage('load-failed')
             : copy.homeTimeZone.loading.message}
         </Text>
-        {flow.kind === 'load-error' ? (
+        {snapshot.kind === 'load-error' ? (
           <Pressable
             accessibilityRole="button"
-            onPress={() => {
-              setFlow({ kind: 'loading' });
-              setRetry((value) => value + 1);
-            }}
+            onPress={() => session.dispatch({ type: 'retry-load' })}
             style={[styles.secondaryButton, { borderColor: palette.rule }]}
           >
             <Text style={[styles.buttonText, { color: palette.ink }]}>
