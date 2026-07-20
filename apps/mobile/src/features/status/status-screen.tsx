@@ -225,8 +225,6 @@ export default function StatusScreen({
     source: dataPackSnapshot.source,
   } as const;
   const freshnessText = copy.dataFreshness.status(freshnessFacts);
-  const freshnessDescription =
-    copy.dataFreshness.accessibility.description(freshnessFacts);
 
   useEffect(() => {
     if (
@@ -561,8 +559,9 @@ export default function StatusScreen({
           <View
             accessible
             accessibilityLabel={copy.dataFreshness.accessibility.pack({
-              description: freshnessDescription,
+              ...freshnessFacts,
               packVersion: viewModel.packVersion,
+              uses24hourClock,
               validUntil: viewModel.validUntil,
             })}
           >
@@ -575,6 +574,7 @@ export default function StatusScreen({
             <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
               {copy.dataFreshness.packDetails({
                 packVersion: viewModel.packVersion,
+                uses24hourClock,
                 validUntil: viewModel.validUntil,
               })}
             </Text>

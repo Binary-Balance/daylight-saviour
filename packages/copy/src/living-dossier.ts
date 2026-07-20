@@ -594,7 +594,7 @@ export const livingDossier = Object.freeze({
     heading: 'Civil-time decision unavailable',
     label: (freshness: 'decision-unavailable' | 'expired') =>
       freshness === 'expired' ? 'REFRESH REQUIRED' : 'DECISION UNAVAILABLE',
-    message: (reason: CivilTimeDecisionUnavailableReason | string) =>
+    message: (reason: CivilTimeDecisionUnavailableReason) =>
       Object.prototype.hasOwnProperty.call(unavailableMessages, reason)
         ? unavailableMessages[reason as CivilTimeDecisionUnavailableReason]
         : 'Civil-time facts are unavailable. Choose a supported Home Time Zone or try again later.',

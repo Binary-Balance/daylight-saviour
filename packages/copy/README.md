@@ -31,8 +31,10 @@ not assemble translated sentence fragments.
 
 Formatting is explicitly Australian English. Civil-time functions receive a
 Home Time Zone context and explicit device 12/24-hour preference. They never
-read ambient machine locale or time zone. Accessibility paths remain literal
-and separate from playful secondary prose when their wording differs.
+read ambient machine locale or time zone. Validity Horizon instants are rendered
+in Australian-English order with an explicit UTC label and device 12/24-hour
+preference. Accessibility paths accept structured facts and return complete
+labels; they remain separate from playful prose when their wording differs.
 
 Known error codes have exhaustive reviewed mappings. Unknown runtime values use
 a reviewed safe fallback. Raw exception messages remain diagnostic-only and are

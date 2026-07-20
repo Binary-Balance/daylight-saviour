@@ -177,19 +177,40 @@ describe('Australian-English copy catalogue', () => {
       'Verified data current',
     );
     assert.equal(
-      dataFreshness.accessibility.description({
-        freshness: 'expired',
-        source: 'cached',
+      dataFreshness.accessibility.pack({
+        freshness: 'current',
+        packVersion: '2026c-australian-v1',
+        source: 'remote',
+        uses24hourClock: false,
+        validUntil: '2030-12-31T23:59:59.000Z',
       }),
-      'validity expired, refresh required',
+      'Time-Zone Data Pack 2026c-australian-v1, verified data current, valid until 31 December 2030 at 11:59:59 pm UTC',
     );
     assert.equal(
       dataFreshness.accessibility.pack({
-        description: 'verified data current',
+        freshness: 'expired',
         packVersion: '2026c-australian-v1',
+        source: 'cached',
+        uses24hourClock: true,
         validUntil: '2030-12-31T23:59:59.000Z',
       }),
-      'Time-Zone Data Pack 2026c-australian-v1, verified data current, valid until 2030-12-31T23:59:59.000Z',
+      'Time-Zone Data Pack 2026c-australian-v1, validity expired, refresh required, valid until 31 December 2030 at 23:59:59 UTC',
+    );
+    assert.equal(
+      dataFreshness.packDetails({
+        packVersion: '2026c-australian-v1',
+        uses24hourClock: true,
+        validUntil: '2030-12-31T23:59:59.000Z',
+      }),
+      'Pack 2026c-australian-v1 · Valid through 31 December 2030 at 23:59:59 UTC',
+    );
+    assert.equal(
+      dataFreshness.packDetails({
+        packVersion: '2026c-australian-v1',
+        uses24hourClock: false,
+        validUntil: 'invalid-runtime-value',
+      }),
+      'Pack 2026c-australian-v1 · Valid through recorded UTC Validity Horizon',
     );
     assert.equal(
       settings.homeTimeZone('Sydney, Canberra & most of NSW'),

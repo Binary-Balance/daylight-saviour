@@ -54,7 +54,7 @@ export const homeTimeZone = Object.freeze({
     heading: 'SUGGESTED HOME TIME ZONE',
     useSuggestedButton: 'Use this Home Time Zone',
   }),
-  errorMessage: (code: HomeTimeZoneErrorCode | string) =>
+  errorMessage: (code: HomeTimeZoneErrorCode) =>
     Object.prototype.hasOwnProperty.call(errors, code)
       ? errors[code as HomeTimeZoneErrorCode]
       : 'Something went wrong with Home Time Zone settings. Try again.',
@@ -62,7 +62,7 @@ export const homeTimeZone = Object.freeze({
     message: 'Loading Home Time Zone…',
     retryButton: 'Retry',
   }),
-  notice: (code: HomeTimeZoneNoticeCode | string) =>
+  notice: (code: HomeTimeZoneNoticeCode) =>
     Object.prototype.hasOwnProperty.call(notices, code)
       ? notices[code as HomeTimeZoneNoticeCode]
       : 'Home Time Zone needs attention. Choose an Australian region.',
