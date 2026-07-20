@@ -36,6 +36,12 @@ Add each dependency to its consuming workspace. Keep React, React DOM, and React
 
 Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycle-script approvals to suppress dependency problems. Resolve conflicts explicitly, document accepted advisories, and verify dependency shape with `npm run dependencies:check`.
 
+Portable signed-pack verification pins `@noble/ed25519` 3.1.0 and
+`@noble/hashes` 2.2.0 in `@daylight-saviour/contracts`. Both are MIT,
+zero-runtime-dependency modules. Verification wires pure JavaScript SHA
+functions, so React Native needs no randomness or crypto polyfill. Node's
+built-in crypto performs deterministic artifact signing.
+
 Root override `uuid@11.1.1` patches the version requested by Expo's transitive `xcode@3.0.1` tooling. `xcode` uses the retained `uuid.v4()` API. Keep native generation in validation and remove this override when Expo's dependency chain adopts a patched version directly.
 
 The root `allowScripts` policy denies the optional `unrs-resolver@1.12.2` postinstall inherited through `eslint-config-expo`; repository linting works without it. The exact `fsevents@2.3.3` install script is approved for optional native macOS file watching. `strict-allow-scripts=true` makes clean installs fail before any future unreviewed lifecycle script runs. Review and pin a script before approving it.
@@ -194,6 +200,21 @@ Web screenshots provide fast layout evidence only. They complement rather than
 replace physical-device or native-runtime validation for Android and iOS
 behavior, including permissions, notifications, secure storage, and lifecycle
 handling.
+
+## Signed-pack local HTTP evidence
+
+Run time-zone data tests with loopback listener permission. Suite generates
+deterministic test-only signed artifacts in temporary directories, serves them
+through reference HTTP harness, proves validators and immutable cache headers,
+then closes listener:
+
+```sh
+npm run test --workspace @daylight-saviour/time-zone-data
+```
+
+No cloud deployment, production endpoint, resource identifier, or production
+key participates. See `packages/time-zone-data/README.md` for manual harness
+commands.
 
 ## Validation
 

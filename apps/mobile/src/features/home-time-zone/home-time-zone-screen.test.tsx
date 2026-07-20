@@ -5,11 +5,13 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react-native';
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, AppState, type AppStateStatus } from 'react-native';
+import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
 import appConfig from '../../../app.json';
 import HomeTimeZoneScreen from './home-time-zone-screen';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
+import { createTimeZoneDataPackManager } from '../time-zone-data/time-zone-data-manager';
 
 function createAdapters({
   acknowledgedEventAt = null,
@@ -46,6 +48,15 @@ function createAdapters({
         stored = canonicalZoneId;
       }),
     },
+    timeZoneDataPacks: createTimeZoneDataPackManager({
+      bundledPack: bundledAustralianDataPack,
+      now: () => now,
+      remoteConfig: null,
+      storage: {
+        load: jest.fn(async () => null),
+        save: jest.fn(async () => undefined),
+      },
+    }),
   };
   return adapters;
 }
@@ -61,6 +72,28 @@ describe('HomeTimeZoneScreen', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it('starts cold-launch refresh and forwards active lifecycle events', async () => {
+    const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+    const initialize = jest.spyOn(adapters.timeZoneDataPacks, 'initialize');
+    const refresh = jest.spyOn(adapters.timeZoneDataPacks, 'refresh');
+    let appStateHandler: ((state: AppStateStatus) => void) | undefined;
+    jest
+      .spyOn(AppState, 'addEventListener')
+      .mockImplementation((_type, listener) => {
+        appStateHandler = listener;
+        return { remove: jest.fn() };
+      });
+
+    render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+    await screen.findByText('Standard time applies');
+
+    expect(initialize).toHaveBeenCalledTimes(1);
+    act(() => appStateHandler?.('background'));
+    expect(refresh).not.toHaveBeenCalledWith('foreground');
+    act(() => appStateHandler?.('active'));
+    expect(refresh).toHaveBeenCalledWith('foreground');
   });
 
   it('confirms a supported aliased device zone without location permission', async () => {
@@ -356,6 +389,7 @@ describe('HomeTimeZoneScreen', () => {
 
   it('shows literal load and save errors', async () => {
     const loadFailure: HomeTimeZoneAdapters = {
+      ...createAdapters(),
       aftermathAcknowledgements: {
         load: jest.fn(async () => null),
         save: jest.fn(async () => undefined),

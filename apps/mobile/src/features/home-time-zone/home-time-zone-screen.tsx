@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  AppState,
   Pressable,
   SectionList,
   StyleSheet,
@@ -196,6 +197,28 @@ export default function HomeTimeZoneScreen({
   const [retry, setRetry] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [dataPackSnapshot, setDataPackSnapshot] = useState(() =>
+    adapters.timeZoneDataPacks.getSnapshot(),
+  );
+
+  useEffect(() => {
+    const updateDataPack = () =>
+      setDataPackSnapshot(adapters.timeZoneDataPacks.getSnapshot());
+    const unsubscribe = adapters.timeZoneDataPacks.subscribe(updateDataPack);
+    const appStateSubscription = AppState.addEventListener(
+      'change',
+      (nextState) => {
+        if (nextState === 'active') {
+          void adapters.timeZoneDataPacks.refresh('foreground');
+        }
+      },
+    );
+    void adapters.timeZoneDataPacks.initialize();
+    return () => {
+      appStateSubscription.remove();
+      unsubscribe();
+    };
+  }, [adapters]);
 
   useEffect(() => {
     let active = true;
@@ -296,6 +319,7 @@ export default function HomeTimeZoneScreen({
     return (
       <StatusScreen
         acknowledgedEventAt={flow.acknowledgedEventAt}
+        dataPackSnapshot={dataPackSnapshot}
         key={flow.zoneId}
         now={now}
         onAcknowledgeAftermath={(eventAt) => {
@@ -324,6 +348,7 @@ export default function HomeTimeZoneScreen({
             uses24hourClock: flow.uses24hourClock,
           });
         }}
+        onRetryDataPack={() => adapters.timeZoneDataPacks.refresh('manual')}
         uses24hourClock={flow.uses24hourClock}
         zoneId={flow.zoneId}
       />
@@ -357,6 +382,8 @@ export default function HomeTimeZoneScreen({
   if (flow.kind === 'confirm') {
     const zone = getAustralianZone(flow.zoneId)!;
     const status = createStatusViewModel(
+      dataPackSnapshot.pack,
+      dataPackSnapshot.freshness,
       flow.zoneId,
       now ?? new Date(),
       flow.uses24hourClock,

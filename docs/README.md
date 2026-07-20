@@ -57,5 +57,6 @@ Every ADR is currently accepted. Status is recorded in each ADR's front matter.
 - [Runtime-validated contracts](../packages/contracts/README.md)
 - [Reviewed copy](../packages/copy/README.md)
 - [Time-zone data](../packages/time-zone-data/README.md)
+- [Mobile Time-Zone Data Pack refresh](../apps/mobile/src/features/time-zone-data/README.md)
 
 Source-adjacent README files document component seams. If one conflicts with an accepted ADR, update both deliberately or record a superseding decision.

@@ -10,7 +10,12 @@
   },
   "scripts": {
     "generate": "node scripts/generate-australian-pack.mjs",
+    "publish:test": "node scripts/sign-australian-pack.mjs",
+    "serve:test": "node scripts/serve-test-deployment.mjs",
     "test": "node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@daylight-saviour/contracts": "*"
   }
 }
