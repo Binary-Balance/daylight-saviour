@@ -21,6 +21,7 @@ export type TimeZoneDataPackFreshness =
   | 'expired';
 
 export type TimeZoneDataPackSource = 'bundled' | 'cached' | 'remote';
+export type TimeZoneDataPackErrorCode = 'refresh-failed';
 export type TimeZoneDataPackRefreshTrigger =
   | 'cold-launch'
   | 'foreground'
@@ -29,7 +30,7 @@ export type TimeZoneDataPackRefreshTrigger =
 export interface TimeZoneDataPackSnapshot {
   readonly freshness: TimeZoneDataPackFreshness;
   readonly lastCheckedAt: string | null;
-  readonly lastError: string | null;
+  readonly lastError: TimeZoneDataPackErrorCode | null;
   readonly pack: ActivatedTimeZoneDataPack;
   readonly remoteEnabled: boolean;
   readonly source: TimeZoneDataPackSource;
@@ -460,8 +461,7 @@ export function createTimeZoneDataPackManager(
             ? 'offline-valid'
             : 'retry-failed',
         lastCheckedAt: checkedAtIso,
-        lastError:
-          'Refresh failed. Last verified Time-Zone Data Pack remains active.',
+        lastError: 'refresh-failed',
       });
     }
   }

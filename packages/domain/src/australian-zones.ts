@@ -16,14 +16,8 @@ export interface AustralianZone {
 }
 
 export const australianZoneGroups = [
-  {
-    id: 'mainland-and-state-regions',
-    label: 'Mainland & state regions',
-  },
-  {
-    id: 'islands-and-external-territories',
-    label: 'Islands & external territories',
-  },
+  { id: 'mainland-and-state-regions' },
+  { id: 'islands-and-external-territories' },
 ] as const;
 
 export const australianZones: readonly AustralianZone[] = [

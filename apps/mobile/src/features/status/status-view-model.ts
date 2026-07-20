@@ -2,125 +2,15 @@ import {
   CivilTimeDecisionUnavailableError,
   decideLivingDossier,
   getAustralianZone,
+  type ChangeDirection,
   type CivilTimeDecisionUnavailableReason,
+  type DaylightSavingStatus,
   type LivingDossierPhase,
-  type LocalDateTime,
 } from '@daylight-saviour/domain';
 import type { ActivatedTimeZoneDataPack } from '@daylight-saviour/contracts';
+import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import type { TimeZoneDataPackFreshness } from '../time-zone-data/time-zone-data-manager';
-
-const months = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-] as const;
-
-function twoDigits(value: number) {
-  return value.toString().padStart(2, '0');
-}
-
-function formatTime(local: LocalDateTime, uses24hourClock: boolean) {
-  if (uses24hourClock) {
-    return `${twoDigits(local.hour)}:${twoDigits(local.minute)}`;
-  }
-
-  const period = local.hour >= 12 ? 'pm' : 'am';
-  const hour = local.hour % 12 || 12;
-  return `${hour}:${twoDigits(local.minute)} ${period}`;
-}
-
-function formatDate(local: LocalDateTime) {
-  return `${local.day} ${months[local.month - 1]} ${local.year}`;
-}
-
-function formatOffset(offsetSeconds: number) {
-  const sign = offsetSeconds >= 0 ? '+' : '-';
-  const absoluteMinutes = Math.abs(offsetSeconds) / 60;
-  const hours = Math.floor(absoluteMinutes / 60);
-  const minutes = absoluteMinutes % 60;
-  return `UTC${sign}${twoDigits(hours)}:${twoDigits(minutes)}`;
-}
-
-function plural(value: number, unit: string) {
-  return `${value} ${unit}${value === 1 ? '' : 's'}`;
-}
-
-export function formatAbsoluteDuration(totalSeconds: number) {
-  let remaining = Math.floor(Math.abs(totalSeconds));
-  if (remaining < 1) {
-    return 'now';
-  }
-
-  const parts: string[] = [];
-  for (const [unit, size] of [
-    ['day', 86_400],
-    ['hour', 3_600],
-    ['minute', 60],
-    ['second', 1],
-  ] as const) {
-    const value = Math.floor(remaining / size);
-    remaining %= size;
-    if (value > 0) {
-      parts.push(plural(value, unit));
-    }
-    if (parts.length === 2) {
-      break;
-    }
-  }
-
-  return parts.join(', ');
-}
-
-function formatDelta(offsetDeltaSeconds: number) {
-  const absoluteMinutes = Math.abs(offsetDeltaSeconds) / 60;
-  if (absoluteMinutes % 60 === 0) {
-    return plural(absoluteMinutes / 60, 'hour');
-  }
-  return plural(absoluteMinutes, 'minute');
-}
-
-const phasePresentation: Record<
-  LivingDossierPhase,
-  { readonly label: string; readonly secondaryLine: string }
-> = {
-  ordinary: {
-    label: 'ON FILE',
-    secondaryLine: 'Next adjustment recorded. Civil time continues meanwhile.',
-  },
-  approaching: {
-    label: 'APPROACHING',
-    secondaryLine: 'Clock adjustment approaching. Paperwork remains composed.',
-  },
-  'reminder-week': {
-    label: 'REMINDER WEEK',
-    secondaryLine: 'Change due within one week. The clock has been notified.',
-  },
-  'reminder-day': {
-    label: 'REMINDER DAY',
-    secondaryLine:
-      'Change due within 24 hours. Temporal administration is ready.',
-  },
-  aftermath: {
-    label: 'CHANGE RECORDED',
-    secondaryLine:
-      'New civil time now applies. The clock has filed its amendment.',
-  },
-  'no-event': {
-    label: 'NO CHANGE FILED',
-    secondaryLine:
-      'No clock adjustment is scheduled. Civil time may rest unbothered.',
-  },
-};
 
 export type StatusViewModel =
   | {
@@ -130,11 +20,12 @@ export type StatusViewModel =
       readonly currentOffset: string;
       readonly event: {
         readonly countdown: string | null;
+        readonly countdownAccessibilityLabel: string | null;
         readonly date: string;
-        readonly direction: 'Forward Change' | 'Backward Change';
+        readonly direction: ChangeDirection;
         readonly elapsed: string | null;
         readonly instant: string;
-        readonly offsetAmount: string;
+        readonly clockMovement: string;
         readonly offsetChange: string;
         readonly relation: 'completed' | 'upcoming';
         readonly wallTimeChange: string;
@@ -145,7 +36,7 @@ export type StatusViewModel =
       readonly phase: LivingDossierPhase;
       readonly phaseLabel: string;
       readonly secondaryLine: string;
-      readonly status: string;
+      readonly status: DaylightSavingStatus;
       readonly validUntil: string;
       readonly zoneId: string;
     }
@@ -165,7 +56,8 @@ export function createStatusViewModel(
   dataFreshness: TimeZoneDataPackFreshness,
   zoneId: string,
   now: Date,
-  uses24hourClock = false,
+  uses24hourClock: boolean,
+  installationSeed: string,
   acknowledgedEventAt: string | null = null,
 ): StatusViewModel {
   const packDetails = {
@@ -178,38 +70,70 @@ export function createStatusViewModel(
     });
     const decision = dossier.civilTime;
     const event = dossier.featuredEvent;
-    const presentation = phasePresentation[dossier.phase];
     const completed = dossier.phase === 'aftermath';
+    const hourCycleContext = {
+      homeTimeZone: decision.zoneId,
+      uses24hourClock,
+    } as const;
 
     return {
       availability: 'ready',
       abbreviation: decision.abbreviation,
-      clock: formatTime(decision.localDateTime, uses24hourClock),
-      currentOffset: formatOffset(decision.utcOffsetSeconds),
+      clock: copy.livingDossier.clock.format({
+        context: hourCycleContext,
+        localDateTime: decision.localDateTime,
+      }),
+      currentOffset: copy.livingDossier.clock.utcOffset(
+        decision.utcOffsetSeconds,
+      ),
       event:
         event === null
           ? null
           : {
               countdown: completed
                 ? null
-                : formatAbsoluteDuration(event.secondsUntil),
-              date: formatDate(event.localAfter),
+                : copy.livingDossier.changeEvent.countdown(event.secondsUntil),
+              countdownAccessibilityLabel: completed
+                ? null
+                : copy.livingDossier.accessibility.countdown(
+                    event.secondsUntil,
+                  ),
+              date: copy.livingDossier.changeEvent.date(event.localAfter),
               direction: event.direction,
               elapsed: completed
-                ? formatAbsoluteDuration(event.secondsUntil)
+                ? copy.livingDossier.changeEvent.elapsed(event.secondsUntil)
                 : null,
               instant: event.at,
-              offsetAmount: formatDelta(event.offsetDeltaSeconds),
-              offsetChange: `${formatOffset(event.offsetBeforeSeconds)} → ${formatOffset(event.offsetAfterSeconds)}`,
+              clockMovement: copy.livingDossier.changeEvent.clocksMove(
+                event.offsetDeltaSeconds,
+              ),
+              offsetChange: copy.livingDossier.changeEvent.offsetChange({
+                afterSeconds: event.offsetAfterSeconds,
+                beforeSeconds: event.offsetBeforeSeconds,
+              }),
               relation: completed ? 'completed' : 'upcoming',
-              wallTimeChange: `${formatTime(event.localBefore, uses24hourClock)} → ${formatTime(event.localAfter, uses24hourClock)}`,
+              wallTimeChange: copy.livingDossier.changeEvent.localTimeChange({
+                after: event.localAfter,
+                before: event.localBefore,
+                context: hourCycleContext,
+              }),
             },
       friendlyZoneLabel: decision.friendlyZoneLabel,
       freshness: dataFreshness,
       ...packDetails,
       phase: dossier.phase,
-      phaseLabel: presentation.label,
-      secondaryLine: presentation.secondaryLine,
+      phaseLabel: copy.livingDossier.phaseLabel(dossier.phase),
+      secondaryLine: copy.livingDossier.secondary.select({
+        event:
+          event === null
+            ? null
+            : { direction: event.direction, instant: event.at },
+        installationSeed,
+        localDate: decision.localDateTime,
+        phase: dossier.phase,
+        status: decision.daylightSavingStatus,
+        zoneId: decision.zoneId,
+      }),
       status: decision.daylightSavingStatus,
       zoneId: decision.zoneId,
     };
@@ -218,42 +142,24 @@ export function createStatusViewModel(
       throw error;
     }
 
-    const unavailablePresentation: Record<
+    const unavailableFreshness: Record<
       CivilTimeDecisionUnavailableReason,
-      {
-        readonly freshness: 'decision-unavailable' | 'expired';
-        readonly message: string;
-      }
+      'decision-unavailable' | 'expired'
     > = {
-      'before-coverage': {
-        freshness: 'decision-unavailable',
-        message:
-          'The selected instant precedes this Time-Zone Data Pack coverage.',
-      },
-      'invalid-instant': {
-        freshness: 'decision-unavailable',
-        message: 'The current instant is invalid. Civil-time facts are hidden.',
-      },
-      'unsupported-zone': {
-        freshness: 'decision-unavailable',
-        message:
-          'This Home Time Zone is not supported. Choose an Australian Home Time Zone.',
-      },
-      'validity-expired': {
-        freshness: 'expired',
-        message:
-          'The Validity Horizon has passed. New verified data is required before civil-time facts can be shown.',
-      },
+      'before-coverage': 'decision-unavailable',
+      'invalid-instant': 'decision-unavailable',
+      'unsupported-zone': 'decision-unavailable',
+      'validity-expired': 'expired',
     };
-    const unavailable = unavailablePresentation[error.reason];
+    const freshness = unavailableFreshness[error.reason];
 
     return {
       availability: 'unavailable',
       friendlyZoneLabel:
         getAustralianZone(zoneId)?.friendlyLabel ??
-        'Unsupported Home Time Zone',
-      freshness: unavailable.freshness,
-      message: unavailable.message,
+        copy.livingDossier.decisionUnavailable.fallbackZoneLabel,
+      freshness,
+      message: copy.livingDossier.decisionUnavailable.message(error.reason),
       ...packDetails,
       unavailabilityReason: error.reason,
       zoneId,
