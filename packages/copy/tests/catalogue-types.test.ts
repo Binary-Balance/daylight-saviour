@@ -22,4 +22,4 @@ const fragmentPackFacts = {
 australianEnglish.dataFreshness.accessibility.pack(fragmentPackFacts);
 
 // @ts-expect-error invalid decision reasons are not public API
-australianEnglish.livingDossier.decisionUnavailable.message('future-reason');
+australianEnglish.civilTimeReport.decisionUnavailable.message('future-reason');

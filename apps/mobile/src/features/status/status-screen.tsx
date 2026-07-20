@@ -16,7 +16,7 @@ import { australianEnglish as copy } from '@daylight-saviour/copy';
 import type { ChangeDirection } from '@daylight-saviour/domain';
 
 import { daylightSaviourPalettes } from '../../theme';
-import { createDossierMotionRecipe } from './dossier-motion';
+import { createCivilTimeReportMotionRecipe } from './civil-time-report-motion';
 import { createStatusViewModel } from './status-view-model';
 import type { TimeZoneDataPackSnapshot } from '../time-zone-data/time-zone-data-manager';
 
@@ -100,7 +100,7 @@ function SemanticEventMotion({
     () =>
       reducedMotion === null
         ? null
-        : createDossierMotionRecipe(direction, reducedMotion),
+        : createCivilTimeReportMotionRecipe(direction, reducedMotion),
     [direction, reducedMotion],
   );
 
@@ -251,10 +251,10 @@ export default function StatusScreen({
           style={[styles.utilityHeader, { borderBottomColor: palette.rule }]}
         >
           <Text style={[styles.documentLabel, { color: palette.secondaryInk }]}>
-            {copy.livingDossier.document.label}
+            {copy.civilTimeReport.document.label}
           </Text>
           <Text style={[styles.reference, { color: palette.accent }]}>
-            {copy.livingDossier.document.reference}
+            {copy.civilTimeReport.document.reference}
           </Text>
         </View>
 
@@ -262,9 +262,9 @@ export default function StatusScreen({
           accessibilityHint={
             onChooseZone === undefined
               ? undefined
-              : copy.livingDossier.accessibility.openZoneSelectionHint
+              : copy.civilTimeReport.accessibility.openZoneSelectionHint
           }
-          accessibilityLabel={copy.livingDossier.accessibility.homeTimeZone({
+          accessibilityLabel={copy.civilTimeReport.accessibility.homeTimeZone({
             friendlyLabel: viewModel.friendlyZoneLabel,
             zoneId: viewModel.zoneId,
           })}
@@ -281,7 +281,7 @@ export default function StatusScreen({
           ]}
         >
           <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
-            {copy.livingDossier.homeTimeZoneHeading}
+            {copy.civilTimeReport.homeTimeZoneHeading}
           </Text>
           <Text style={[styles.zone, { color: palette.ink }]}>
             {viewModel.friendlyZoneLabel}
@@ -295,7 +295,7 @@ export default function StatusScreen({
           <>
             <View style={styles.statusSection}>
               <View
-                accessibilityLabel={copy.livingDossier.accessibility.clock({
+                accessibilityLabel={copy.civilTimeReport.accessibility.clock({
                   abbreviation: viewModel.abbreviation,
                   clock: viewModel.clock,
                   currentOffset: viewModel.currentOffset,
@@ -345,14 +345,14 @@ export default function StatusScreen({
                   accessible={false}
                   style={[styles.identifier, { color: palette.secondaryInk }]}
                 >
-                  {copy.livingDossier.clock.currentMetadata({
+                  {copy.civilTimeReport.clock.currentMetadata({
                     abbreviation: viewModel.abbreviation,
                     currentOffset: viewModel.currentOffset,
                   })}
                 </Text>
               </View>
               <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
-                {copy.livingDossier.daylightSavingStatusHeading}
+                {copy.civilTimeReport.daylightSavingStatusHeading}
               </Text>
               <Text
                 accessibilityRole="header"
@@ -393,28 +393,28 @@ export default function StatusScreen({
                     borderColor: palette.rule,
                   },
                 ]}
-                testID="no-event-dossier"
+                testID="no-event-civil-time-report"
               >
                 <Text
                   style={[styles.metadata, { color: palette.secondaryInk }]}
                 >
-                  {copy.livingDossier.noEvent.label}
+                  {copy.civilTimeReport.noEvent.label}
                 </Text>
                 <Text
                   accessibilityRole="header"
                   style={[styles.eventDate, { color: palette.ink }]}
                 >
-                  {copy.livingDossier.noEvent.heading}
+                  {copy.civilTimeReport.noEvent.heading}
                 </Text>
                 <Text style={[styles.body, { color: palette.ink }]}>
-                  {copy.livingDossier.noEvent.body}
+                  {copy.civilTimeReport.noEvent.body}
                 </Text>
                 <Text
                   accessibilityElementsHidden
                   importantForAccessibility="no-hide-descendants"
                   style={[styles.noEventMark, { color: palette.accent }]}
                 >
-                  {copy.livingDossier.noEvent.mark}
+                  {copy.civilTimeReport.noEvent.mark}
                 </Text>
               </View>
             ) : (
@@ -427,12 +427,12 @@ export default function StatusScreen({
               >
                 <View
                   style={[styles.eventCard, { borderColor: palette.rule }]}
-                  testID={`${viewModel.phase}-dossier`}
+                  testID={`${viewModel.phase}-civil-time-report`}
                 >
                   <Text
                     style={[styles.metadata, { color: palette.secondaryInk }]}
                   >
-                    {copy.livingDossier.changeEvent.heading(
+                    {copy.civilTimeReport.changeEvent.heading(
                       viewModel.event.relation,
                     )}
                   </Text>
@@ -451,7 +451,7 @@ export default function StatusScreen({
                       importantForAccessibility="no-hide-descendants"
                       style={[styles.direction, { color: palette.accent }]}
                     >
-                      {copy.livingDossier.changeEvent.directionArrow(
+                      {copy.civilTimeReport.changeEvent.directionArrow(
                         viewModel.event.direction,
                       )}
                     </Text>
@@ -463,7 +463,7 @@ export default function StatusScreen({
                         { color: palette.secondaryInk },
                       ]}
                     >
-                      {copy.livingDossier.changeEvent.localTimeHeading}
+                      {copy.civilTimeReport.changeEvent.localTimeHeading}
                     </Text>
                     <Text style={[styles.eventFact, { color: palette.ink }]}>
                       {viewModel.event.wallTimeChange}
@@ -474,7 +474,7 @@ export default function StatusScreen({
                         { color: palette.secondaryInk },
                       ]}
                     >
-                      {copy.livingDossier.changeEvent.utcOffsetHeading}
+                      {copy.civilTimeReport.changeEvent.utcOffsetHeading}
                     </Text>
                     <Text style={[styles.eventFact, { color: palette.ink }]}>
                       {viewModel.event.offsetChange}
@@ -493,7 +493,7 @@ export default function StatusScreen({
                           { color: palette.secondaryInk },
                         ]}
                       >
-                        {copy.livingDossier.changeEvent.completedHeading}
+                        {copy.civilTimeReport.changeEvent.completedHeading}
                       </Text>
                       <Text style={[styles.countdown, { color: palette.ink }]}>
                         {viewModel.event.elapsed}
@@ -508,7 +508,7 @@ export default function StatusScreen({
                           { color: palette.secondaryInk },
                         ]}
                       >
-                        {copy.livingDossier.changeEvent.countdownHeading}
+                        {copy.civilTimeReport.changeEvent.countdownHeading}
                       </Text>
                       <Text
                         accessibilityLabel={
@@ -534,12 +534,12 @@ export default function StatusScreen({
             ]}
             testID={
               viewModel.freshness === 'expired'
-                ? 'expired-dossier'
-                : 'unavailable-dossier'
+                ? 'expired-civil-time-report'
+                : 'unavailable-civil-time-report'
             }
           >
             <Text style={[styles.metadata, { color: palette.accent }]}>
-              {copy.livingDossier.decisionUnavailable.label(
+              {copy.civilTimeReport.decisionUnavailable.label(
                 viewModel.freshness,
               )}
             </Text>
@@ -547,7 +547,7 @@ export default function StatusScreen({
               accessibilityRole="header"
               style={[styles.status, { color: palette.ink }]}
             >
-              {copy.livingDossier.decisionUnavailable.heading}
+              {copy.civilTimeReport.decisionUnavailable.heading}
             </Text>
             <Text style={[styles.body, { color: palette.ink }]}>
               {viewModel.message}

@@ -12,7 +12,7 @@ import {
 const storageKey = 'home-time-zone';
 const secondaryCopySeedStorageKey = 'secondary-copy-seed-v1';
 const aftermathStorageKey = (canonicalZoneId: string) =>
-  `living-dossier-aftermath:${canonicalZoneId}`;
+  `civil-time-report-aftermath:${canonicalZoneId}`;
 const timeZoneDataPackStorageKey = 'time-zone-data-pack-cache-v1';
 
 function createOpaqueSecondaryCopySeed() {

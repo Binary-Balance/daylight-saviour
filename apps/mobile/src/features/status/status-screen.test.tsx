@@ -270,8 +270,8 @@ describe('StatusScreen', () => {
     expect(screen.queryByText(/time applies$/)).toBeNull();
     expect(screen.queryByText(/UTC\+\d/)).toBeNull();
     expect(screen.queryByText(/Civil time may/)).toBeNull();
-    expect(screen.getByTestId('expired-dossier')).toBeTruthy();
-    expect(screen.queryByTestId('no-event-dossier')).toBeNull();
+    expect(screen.getByTestId('expired-civil-time-report')).toBeTruthy();
+    expect(screen.queryByTestId('no-event-civil-time-report')).toBeNull();
     expect(screen.getByLabelText(/validity expired/)).toBeTruthy();
   });
 
@@ -360,7 +360,7 @@ describe('StatusScreen', () => {
       />,
     );
 
-    expect(screen.getByTestId('unavailable-dossier')).toBeTruthy();
+    expect(screen.getByTestId('unavailable-civil-time-report')).toBeTruthy();
     expect(screen.getByText('DECISION UNAVAILABLE')).toBeTruthy();
     expect(screen.getByText(/Home Time Zone is not supported/)).toBeTruthy();
     expect(screen.getByLabelText(/freshness not determined/)).toBeTruthy();
@@ -392,8 +392,8 @@ describe('StatusScreen', () => {
       ).toBeTruthy();
       expect(screen.queryByText(/^In /)).toBeNull();
       expect(screen.getByText(/No countdown required/)).toBeTruthy();
-      expect(screen.getByTestId('no-event-dossier')).toBeTruthy();
-      expect(screen.queryByTestId('expired-dossier')).toBeNull();
+      expect(screen.getByTestId('no-event-civil-time-report')).toBeTruthy();
+      expect(screen.queryByTestId('expired-civil-time-report')).toBeNull();
       expect(screen.getByLabelText(/bundled data current/)).toBeTruthy();
     },
   );
@@ -416,15 +416,31 @@ describe('StatusScreen', () => {
   });
 
   it.each([
-    ['2026-09-05T15:59:59.000Z', 'ordinary-dossier', 'ON FILE'],
-    ['2026-09-05T16:00:00.000Z', 'approaching-dossier', 'APPROACHING'],
-    ['2026-09-26T16:00:00.000Z', 'reminder-week-dossier', 'REMINDER WEEK'],
-    ['2026-10-02T16:00:00.000Z', 'reminder-day-dossier', 'REMINDER DAY'],
-    ['2026-10-03T16:00:00.000Z', 'aftermath-dossier', 'CHANGE RECORDED'],
-    ['2026-10-05T16:00:00.000Z', 'ordinary-dossier', 'ON FILE'],
+    ['2026-09-05T15:59:59.000Z', 'ordinary-civil-time-report', 'ON FILE'],
+    [
+      '2026-09-05T16:00:00.000Z',
+      'approaching-civil-time-report',
+      'APPROACHING',
+    ],
+    [
+      '2026-09-26T16:00:00.000Z',
+      'reminder-week-civil-time-report',
+      'REMINDER WEEK',
+    ],
+    [
+      '2026-10-02T16:00:00.000Z',
+      'reminder-day-civil-time-report',
+      'REMINDER DAY',
+    ],
+    [
+      '2026-10-03T16:00:00.000Z',
+      'aftermath-civil-time-report',
+      'CHANGE RECORDED',
+    ],
+    ['2026-10-05T16:00:00.000Z', 'ordinary-civil-time-report', 'ON FILE'],
   ] as const)(
     'renders deterministic phase at %s',
-    (instant, dossierTestId, phaseLabel) => {
+    (instant, reportTestId, phaseLabel) => {
       render(
         <StatusScreen
           now={new Date(instant)}
@@ -433,7 +449,7 @@ describe('StatusScreen', () => {
         />,
       );
 
-      expect(screen.getByTestId(dossierTestId)).toBeTruthy();
+      expect(screen.getByTestId(reportTestId)).toBeTruthy();
       expect(
         screen.getByText(phaseLabel, { includeHiddenElements: true }),
       ).toBeTruthy();
@@ -553,7 +569,7 @@ describe('StatusScreen', () => {
         reducedMotion
       />,
     );
-    expect(screen.getByTestId('aftermath-dossier')).toBeTruthy();
+    expect(screen.getByTestId('aftermath-civil-time-report')).toBeTruthy();
     expect(acknowledge).toHaveBeenCalledWith('2026-10-03T16:00:00.000Z');
 
     first.unmount();
@@ -565,8 +581,8 @@ describe('StatusScreen', () => {
         reducedMotion
       />,
     );
-    expect(screen.getByTestId('ordinary-dossier')).toBeTruthy();
-    expect(screen.queryByTestId('aftermath-dossier')).toBeNull();
+    expect(screen.getByTestId('ordinary-civil-time-report')).toBeTruthy();
+    expect(screen.queryByTestId('aftermath-civil-time-report')).toBeNull();
     expect(acknowledge).toHaveBeenCalledTimes(1);
   });
 

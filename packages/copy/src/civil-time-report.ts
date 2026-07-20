@@ -2,7 +2,7 @@ import type {
   ChangeDirection,
   CivilTimeDecisionUnavailableReason,
   DaylightSavingStatus,
-  LivingDossierPhase,
+  CivilTimeReportPhase,
   LocalDateTime,
 } from '@daylight-saviour/domain';
 
@@ -18,7 +18,7 @@ export interface SecondaryCopyInput {
   } | null;
   readonly installationSeed: string;
   readonly localDate: Pick<LocalDateTime, 'day' | 'month' | 'year'>;
-  readonly phase: LivingDossierPhase;
+  readonly phase: CivilTimeReportPhase;
   readonly status: DaylightSavingStatus;
   readonly zoneId: string;
 }
@@ -519,7 +519,7 @@ const phaseLabels = {
   ordinary: 'ON FILE',
   'reminder-day': 'REMINDER DAY',
   'reminder-week': 'REMINDER WEEK',
-} as const satisfies Record<LivingDossierPhase, string>;
+} as const satisfies Record<CivilTimeReportPhase, string>;
 
 const unavailableMessages = {
   'before-coverage':
@@ -532,7 +532,7 @@ const unavailableMessages = {
     'The Validity Horizon has passed. New verified data is required before civil-time facts can be shown.',
 } as const satisfies Record<CivilTimeDecisionUnavailableReason, string>;
 
-export const livingDossier = Object.freeze({
+export const civilTimeReport = Object.freeze({
   accessibility: Object.freeze({
     clock: (facts: {
       readonly abbreviation: string;
@@ -611,7 +611,7 @@ export const livingDossier = Object.freeze({
     label: 'CHANGE EVENT RECORD',
     mark: '✓ CIVIL TIME LEFT IN PEACE',
   }),
-  phaseLabel: (phase: LivingDossierPhase) => phaseLabels[phase],
+  phaseLabel: (phase: CivilTimeReportPhase) => phaseLabels[phase],
   secondary: Object.freeze({
     catalogue: secondaryCatalogue,
     select: selectSecondaryCopy,

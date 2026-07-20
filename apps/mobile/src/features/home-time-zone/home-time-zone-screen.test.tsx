@@ -206,7 +206,7 @@ describe('HomeTimeZoneScreen', () => {
     [false, '10:00 am'],
     [true, '10:00'],
   ] as const)(
-    'uses device %s-hour preference for onboarding and saved dossier',
+    'uses device %s-hour preference for onboarding and saved report',
     async (uses24hourClock, expectedClock) => {
       const adapters = createAdapters({ uses24hourClock });
       const first = render(
@@ -243,7 +243,7 @@ describe('HomeTimeZoneScreen', () => {
     ).toBeTruthy();
   });
 
-  it('reopens chooser from Home Time Zone control and updates dossier', async () => {
+  it('reopens chooser from Home Time Zone control and updates report', async () => {
     const adapters = createAdapters({ savedZone: 'Australia/Brisbane' });
 
     render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
@@ -274,7 +274,7 @@ describe('HomeTimeZoneScreen', () => {
     expect(screen.getAllByText(/UTC\+10:30/).length).toBeGreaterThan(0);
   });
 
-  it('cancels dossier chooser without saving and restores prior zone', async () => {
+  it('cancels report chooser without saving and restores prior zone', async () => {
     const adapters = createAdapters({ savedZone: 'Australia/Brisbane' });
 
     render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
@@ -347,14 +347,16 @@ describe('HomeTimeZoneScreen', () => {
     ).toBeTruthy();
   });
 
-  it('persists per-event aftermath acknowledgement and resumes normal dossier', async () => {
+  it('persists per-event aftermath acknowledgement and resumes normal report', async () => {
     const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
     const aftermathNow = new Date('2026-10-03T17:00:00.000Z');
     const first = render(
       <HomeTimeZoneScreen adapters={adapters} now={aftermathNow} />,
     );
 
-    expect(await screen.findByTestId('aftermath-dossier')).toBeTruthy();
+    expect(
+      await screen.findByTestId('aftermath-civil-time-report'),
+    ).toBeTruthy();
     await waitFor(() =>
       expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalledWith(
         'Australia/Sydney',
@@ -365,8 +367,10 @@ describe('HomeTimeZoneScreen', () => {
     first.unmount();
     render(<HomeTimeZoneScreen adapters={adapters} now={aftermathNow} />);
 
-    expect(await screen.findByTestId('ordinary-dossier')).toBeTruthy();
-    expect(screen.queryByTestId('aftermath-dossier')).toBeNull();
+    expect(
+      await screen.findByTestId('ordinary-civil-time-report'),
+    ).toBeTruthy();
+    expect(screen.queryByTestId('aftermath-civil-time-report')).toBeNull();
   });
 
   it('does not replay acknowledged Aftermath after chooser cancel in same opening', async () => {
@@ -378,7 +382,9 @@ describe('HomeTimeZoneScreen', () => {
       />,
     );
 
-    expect(await screen.findByTestId('aftermath-dossier')).toBeTruthy();
+    expect(
+      await screen.findByTestId('aftermath-civil-time-report'),
+    ).toBeTruthy();
     await waitFor(() =>
       expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalled(),
     );
@@ -393,8 +399,10 @@ describe('HomeTimeZoneScreen', () => {
       }),
     );
 
-    expect(await screen.findByTestId('ordinary-dossier')).toBeTruthy();
-    expect(screen.queryByTestId('aftermath-dossier')).toBeNull();
+    expect(
+      await screen.findByTestId('ordinary-civil-time-report'),
+    ).toBeTruthy();
+    expect(screen.queryByTestId('aftermath-civil-time-report')).toBeNull();
   });
 
   it('degrades saved-zone acknowledgement read failure to unacknowledged state', async () => {

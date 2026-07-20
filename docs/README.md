@@ -49,7 +49,7 @@ Every ADR is currently accepted. Status is recorded in each ADR's front matter.
 - [ADR 0014: Launch in Australian English with localization boundaries](adr/0014-launch-in-australian-english.md)
 - [ADR 0017: Use low-infrastructure support channels](adr/0017-use-low-infrastructure-support-channels.md)
 - [ADR 0018: Use a bureaucratic-modernist visual language](adr/0018-use-bureaucratic-modernist-visual-language.md)
-- [ADR 0020: Use a Living Dossier instead of artificial engagement](adr/0020-use-a-living-civil-time-dossier.md)
+- [ADR 0020: Use a Civil Time Report instead of artificial engagement](adr/0020-use-a-civil-time-report.md)
 
 ## Component documentation
 
