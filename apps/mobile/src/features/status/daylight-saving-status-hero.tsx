@@ -101,9 +101,10 @@ export default function DaylightSavingStatusHero({
           styles.stamp,
           {
             borderColor: palette.accent,
-            transform: [{ rotate: '-1deg' }],
+            transform: [{ rotate: '-3deg' }],
           },
         ]}
+        testID="phase-stamp"
       >
         <Text style={[styles.stampText, { color: palette.accent }]}>
           {facts.phaseLabel}

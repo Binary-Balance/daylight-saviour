@@ -127,6 +127,22 @@ describe('Australian-English copy catalogue', () => {
     );
   });
 
+  it('names each Civil Time Report phase by its Change Event meaning', () => {
+    const { phaseLabel } = australianEnglish.civilTimeReport;
+    const expected = {
+      aftermath: 'CHANGE RECORDED',
+      approaching: 'CHANGE APPROACHING',
+      'no-event': 'NO CHANGE SCHEDULED',
+      ordinary: 'NO CHANGE IMMINENT',
+      'reminder-day': 'CHANGE WITHIN 24 HOURS',
+      'reminder-week': 'CHANGE WITHIN 7 DAYS',
+    };
+
+    for (const [phase, label] of Object.entries(expected)) {
+      assert.equal(phaseLabel(phase), label);
+    }
+  });
+
   it('maps every known unavailable reason and unknown runtime values safely', () => {
     const decision = australianEnglish.civilTimeReport.decisionUnavailable;
     const expected = {

@@ -514,11 +514,11 @@ function selectSecondaryCopy(input: SecondaryCopyInput) {
 
 const phaseLabels = {
   aftermath: 'CHANGE RECORDED',
-  approaching: 'APPROACHING',
-  'no-event': 'NO CHANGE FILED',
-  ordinary: 'ON FILE',
-  'reminder-day': 'REMINDER DAY',
-  'reminder-week': 'REMINDER WEEK',
+  approaching: 'CHANGE APPROACHING',
+  'no-event': 'NO CHANGE SCHEDULED',
+  ordinary: 'NO CHANGE IMMINENT',
+  'reminder-day': 'CHANGE WITHIN 24 HOURS',
+  'reminder-week': 'CHANGE WITHIN 7 DAYS',
 } as const satisfies Record<CivilTimeReportPhase, string>;
 
 const unavailableMessages = {
