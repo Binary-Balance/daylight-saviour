@@ -154,28 +154,36 @@ describe('StatusScreen facade', () => {
   });
 
   it.each([
-    ['2026-09-05T15:59:59.000Z', 'ordinary-civil-time-report', 'ON FILE'],
+    [
+      '2026-09-05T15:59:59.000Z',
+      'ordinary-civil-time-report',
+      'NO CHANGE IMMINENT',
+    ],
     [
       '2026-09-05T16:00:00.000Z',
       'approaching-civil-time-report',
-      'APPROACHING',
+      'CHANGE APPROACHING',
     ],
     [
       '2026-09-26T16:00:00.000Z',
       'reminder-week-civil-time-report',
-      'REMINDER WEEK',
+      'CHANGE WITHIN 7 DAYS',
     ],
     [
       '2026-10-02T16:00:00.000Z',
       'reminder-day-civil-time-report',
-      'REMINDER DAY',
+      'CHANGE WITHIN 24 HOURS',
     ],
     [
       '2026-10-03T16:00:00.000Z',
       'aftermath-civil-time-report',
       'CHANGE RECORDED',
     ],
-    ['2026-10-05T16:00:00.000Z', 'ordinary-civil-time-report', 'ON FILE'],
+    [
+      '2026-10-05T16:00:00.000Z',
+      'ordinary-civil-time-report',
+      'NO CHANGE IMMINENT',
+    ],
   ] as const)(
     'composes deterministic phase at %s',
     (instant, reportTestId, phaseLabel) => {

@@ -27,6 +27,7 @@ After Expo scaffold exists, run from repository root:
 - `npm ci` — install from lockfile.
 - `npx expo start` — run Metro for device or simulator development.
 - `npx expo start --web` — run browser preview.
+- `npm run web --workspace @daylight-saviour/mobile -- --port 8087 --localhost` — run browser preview at fixed `http://localhost:8087`; do not pass fixed-port flags through root `npm run web`, because its workspace wrapper does not forward them.
 - `npm run typecheck` — validate strict TypeScript.
 - `npm run lint` — run configured ESLint checks.
 - `npm test` — run unit and component tests.

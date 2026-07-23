@@ -10,7 +10,7 @@ const facts: DaylightSavingStatusHeroFacts = {
   abbreviation: 'AEST',
   clock: '10:17 pm',
   currentOffset: 'UTC+10:00',
-  phaseLabel: 'ON FILE',
+  phaseLabel: 'NO CHANGE IMMINENT',
   secondaryLine: 'Test secondary line.',
   status: 'Standard time applies',
 };
@@ -103,8 +103,17 @@ describe('DaylightSavingStatusHero', () => {
         screen.getByRole('header', { name: 'Standard time applies' }),
       ).toBeTruthy();
       expect(
-        screen.getByText('ON FILE', { includeHiddenElements: true }),
+        screen.getByText('NO CHANGE IMMINENT', {
+          includeHiddenElements: true,
+        }),
       ).toBeTruthy();
+      expect(
+        ReactNative.StyleSheet.flatten(
+          screen.getByTestId('phase-stamp', {
+            includeHiddenElements: true,
+          }).props.style,
+        ).transform,
+      ).toEqual([{ rotate: '-3deg' }]);
     },
   );
 });
