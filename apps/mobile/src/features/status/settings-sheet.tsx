@@ -83,10 +83,15 @@ export default function SettingsSheet({
                 onPress={() => setOpen(false)}
                 style={[
                   styles.closeButton,
-                  { backgroundColor: palette.accent },
+                  { backgroundColor: palette.actionFill },
                 ]}
               >
-                <Text style={styles.closeButtonText}>
+                <Text
+                  style={[
+                    styles.closeButtonText,
+                    { color: palette.onActionFill },
+                  ]}
+                >
                   {copy.settings.closeButton}
                 </Text>
               </Pressable>
@@ -110,7 +115,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   closeButtonText: {
-    color: '#FFF9EA',
     fontSize: 17,
     fontWeight: '800',
   },

@@ -15,6 +15,7 @@ describe('CivilTimeReportHeader', () => {
         <CivilTimeReportHeader
           facts={{
             friendlyZoneLabel: 'Casey Station, Australian Antarctic Territory',
+            packVersion: '2026a-australian-v1',
             zoneId: 'Antarctica/Casey',
           }}
           onChooseZone={chooseZone}
@@ -39,6 +40,13 @@ describe('CivilTimeReportHeader', () => {
             .props.style,
         ).color,
       ).toBe(palette.ink);
+      expect(
+        StyleSheet.flatten(
+          screen.getByText('2026a-australian-v1', {
+            includeHiddenElements: true,
+          }).props.style,
+        ).color,
+      ).toBe(palette.solarGold);
       fireEvent.press(zone);
       expect(chooseZone).toHaveBeenCalledTimes(1);
     },
@@ -49,6 +57,7 @@ describe('CivilTimeReportHeader', () => {
       <CivilTimeReportHeader
         facts={{
           friendlyZoneLabel: 'Sydney, Canberra & most of NSW',
+          packVersion: '2026a-australian-v1',
           zoneId: 'Australia/Sydney',
         }}
         palette={daylightSaviourPalettes.light}

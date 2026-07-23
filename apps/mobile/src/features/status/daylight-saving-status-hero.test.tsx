@@ -114,6 +114,13 @@ describe('DaylightSavingStatusHero', () => {
           }).props.style,
         ).transform,
       ).toEqual([{ rotate: '-3deg' }]);
+      expect(
+        ReactNative.StyleSheet.flatten(
+          screen.getByTestId('phase-stamp', {
+            includeHiddenElements: true,
+          }).props.style,
+        ).borderColor,
+      ).toBe(palette.signalRed);
     },
   );
 });

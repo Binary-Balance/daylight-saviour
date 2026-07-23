@@ -289,9 +289,17 @@ export default function HomeTimeZoneScreen({
                 zoneId: snapshot.zoneId,
               })
             }
-            style={[styles.primaryButton, { backgroundColor: palette.accent }]}
+            style={[
+              styles.primaryButton,
+              { backgroundColor: palette.actionFill },
+            ]}
           >
-            <Text style={styles.primaryButtonText}>
+            <Text
+              style={[
+                styles.primaryButtonText,
+                { color: palette.onActionFill },
+              ]}
+            >
               {copy.homeTimeZone.confirmation.useSuggestedButton}
             </Text>
           </Pressable>
@@ -352,7 +360,7 @@ const styles = StyleSheet.create({
   listContent: { padding: 24 },
   metadata: { fontSize: 12, fontWeight: '700', letterSpacing: 1.1 },
   primaryButton: { alignItems: 'center', minHeight: 52, padding: 16 },
-  primaryButtonText: { color: '#FFF9EA', fontSize: 17, fontWeight: '800' },
+  primaryButtonText: { fontSize: 17, fontWeight: '800' },
   safeArea: { flex: 1 },
   search: { borderWidth: 1, fontSize: 17, minHeight: 52, padding: 14 },
   secondaryButton: {

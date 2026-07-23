@@ -6,6 +6,7 @@ import type { DaylightSaviourPalette } from '../../theme';
 
 export interface CivilTimeReportHeaderFacts {
   readonly friendlyZoneLabel: string;
+  readonly packVersion: string;
   readonly zoneId: string;
 }
 
@@ -25,13 +26,16 @@ export default function CivilTimeReportHeader({
       <View
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
-        style={[styles.utilityHeader, { borderBottomColor: palette.rule }]}
+        style={[
+          styles.utilityHeader,
+          { borderBottomColor: palette.solarGoldStructure },
+        ]}
       >
         <Text style={[styles.documentLabel, { color: palette.secondaryInk }]}>
           {copy.civilTimeReport.document.label}
         </Text>
-        <Text style={[styles.reference, { color: palette.accent }]}>
-          {copy.civilTimeReport.document.reference}
+        <Text style={[styles.reference, { color: palette.solarGold }]}>
+          {facts.packVersion}
         </Text>
       </View>
 

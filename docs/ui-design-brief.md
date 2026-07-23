@@ -42,14 +42,16 @@ Candidate colour tokens, subject to on-device contrast validation:
 
 | Role | Light | Dark |
 | --- | --- | --- |
-| Background | Warm cream `#F4EEDC` | Midnight navy `#081426` |
-| Surface | Pale paper `#FFF9EA` | Navy `#101F35` |
-| Primary ink | `#111B2C` | `#F6F0DE` |
-| Secondary ink | `#596273` | `#B6C0CF` |
-| Rules | `#A9A38F` | `#405067` |
-| Accent | Signal orange `#E5482D` | Signal coral `#FF6A4D` |
+| Background | Civic White `#F7F8FA` | Midnight navy `#081426` |
+| Surface | White record `#FFFFFF` | Navy `#101F35` |
+| Primary ink | `#101B2D` | `#F6F0DE` |
+| Secondary ink | `#5B6678` | `#B6C0CF` |
+| Rules and neutral controls | `#AAB2BC` | `#405067` |
+| Solar-gold text | `#A66F00` | Signal coral `#FF6A4D` |
+| Solar-gold structure | `#C99A22` | `#405067` |
+| Fictional phase stamp | Signal red `#E5482D` | Signal coral `#FF6A4D` |
 
-Accent marks direction, focus, or attention but never carries meaning alone. Daylight saving is not coded as green/success, nor standard time as red/failure. Prefer rules and tonal surfaces over shadows; avoid pure white, pure black, and gradient-led backgrounds.
+In light appearance, Solar Gold guides the eye from active Time-Zone Data Pack provenance through the utility-header divider to the next Change Event's direction, top rule, and left rail. Signal red is reserved for fictional phase stamps so it remains recognisably stamped. Settings, Home Time Zone controls, and unrelated rules remain neutral. Colour never carries meaning alone: direction, pack provenance, and status remain textual. Preserve the existing dark palette and behaviour. Prefer rules and tonal surfaces over shadows; avoid beige, cream, manila, parchment, sepia, gradients, metallic effects, decorative sun motifs, and implied government affiliation.
 
 ## Semantic Motion
 
