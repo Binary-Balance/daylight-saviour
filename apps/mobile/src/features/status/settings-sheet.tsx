@@ -33,7 +33,7 @@ export default function SettingsSheet({
         style={({ pressed }) => [
           styles.settingsButton,
           {
-            borderColor: palette.rule,
+            borderColor: palette.controlBoundary,
             backgroundColor: palette.background,
             opacity: pressed ? 0.72 : 1,
           },

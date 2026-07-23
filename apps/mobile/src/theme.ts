@@ -2,6 +2,7 @@ export const daylightSaviourPalettes = {
   light: {
     actionFill: '#101B2D',
     background: '#F7F8FA',
+    controlBoundary: '#87919D',
     decisionNoticeBorder: '#AAB2BC',
     decisionNoticeText: '#5B6678',
     ink: '#101B2D',
@@ -10,13 +11,14 @@ export const daylightSaviourPalettes = {
     rule: '#AAB2BC',
     secondaryInk: '#5B6678',
     signalRed: '#E5482D',
-    solarGold: '#A66F00',
+    solarGold: '#9A6700',
     solarGoldStructure: '#C99A22',
     surface: '#FFFFFF',
   },
   dark: {
     actionFill: '#FF6A4D',
     background: '#081426',
+    controlBoundary: '#405067',
     decisionNoticeBorder: '#FF6A4D',
     decisionNoticeText: '#FF6A4D',
     ink: '#F6F0DE',

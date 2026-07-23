@@ -47,6 +47,16 @@ describe('CivilTimeReportHeader', () => {
           }).props.style,
         ).color,
       ).toBe(palette.solarGold);
+      expect(
+        StyleSheet.flatten(
+          screen.getByTestId('utility-identity', {
+            includeHiddenElements: true,
+          }).props.style,
+        ),
+      ).toMatchObject({ flexShrink: 1, gap: 4 });
+      expect(StyleSheet.flatten(zone.props.style).borderColor).toBe(
+        palette.controlBoundary,
+      );
       fireEvent.press(zone);
       expect(chooseZone).toHaveBeenCalledTimes(1);
     },

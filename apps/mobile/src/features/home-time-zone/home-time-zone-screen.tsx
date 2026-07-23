@@ -116,7 +116,7 @@ function ZoneChooser({
           style={[
             styles.search,
             {
-              borderColor: palette.rule,
+              borderColor: palette.controlBoundary,
               color: palette.ink,
               backgroundColor: palette.surface,
             },
@@ -307,7 +307,10 @@ export default function HomeTimeZoneScreen({
             accessibilityRole="button"
             disabled={snapshot.saving}
             onPress={() => session.dispatch({ type: 'choose-zone' })}
-            style={[styles.secondaryButton, { borderColor: palette.rule }]}
+            style={[
+              styles.secondaryButton,
+              { borderColor: palette.controlBoundary },
+            ]}
           >
             <Text style={[styles.buttonText, { color: palette.ink }]}>
               {copy.homeTimeZone.confirmation.chooseAnotherButton}
@@ -338,7 +341,10 @@ export default function HomeTimeZoneScreen({
           <Pressable
             accessibilityRole="button"
             onPress={() => session.dispatch({ type: 'retry-load' })}
-            style={[styles.secondaryButton, { borderColor: palette.rule }]}
+            style={[
+              styles.secondaryButton,
+              { borderColor: palette.controlBoundary },
+            ]}
           >
             <Text style={[styles.buttonText, { color: palette.ink }]}>
               {copy.homeTimeZone.loading.retryButton}

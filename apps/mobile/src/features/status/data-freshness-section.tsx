@@ -62,7 +62,7 @@ export default function DataFreshnessSection({
           accessibilityRole="button"
           disabled={facts.freshness === 'checking'}
           onPress={() => void onRetry()}
-          style={[styles.retryButton, { borderColor: palette.rule }]}
+          style={[styles.retryButton, { borderColor: palette.controlBoundary }]}
         >
           <Text style={[styles.buttonText, { color: palette.ink }]}>
             {facts.freshness === 'checking'

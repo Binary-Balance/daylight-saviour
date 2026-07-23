@@ -46,12 +46,13 @@ Candidate colour tokens, subject to on-device contrast validation:
 | Surface | White record `#FFFFFF` | Navy `#101F35` |
 | Primary ink | `#101B2D` | `#F6F0DE` |
 | Secondary ink | `#5B6678` | `#B6C0CF` |
-| Rules and neutral controls | `#AAB2BC` | `#405067` |
-| Solar-gold text | `#A66F00` | Signal coral `#FF6A4D` |
+| Decorative rules | `#AAB2BC` | `#405067` |
+| Neutral control boundaries | `#87919D` | `#405067` |
+| Solar-gold text | `#9A6700` | Signal coral `#FF6A4D` |
 | Solar-gold structure | `#C99A22` | `#405067` |
 | Fictional phase stamp | Signal red `#E5482D` | Signal coral `#FF6A4D` |
 
-In light appearance, Solar Gold guides the eye from active Time-Zone Data Pack provenance through the utility-header divider to the next Change Event's direction, top rule, and left rail. Signal red is reserved for fictional phase stamps so it remains recognisably stamped. Settings, Home Time Zone controls, and unrelated rules remain neutral. Colour never carries meaning alone: direction, pack provenance, and status remain textual. Preserve the existing dark palette and behaviour. Prefer rules and tonal surfaces over shadows; avoid beige, cream, manila, parchment, sepia, gradients, metallic effects, decorative sun motifs, and implied government affiliation.
+In light appearance, Solar Gold guides the eye from active Time-Zone Data Pack provenance through the utility-header divider to the next Change Event's direction, top rule, and left rail. Its text token meets 4.5:1 contrast against both Civic White and white record surfaces; neutral control boundaries meet 3:1 while cool rules remain decorative. Signal red is reserved for fictional phase stamps so it remains recognisably stamped. Settings, Home Time Zone controls, and unrelated rules remain neutral. Colour never carries meaning alone: direction, pack provenance, and status remain textual. Preserve the existing dark palette and behaviour. Prefer rules and tonal surfaces over shadows; avoid beige, cream, manila, parchment, sepia, gradients, metallic effects, decorative sun motifs, and implied government affiliation.
 
 ## Semantic Motion
 
