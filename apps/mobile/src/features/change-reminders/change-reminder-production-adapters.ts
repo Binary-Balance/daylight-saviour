@@ -230,7 +230,7 @@ export function createProductionChangeReminderAdapters({
       }
       const pending = {
         attemptGeneration: nextGeneration,
-        homeTimeZone: saved?.homeTimeZone ?? homeTimeZone,
+        homeTimeZone,
         oneDayEnabled: true,
         oneWeekEnabled: true,
         registrationRequestId:
@@ -276,7 +276,10 @@ export function createProductionChangeReminderAdapters({
     }
   }
 
-  let enableInFlight: Promise<ChangeReminderEnableResult> | null = null;
+  let enableInFlight: {
+    readonly homeTimeZone: string;
+    readonly promise: Promise<ChangeReminderEnableResult>;
+  } | null = null;
   return {
     async restore() {
       if (platform === 'web') return { kind: 'unavailable' };
@@ -296,11 +299,16 @@ export function createProductionChangeReminderAdapters({
       };
     },
     enable(homeTimeZone) {
-      if (enableInFlight !== null) return enableInFlight;
-      enableInFlight = performEnable(homeTimeZone).finally(() => {
-        enableInFlight = null;
+      if (enableInFlight !== null) {
+        return enableInFlight.homeTimeZone === homeTimeZone
+          ? enableInFlight.promise
+          : Promise.resolve({ kind: 'failed' });
+      }
+      const promise = performEnable(homeTimeZone).finally(() => {
+        if (enableInFlight?.promise === promise) enableInFlight = null;
       });
-      return enableInFlight;
+      enableInFlight = { homeTimeZone, promise };
+      return promise;
     },
     openSettings,
   };

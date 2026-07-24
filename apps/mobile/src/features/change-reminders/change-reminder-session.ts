@@ -56,12 +56,7 @@ export function createChangeReminderSession({
       } else if (result.kind === 'unregistered') {
         publish({ kind: 'untouched' });
       } else if (result.kind === 'pending') {
-        publish({
-          kind:
-            result.homeTimeZone === homeTimeZone
-              ? 'retry-pending'
-              : 'zone-mismatch',
-        });
+        publish({ kind: 'retry-pending' });
       } else if (result.registration.homeTimeZone !== homeTimeZone) {
         publish({ kind: 'zone-mismatch' });
       } else if (!result.notificationPermissionGranted) {

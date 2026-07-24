@@ -248,6 +248,33 @@ describe('production Change Reminder adapters', () => {
     expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('does not share in-flight enablement across different zones', async () => {
+    let resolve!: (response: Response) => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((onStarted) => {
+      markStarted = onStarted;
+    });
+    const fetchImplementation = jest.fn(async (_input: URL | RequestInfo) => {
+      markStarted();
+      return await new Promise<Response>((onResolve) => {
+        resolve = onResolve;
+      });
+    }) as jest.MockedFunction<typeof fetch>;
+    const test = harness({ fetchImplementation });
+    const sydney = test.adapters.enable('Australia/Sydney');
+    await started;
+
+    await expect(test.adapters.enable('Australia/Brisbane')).resolves.toEqual({
+      kind: 'failed',
+    });
+    resolve(Response.json(responseBody));
+    await expect(sydney).resolves.toEqual({ kind: 'enabled' });
+    expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({ homeTimeZone: 'Australia/Sydney' });
+  });
+
   it('persists and restores one versioned SecureStore value', async () => {
     const test = harness();
     await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
@@ -280,7 +307,7 @@ describe('production Change Reminder adapters', () => {
     });
   });
 
-  it('restores and retries pending state after relaunch using its original zone', async () => {
+  it('retries relaunched pending state using the caller current zone', async () => {
     const storage = {
       value: JSON.stringify({
         attemptGeneration: 4,
@@ -306,8 +333,12 @@ describe('production Change Reminder adapters', () => {
       ),
     ).toMatchObject({
       attemptGeneration: 5,
-      homeTimeZone: 'Australia/Sydney',
+      homeTimeZone: 'Australia/Brisbane',
       registrationRequestId: 'b'.repeat(64),
+    });
+    expect(JSON.parse(storage.value)).toMatchObject({
+      homeTimeZone: 'Australia/Brisbane',
+      state: 'registered',
     });
   });
 

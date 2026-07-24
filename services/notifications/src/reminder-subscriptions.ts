@@ -16,6 +16,7 @@ const throttleWindowMs = 10 * 60 * 1000;
 const throttleRetentionMs = 30 * 24 * 60 * 60 * 1000;
 const throttleLimit = 5;
 const tableMutationRetryLimit = 12;
+const subscriptionPartitionKey = 'subscriptions-v1';
 
 interface ReminderSubscriptionRegistration {
   readonly attemptGeneration: number;
@@ -93,10 +94,6 @@ export function opaqueRandomValue() {
 
 export function hashOpaqueValue(value: string) {
   return createHash('sha256').update(value).digest('base64url');
-}
-
-export function homeTimeZonePartitionKey(homeTimeZone: string) {
-  return `zone-${hashOpaqueValue(homeTimeZone)}`;
 }
 
 export function deriveInstallationId(registrationRequestId: string) {
@@ -299,9 +296,8 @@ export function createTableReminderSubscriptionStore(
 ): ReminderSubscriptionStore {
   return {
     async saveSubscription(record) {
-      const partitionKey = homeTimeZonePartitionKey(record.homeTimeZone);
       const entity = {
-        partitionKey,
+        partitionKey: subscriptionPartitionKey,
         rowKey: record.installationId,
         attemptGeneration: record.attemptGeneration,
         credentialHash: record.credentialHash,
@@ -317,7 +313,7 @@ export function createTableReminderSubscriptionStore(
         let existing: SubscriptionEntity;
         try {
           existing = await subscriptions.get(
-            partitionKey,
+            subscriptionPartitionKey,
             record.installationId,
           );
         } catch (error) {

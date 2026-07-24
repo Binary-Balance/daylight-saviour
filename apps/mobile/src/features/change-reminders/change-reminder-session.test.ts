@@ -87,10 +87,10 @@ describe('Change Reminder session', () => {
     stop();
   });
 
-  it('restores pending registration as retryable and retries through the adapter', async () => {
+  it('keeps pending registration retryable after Home Time Zone changes', async () => {
     const boundary = adapters({
       restore: jest.fn(async () => ({
-        homeTimeZone: 'Australia/Sydney',
+        homeTimeZone: 'Australia/Brisbane',
         kind: 'pending' as const,
       })),
     });

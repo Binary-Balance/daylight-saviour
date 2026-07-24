@@ -5,7 +5,6 @@ import {
   createTableReminderSubscriptionStore,
   deriveInstallationId,
   hashOpaqueValue,
-  homeTimeZonePartitionKey,
   normalizeClientAddress,
   registerReminderSubscription,
   type ReminderSubscriptionStore,
@@ -334,7 +333,7 @@ describe('reminder subscription registration', () => {
 });
 
 describe('Azure Table mapping', () => {
-  it('uses a deterministic Table-safe zone partition and retains canonical zone', async () => {
+  it('uses a fixed subscription partition and retains canonical zone as data', async () => {
     let entity: Record<string, unknown> | undefined;
     const tableStore = createTableReminderSubscriptionStore(
       subscriptionTable({
@@ -362,10 +361,7 @@ describe('Azure Table mapping', () => {
       registeredAt: new Date('2026-07-24T05:00:00.000Z'),
     });
 
-    assert.equal(
-      entity?.partitionKey,
-      homeTimeZonePartitionKey('Australia/Sydney'),
-    );
+    assert.equal(entity?.partitionKey, 'subscriptions-v1');
     assert.doesNotMatch(String(entity?.partitionKey), /[\\/#?]/);
     assert.equal(entity?.homeTimeZone, 'Australia/Sydney');
     assert.equal(entity?.attemptGeneration, 1);
@@ -477,6 +473,31 @@ describe('generation-ordered subscription persistence', () => {
     assert.equal(stored.attemptGeneration, 2);
     assert.equal(stored.credentialHash, 'credential-2');
     assert.equal(stored.deviceToken, `${validRegistration.deviceToken}-2`);
+  });
+
+  it('updates one stable row when a higher generation changes zone', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+
+    assert.equal(
+      await registrationStore.saveSubscription(record(1)),
+      'accepted',
+    );
+    assert.equal(
+      await registrationStore.saveSubscription({
+        ...record(2),
+        homeTimeZone: 'Australia/Brisbane',
+      }),
+      'accepted',
+    );
+
+    const stored = onlyRow(subscriptions.rows);
+    assert.equal(stored.attemptGeneration, 2);
+    assert.equal(stored.homeTimeZone, 'Australia/Brisbane');
+    assert.equal(stored.partitionKey, 'subscriptions-v1');
   });
 
   it('accepts one of concurrent equal attempts and keeps one row', async () => {
