@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  createAzureReminderSubscriptionStore,
+  createReminderSubscriptionHandler,
   createTableReminderSubscriptionStore,
   deriveInstallationId,
   hashOpaqueValue,
@@ -111,6 +113,24 @@ function unusedThrottleTable() {
 }
 
 describe('reminder subscription registration', () => {
+  it('returns a generic unavailable response when store construction fails', async () => {
+    const handler = createReminderSubscriptionHandler(() => {
+      throw new Error('sensitive managed identity detail');
+    });
+
+    const result = await handler({} as never);
+
+    assert.deepEqual(result, {
+      headers: { 'Cache-Control': 'no-store' },
+      jsonBody: { error: 'Registration unavailable' },
+      status: 503,
+    });
+    assert.doesNotMatch(
+      JSON.stringify(result),
+      /identity|sensitive|REMINDER_MANAGED_IDENTITY_CLIENT_ID/i,
+    );
+  });
+
   it('stores a credential hash, never the returned credential, after strict validation', async () => {
     let saved: Record<string, unknown> | undefined;
     const now = new Date('2026-07-24T05:00:00.000Z');
@@ -333,6 +353,96 @@ describe('reminder subscription registration', () => {
 });
 
 describe('Azure Table mapping', () => {
+  it('selects the configured UAMI and shares its credential across both Table clients', () => {
+    const credential = {
+      getToken: async () => ({
+        expiresOnTimestamp: 0,
+        token: 'test-token',
+      }),
+    };
+    const selectedClientIds: string[] = [];
+    const tableClients: {
+      readonly credential: object;
+      readonly endpoint: string;
+      readonly tableName: string;
+    }[] = [];
+
+    createAzureReminderSubscriptionStore(
+      {
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: ' runtime-uami-client-id ',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      },
+      {
+        createCredential: (clientId) => {
+          selectedClientIds.push(clientId);
+          return credential;
+        },
+        createTableClient: (endpoint, tableName, selectedCredential) => {
+          tableClients.push({
+            credential: selectedCredential,
+            endpoint,
+            tableName,
+          });
+          return {} as never;
+        },
+      },
+    );
+
+    assert.deepEqual(selectedClientIds, ['runtime-uami-client-id']);
+    assert.deepEqual(
+      tableClients.map(({ endpoint, tableName }) => ({ endpoint, tableName })),
+      [
+        {
+          endpoint: 'https://dlsvstorage.table.core.windows.net',
+          tableName: 'ReminderSubscriptions',
+        },
+        {
+          endpoint: 'https://dlsvstorage.table.core.windows.net',
+          tableName: 'ReminderRegistrationThrottle',
+        },
+      ],
+    );
+    assert.ok(
+      tableClients.every(
+        (tableClient) => tableClient.credential === credential,
+      ),
+    );
+  });
+
+  it('fails before credential or Table client construction without an explicit UAMI', () => {
+    for (const managedIdentityClientId of [undefined, '', '   ']) {
+      let credentialConstructions = 0;
+      let tableClientConstructions = 0;
+      assert.throws(
+        () =>
+          createAzureReminderSubscriptionStore(
+            {
+              REMINDER_MANAGED_IDENTITY_CLIENT_ID: managedIdentityClientId,
+              REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+            },
+            {
+              createCredential: () => {
+                credentialConstructions += 1;
+                return {
+                  getToken: async () => ({
+                    expiresOnTimestamp: 0,
+                    token: 'test-token',
+                  }),
+                };
+              },
+              createTableClient: () => {
+                tableClientConstructions += 1;
+                return {} as never;
+              },
+            },
+          ),
+        /REMINDER_MANAGED_IDENTITY_CLIENT_ID is required/,
+      );
+      assert.equal(credentialConstructions, 0);
+      assert.equal(tableClientConstructions, 0);
+    }
+  });
+
   it('uses a fixed subscription partition and retains canonical zone as data', async () => {
     let entity: Record<string, unknown> | undefined;
     const tableStore = createTableReminderSubscriptionStore(
