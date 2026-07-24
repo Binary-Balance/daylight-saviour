@@ -1,0 +1,41 @@
+export const changeReminders = Object.freeze({
+  accessibility: Object.freeze({
+    enableHint:
+      'Explains reminder timing before asking for notification permission',
+    openSettingsHint: 'Opens device notification settings',
+  }),
+  enabled: Object.freeze({
+    body: 'One-week and one-day Change Reminders are enabled for your Home Time Zone.',
+    heading: 'CHANGE REMINDERS ENABLED',
+  }),
+  explainer: Object.freeze({
+    body: 'One week and one day before a Change Event, following your Home Time Zone while you travel. Delivery is best effort. No account is needed; only this installation, its push token, zone, and timing preferences are stored.',
+    confirm: 'Enable reminders',
+    heading: 'WARN ME BEFORE TIME MISBEHAVES',
+  }),
+  failed: Object.freeze({
+    body: 'Reminders are not enabled. Check your connection and try again.',
+    heading: 'REMINDER REGISTRATION FAILED',
+    retry: 'Try registration again',
+  }),
+  heading: 'CHANGE REMINDERS',
+  osBlocked: Object.freeze({
+    body: 'Notifications are blocked by your device settings. Reminders are not enabled.',
+    heading: 'NOTIFICATIONS BLOCKED',
+    openSettings: 'Open notification settings',
+  }),
+  permissionDenied: Object.freeze({
+    body: 'Notification permission was not granted. Reminders are not enabled.',
+    heading: 'NOTIFICATIONS NOT ALLOWED',
+    retry: 'Ask again',
+  }),
+  saving: 'Registering reminders…',
+  untouched: Object.freeze({
+    action: 'Warn me before time misbehaves',
+    body: 'Get one-week and one-day warnings before your Home Time Zone changes.',
+  }),
+  webUnavailable: Object.freeze({
+    body: 'Change Reminders require the Android or iOS app. Web preview does not request notification permission.',
+    heading: 'REMINDERS UNAVAILABLE ON WEB',
+  }),
+});

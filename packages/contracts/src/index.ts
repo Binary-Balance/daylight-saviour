@@ -12,6 +12,15 @@ export {
   timeZoneDataPackSchemaVersion,
   type TimeZoneDataPackSchemaVersion,
 } from './time-zone-data-pack-version.ts';
+export {
+  parseReminderSubscriptionRegistration,
+  parseReminderSubscriptionRegistrationResponse,
+  reminderSubscriptionPlatforms,
+  ReminderSubscriptionValidationError,
+  type ReminderSubscriptionPlatform,
+  type ReminderSubscriptionRegistration,
+  type ReminderSubscriptionRegistrationResponse,
+} from './reminder-subscription.ts';
 
 export interface TimeZoneState {
   readonly abbreviation: string;
