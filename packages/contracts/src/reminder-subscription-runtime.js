@@ -35,11 +35,12 @@ export function parseReminderSubscriptionRegistration(value) {
   ]);
   if (!reminderSubscriptionPlatforms.includes(input.platform))
     throw new ReminderSubscriptionValidationError('Unsupported platform');
-  if (
-    typeof input.deviceToken !== 'string' ||
-    input.deviceToken.length < 16 ||
-    input.deviceToken.length > 4096
-  )
+  const validToken =
+    typeof input.deviceToken === 'string' &&
+    (input.platform === 'ios'
+      ? /^[A-Fa-f0-9]{64}$/.test(input.deviceToken)
+      : /^[A-Za-z0-9_:.-]{20,4096}$/.test(input.deviceToken));
+  if (!validToken)
     throw new ReminderSubscriptionValidationError('Invalid device token');
   if (
     typeof input.homeTimeZone !== 'string' ||

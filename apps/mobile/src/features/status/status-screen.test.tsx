@@ -7,6 +7,14 @@ import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 import { daylightSaviourPalettes } from '../../theme';
 import RawStatusScreen from './status-screen';
 
+jest.mock('../change-reminders/change-reminder-production-adapters', () => ({
+  productionChangeReminderAdapters: {
+    enable: jest.fn(),
+    load: jest.fn(() => new Promise(() => undefined)),
+    openSettings: jest.fn(),
+  },
+}));
+
 const bundledSnapshot = {
   freshness: 'current',
   lastCheckedAt: null,

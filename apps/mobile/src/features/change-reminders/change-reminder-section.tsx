@@ -1,18 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import type { DaylightSaviourPalette } from '../../theme';
-import type {
-  ChangeReminderAdapters,
-  ChangeReminderEnableResult,
-} from './change-reminder-adapters';
-
-type State =
-  | 'untouched'
-  | 'explainer'
-  | 'saving'
-  | ChangeReminderEnableResult['kind'];
+import type { ChangeReminderAdapters } from './change-reminder-adapters';
+import { createChangeReminderSession } from './change-reminder-session';
 
 export default function ChangeReminderSection({
   adapters,
@@ -23,29 +15,51 @@ export default function ChangeReminderSection({
   readonly homeTimeZone: string;
   readonly palette: DaylightSaviourPalette;
 }) {
-  const [state, setState] = useState<State>('untouched');
-  const enable = () => {
-    setState('saving');
-    void adapters.enable(homeTimeZone).then((result) => setState(result.kind));
-  };
+  const session = useMemo(
+    () => createChangeReminderSession({ adapters, homeTimeZone }),
+    [adapters, homeTimeZone],
+  );
+  const snapshot = useSyncExternalStore(
+    session.subscribe,
+    session.getSnapshot,
+    session.getSnapshot,
+  );
+
+  useEffect(() => session.start(), [session]);
+
   const content =
-    state === 'untouched'
+    snapshot.kind === 'untouched'
       ? copy.changeReminders.untouched
-      : state === 'explainer'
+      : snapshot.kind === 'explainer'
         ? copy.changeReminders.explainer
-        : state === 'enabled'
+        : snapshot.kind === 'enabled'
           ? copy.changeReminders.enabled
-          : state === 'os-blocked'
+          : snapshot.kind === 'os-blocked'
             ? copy.changeReminders.osBlocked
-            : state === 'unavailable'
+            : snapshot.kind === 'unavailable'
               ? copy.changeReminders.webUnavailable
-              : state === 'saving'
+              : snapshot.kind === 'loading'
                 ? null
-                : state === 'permission-denied'
-                  ? copy.changeReminders.permissionDenied
-                  : copy.changeReminders.failed;
+                : snapshot.kind === 'saving'
+                  ? null
+                  : snapshot.kind === 'load-failed'
+                    ? copy.changeReminders.loadFailed
+                    : snapshot.kind === 'permission-denied'
+                      ? copy.changeReminders.permissionDenied
+                      : copy.changeReminders.failed;
+  const errorState =
+    snapshot.kind === 'failed' ||
+    snapshot.kind === 'load-failed' ||
+    snapshot.kind === 'os-blocked' ||
+    snapshot.kind === 'permission-denied';
+
   return (
-    <View style={[styles.card, { borderColor: palette.rule }]}>
+    <View
+      accessibilityState={{
+        busy: snapshot.kind === 'loading' || snapshot.kind === 'saving',
+      }}
+      style={[styles.card, { borderColor: palette.rule }]}
+    >
       <Text
         accessibilityRole="header"
         style={[styles.metadata, { color: palette.secondaryInk }]}
@@ -53,8 +67,13 @@ export default function ChangeReminderSection({
         {copy.changeReminders.heading}
       </Text>
       {content === null ? (
-        <Text style={[styles.body, { color: palette.ink }]}>
-          {copy.changeReminders.saving}
+        <Text
+          accessibilityLiveRegion="polite"
+          style={[styles.body, { color: palette.ink }]}
+        >
+          {snapshot.kind === 'loading'
+            ? copy.changeReminders.loading
+            : copy.changeReminders.saving}
         </Text>
       ) : (
         <>
@@ -63,16 +82,20 @@ export default function ChangeReminderSection({
               {content.heading}
             </Text>
           ) : null}
-          <Text style={[styles.body, { color: palette.ink }]}>
+          <Text
+            accessibilityLiveRegion={errorState ? 'assertive' : 'none'}
+            accessibilityRole={errorState ? 'alert' : undefined}
+            style={[styles.body, { color: palette.ink }]}
+          >
             {content.body}
           </Text>
         </>
       )}
-      {state === 'untouched' ? (
+      {snapshot.kind === 'untouched' ? (
         <Pressable
-          accessibilityRole="button"
           accessibilityHint={copy.changeReminders.accessibility.enableHint}
-          onPress={() => setState('explainer')}
+          accessibilityRole="button"
+          onPress={() => session.dispatch({ type: 'show-explainer' })}
           style={[styles.button, { borderColor: palette.controlBoundary }]}
         >
           <Text style={[styles.buttonText, { color: palette.ink }]}>
@@ -80,10 +103,10 @@ export default function ChangeReminderSection({
           </Text>
         </Pressable>
       ) : null}
-      {state === 'explainer' ? (
+      {snapshot.kind === 'explainer' ? (
         <Pressable
           accessibilityRole="button"
-          onPress={enable}
+          onPress={() => session.dispatch({ type: 'enable' })}
           style={[styles.button, { backgroundColor: palette.actionFill }]}
         >
           <Text style={[styles.buttonText, { color: palette.onActionFill }]}>
@@ -91,26 +114,39 @@ export default function ChangeReminderSection({
           </Text>
         </Pressable>
       ) : null}
-      {state === 'failed' || state === 'permission-denied' ? (
+      {snapshot.kind === 'failed' || snapshot.kind === 'permission-denied' ? (
         <Pressable
           accessibilityRole="button"
-          onPress={enable}
+          onPress={() => session.dispatch({ type: 'enable' })}
           style={[styles.button, { borderColor: palette.controlBoundary }]}
         >
           <Text style={[styles.buttonText, { color: palette.ink }]}>
-            {state === 'failed'
+            {snapshot.kind === 'failed'
               ? copy.changeReminders.failed.retry
               : copy.changeReminders.permissionDenied.retry}
           </Text>
         </Pressable>
       ) : null}
-      {state === 'os-blocked' ? (
+      {snapshot.kind === 'load-failed' ? (
         <Pressable
           accessibilityRole="button"
+          onPress={() => session.dispatch({ type: 'retry-load' })}
+          style={[styles.button, { borderColor: palette.controlBoundary }]}
+        >
+          <Text style={[styles.buttonText, { color: palette.ink }]}>
+            {copy.changeReminders.loadFailed.retry}
+          </Text>
+        </Pressable>
+      ) : null}
+      {snapshot.kind === 'os-blocked' ? (
+        <Pressable
           accessibilityHint={
             copy.changeReminders.accessibility.openSettingsHint
           }
-          onPress={() => void adapters.openSettings()}
+          accessibilityRole="button"
+          onPress={() => {
+            void adapters.openSettings().catch(() => undefined);
+          }}
           style={[styles.button, { borderColor: palette.controlBoundary }]}
         >
           <Text style={[styles.buttonText, { color: palette.ink }]}>

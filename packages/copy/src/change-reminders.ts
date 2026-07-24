@@ -19,6 +19,12 @@ export const changeReminders = Object.freeze({
     retry: 'Try registration again',
   }),
   heading: 'CHANGE REMINDERS',
+  loading: 'Checking reminder registration…',
+  loadFailed: Object.freeze({
+    body: 'Reminder status could not be read securely. Try again before changing registration.',
+    heading: 'REMINDER STATUS UNAVAILABLE',
+    retry: 'Check reminder status again',
+  }),
   osBlocked: Object.freeze({
     body: 'Notifications are blocked by your device settings. Reminders are not enabled.',
     heading: 'NOTIFICATIONS BLOCKED',

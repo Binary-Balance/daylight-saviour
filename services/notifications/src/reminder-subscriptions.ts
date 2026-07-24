@@ -1,36 +1,21 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { isIP } from 'node:net';
 import { DefaultAzureCredential } from '@azure/identity';
-import { TableClient } from '@azure/data-tables';
+import { odata, TableClient } from '@azure/data-tables';
 import type {
   HttpFunctionOptions,
   HttpRequest,
   HttpResponseInit,
+  TimerFunctionOptions,
 } from '@azure/functions';
 import { parseReminderSubscriptionRegistration } from '@daylight-saviour/contracts/reminder-subscription-runtime';
+import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
 const maxRequestBytes = 8 * 1024;
 const throttleWindowMs = 10 * 60 * 1000;
+const throttleRetentionMs = 30 * 24 * 60 * 60 * 1000;
 const throttleLimit = 5;
-const australianZones = new Set([
-  'Australia/Sydney',
-  'Australia/Broken_Hill',
-  'Australia/Melbourne',
-  'Australia/Hobart',
-  'Australia/Brisbane',
-  'Australia/Lindeman',
-  'Australia/Adelaide',
-  'Australia/Darwin',
-  'Australia/Perth',
-  'Australia/Eucla',
-  'Australia/Lord_Howe',
-  'Antarctica/Macquarie',
-  'Pacific/Norfolk',
-  'Indian/Christmas',
-  'Indian/Cocos',
-  'Antarctica/Casey',
-  'Antarctica/Davis',
-  'Antarctica/Mawson',
-]);
+const throttleRetryLimit = 12;
 
 interface ReminderSubscriptionRegistration {
   readonly deviceToken: string;
@@ -40,16 +25,42 @@ interface ReminderSubscriptionRegistration {
   readonly platform: 'android' | 'ios';
 }
 
+interface ReminderSubscriptionRecord extends ReminderSubscriptionRegistration {
+  readonly credentialHash: string;
+  readonly installationId: string;
+  readonly registeredAt: Date;
+}
+
+interface SubscriptionTable {
+  readonly create: (entity: Record<string, unknown>) => Promise<void>;
+}
+
+interface ThrottleEntity {
+  readonly count: number;
+  readonly etag: string;
+  readonly partitionKey: string;
+  readonly rowKey: string;
+}
+
+interface ThrottleTable {
+  readonly create: (entity: Record<string, unknown>) => Promise<void>;
+  readonly delete: (partitionKey: string, rowKey: string) => Promise<void>;
+  readonly get: (
+    partitionKey: string,
+    rowKey: string,
+  ) => Promise<ThrottleEntity>;
+  readonly listExpired: (now: Date) => AsyncIterable<ThrottleEntity>;
+  readonly replace: (
+    entity: Record<string, unknown>,
+    etag: string,
+  ) => Promise<void>;
+}
+
 export interface ReminderSubscriptionStore {
-  readonly saveSubscription: (record: {
-    readonly credentialHash: string;
-    readonly deviceToken: string;
-    readonly homeTimeZone: string;
-    readonly installationId: string;
-    readonly oneDayEnabled: boolean;
-    readonly oneWeekEnabled: boolean;
-    readonly platform: string;
-  }) => Promise<void>;
+  readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
+  readonly saveSubscription: (
+    record: ReminderSubscriptionRecord,
+  ) => Promise<void>;
   readonly takeSourceAllowance: (
     sourceHash: string,
     now: Date,
@@ -64,9 +75,39 @@ export function hashOpaqueValue(value: string) {
   return createHash('sha256').update(value).digest('base64url');
 }
 
+export function homeTimeZonePartitionKey(homeTimeZone: string) {
+  return `zone-${hashOpaqueValue(homeTimeZone)}`;
+}
+
+export function normalizeClientAddress(value: string | null) {
+  if (value === null) return 'unavailable';
+  let candidate = value.trim();
+  const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(candidate);
+  if (bracketed?.[1] !== undefined) {
+    candidate = bracketed[1];
+  } else {
+    const ipv4WithPort = /^([^:]+):\d+$/.exec(candidate);
+    if (ipv4WithPort?.[1] !== undefined && isIP(ipv4WithPort[1]) === 4) {
+      candidate = ipv4WithPort[1];
+    }
+  }
+
+  const mappedIpv4 = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(candidate);
+  if (mappedIpv4?.[1] !== undefined && isIP(mappedIpv4[1]) === 4) {
+    return mappedIpv4[1];
+  }
+  if (isIP(candidate) === 4) return candidate;
+  if (isIP(candidate) === 6) {
+    const hostname = new URL(`http://[${candidate}]/`).hostname;
+    return hostname.slice(1, -1).toLowerCase();
+  }
+  return 'unavailable';
+}
+
 export function sourceAddressHash(request: HttpRequest) {
-  const forwarded = request.headers.get('x-forwarded-for');
-  const source = forwarded?.split(',')[0]?.trim() || 'unavailable';
+  const source = normalizeClientAddress(
+    request.headers.get('x-azure-clientip'),
+  );
   return hashOpaqueValue(source);
 }
 
@@ -87,42 +128,83 @@ function response(
   };
 }
 
-async function readRegistration(request: HttpRequest) {
-  const contentType = request.headers.get('content-type')?.toLowerCase() ?? '';
-  if (!contentType.startsWith('application/json')) {
-    throw new ReminderSubscriptionRequestError(
-      415,
-      'Expected application/json',
-    );
-  }
-  const length = Number(request.headers.get('content-length'));
-  if (Number.isFinite(length) && length > maxRequestBytes) {
-    throw new ReminderSubscriptionRequestError(413, 'Request too large');
-  }
-  const text = await request.text();
-  if (Buffer.byteLength(text, 'utf8') > maxRequestBytes) {
-    throw new ReminderSubscriptionRequestError(413, 'Request too large');
-  }
-  try {
-    const input = parseReminderSubscriptionRegistration(
-      JSON.parse(text),
-    ) as ReminderSubscriptionRegistration;
-    if (!australianZones.has(input.homeTimeZone)) throw new Error();
-    return input;
-  } catch {
-    throw new ReminderSubscriptionRequestError(
-      400,
-      'Invalid registration request',
-    );
-  }
-}
-
 class ReminderSubscriptionRequestError extends Error {
   constructor(
     readonly status: number,
     message: string,
   ) {
     super(message);
+  }
+}
+
+async function readBoundedBody(request: HttpRequest) {
+  const declaredLength = request.headers.get('content-length');
+  if (declaredLength !== null) {
+    const length = Number(declaredLength);
+    if (!Number.isSafeInteger(length) || length < 0) {
+      throw new ReminderSubscriptionRequestError(400, 'Invalid Content-Length');
+    }
+    if (length > maxRequestBytes) {
+      throw new ReminderSubscriptionRequestError(413, 'Request too large');
+    }
+  }
+
+  if (request.body === null) return '';
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      if (!(chunk.value instanceof Uint8Array)) {
+        throw new ReminderSubscriptionRequestError(400, 'Invalid request body');
+      }
+      total += chunk.value.byteLength;
+      if (total > maxRequestBytes) {
+        await reader.cancel();
+        throw new ReminderSubscriptionRequestError(413, 'Request too large');
+      }
+      chunks.push(chunk.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(body);
+  } catch {
+    throw new ReminderSubscriptionRequestError(400, 'Invalid request body');
+  }
+}
+
+async function readRegistration(request: HttpRequest) {
+  const contentType = request.headers.get('content-type')?.trim().toLowerCase();
+  if (contentType !== 'application/json') {
+    throw new ReminderSubscriptionRequestError(
+      415,
+      'Expected application/json',
+    );
+  }
+  const text = await readBoundedBody(request);
+  try {
+    const input = parseReminderSubscriptionRegistration(
+      JSON.parse(text),
+    ) as ReminderSubscriptionRegistration;
+    if (canonicalAustralianZoneId(input.homeTimeZone) === null)
+      throw new Error();
+    return input;
+  } catch {
+    throw new ReminderSubscriptionRequestError(
+      400,
+      'Invalid registration request',
+    );
   }
 }
 
@@ -147,6 +229,7 @@ export async function registerReminderSubscription(
       ...registration,
       credentialHash: hashOpaqueValue(credential),
       installationId,
+      registeredAt: now,
     });
     return {
       status: 201,
@@ -159,6 +242,94 @@ export async function registerReminderSubscription(
     }
     return response(503, 'Registration unavailable');
   }
+}
+
+function statusCode(error: unknown) {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'statusCode' in error &&
+    typeof error.statusCode === 'number'
+  ) {
+    return error.statusCode;
+  }
+  return undefined;
+}
+
+export function createTableReminderSubscriptionStore(
+  subscriptions: SubscriptionTable,
+  throttles: ThrottleTable,
+): ReminderSubscriptionStore {
+  return {
+    async saveSubscription(record) {
+      await subscriptions.create({
+        partitionKey: homeTimeZonePartitionKey(record.homeTimeZone),
+        rowKey: record.installationId,
+        credentialHash: record.credentialHash,
+        deviceToken: record.deviceToken,
+        homeTimeZone: record.homeTimeZone,
+        oneDayEnabled: record.oneDayEnabled,
+        oneWeekEnabled: record.oneWeekEnabled,
+        platform: record.platform,
+        registeredAt: record.registeredAt,
+      });
+    },
+    async takeSourceAllowance(sourceHash, now) {
+      const window = Math.floor(now.getTime() / throttleWindowMs);
+      const rowKey = String(window);
+      const expiresAt = new Date(
+        window * throttleWindowMs + throttleRetentionMs,
+      );
+
+      for (let attempt = 0; attempt < throttleRetryLimit; attempt += 1) {
+        let entity: ThrottleEntity;
+        try {
+          entity = await throttles.get(sourceHash, rowKey);
+        } catch (error) {
+          if (statusCode(error) !== 404) throw error;
+          try {
+            await throttles.create({
+              partitionKey: sourceHash,
+              rowKey,
+              count: 1,
+              expiresAt,
+            });
+            return true;
+          } catch (createError) {
+            if (statusCode(createError) !== 409) throw createError;
+            continue;
+          }
+        }
+
+        if (entity.count >= throttleLimit) return false;
+        try {
+          await throttles.replace(
+            {
+              partitionKey: sourceHash,
+              rowKey,
+              count: entity.count + 1,
+              expiresAt,
+            },
+            entity.etag,
+          );
+          return true;
+        } catch (updateError) {
+          const updateStatus = statusCode(updateError);
+          if (updateStatus !== 409 && updateStatus !== 412) throw updateError;
+        }
+      }
+      throw new Error('Throttle update contention exceeded retry limit');
+    },
+    async purgeExpiredThrottleRecords(now) {
+      for await (const entity of throttles.listExpired(now)) {
+        try {
+          await throttles.delete(entity.partitionKey, entity.rowKey);
+        } catch (error) {
+          if (statusCode(error) !== 404) throw error;
+        }
+      }
+    },
+  };
 }
 
 export function createAzureReminderSubscriptionStore(): ReminderSubscriptionStore {
@@ -178,42 +349,40 @@ export function createAzureReminderSubscriptionStore(): ReminderSubscriptionStor
     'ReminderRegistrationThrottle',
     credential,
   );
-  return {
-    async saveSubscription(record) {
-      await subscriptions.createEntity({
-        partitionKey: record.homeTimeZone,
-        rowKey: record.installationId,
-        credentialHash: record.credentialHash,
-        deviceToken: record.deviceToken,
-        oneDayEnabled: record.oneDayEnabled,
-        oneWeekEnabled: record.oneWeekEnabled,
-        platform: record.platform,
-      });
+  return createTableReminderSubscriptionStore(
+    {
+      create: async (entity) => {
+        await subscriptions.createEntity(entity as never);
+      },
     },
-    async takeSourceAllowance(sourceHash, now) {
-      const window = Math.floor(now.getTime() / throttleWindowMs);
-      const rowKey = String(window);
-      try {
+    {
+      create: async (entity) => {
+        await throttles.createEntity(entity as never);
+      },
+      delete: async (partitionKey, rowKey) => {
+        await throttles.deleteEntity(partitionKey, rowKey);
+      },
+      get: async (partitionKey, rowKey) => {
         const entity = await throttles.getEntity<{ count: number }>(
-          sourceHash,
+          partitionKey,
           rowKey,
         );
-        if (entity.count >= throttleLimit) return false;
-        await throttles.updateEntity(
-          { partitionKey: sourceHash, rowKey, count: entity.count + 1 },
-          'Replace',
-        );
-        return true;
-      } catch {
-        await throttles.createEntity({
-          partitionKey: sourceHash,
+        return {
+          count: entity.count,
+          etag: entity.etag,
+          partitionKey,
           rowKey,
-          count: 1,
-        });
-        return true;
-      }
+        };
+      },
+      listExpired: (now) =>
+        throttles.listEntities<{ count: number }>({
+          queryOptions: { filter: odata`expiresAt lt ${now}` },
+        }) as AsyncIterable<ThrottleEntity>,
+      replace: async (entity, etag) => {
+        await throttles.updateEntity(entity as never, 'Replace', { etag });
+      },
     },
-  };
+  );
 }
 
 export const reminderSubscriptionOptions: HttpFunctionOptions = {
@@ -225,4 +394,14 @@ export const reminderSubscriptionOptions: HttpFunctionOptions = {
     ),
   methods: ['POST'],
   route: 'reminder-subscriptions',
+};
+
+export const reminderThrottleCleanupOptions: TimerFunctionOptions = {
+  handler: async () => {
+    await createAzureReminderSubscriptionStore().purgeExpiredThrottleRecords(
+      new Date(),
+    );
+  },
+  schedule: '0 17 3 * * *',
+  useMonitor: true,
 };

@@ -2,6 +2,10 @@ import {
   activateTimeZoneDataPack,
   type ActivatedTimeZoneDataPack,
 } from '@daylight-saviour/contracts';
+import {
+  canonicalAustralianZoneId,
+  canonicalAustralianZoneIds,
+} from './australian-zone-runtime.js';
 
 export type AustralianZoneGroup =
   | 'mainland-and-state-regions'
@@ -162,6 +166,12 @@ export const australianZones: readonly AustralianZone[] = [
 ];
 
 const zonesById = new Map(australianZones.map((zone) => [zone.id, zone]));
+if (
+  canonicalAustralianZoneIds.length !== zonesById.size ||
+  canonicalAustralianZoneIds.some((zoneId) => !zonesById.has(zoneId))
+) {
+  throw new Error('Australian zone runtime catalogue is out of sync');
+}
 const canonicalIdsByAcceptedId = new Map<string, string>();
 for (const zone of australianZones) {
   canonicalIdsByAcceptedId.set(zone.id, zone.id);
@@ -178,6 +188,8 @@ export function getAustralianZone(candidate: string) {
   const canonicalId = normalizeAustralianZoneId(candidate);
   return canonicalId === null ? null : (zonesById.get(canonicalId) ?? null);
 }
+
+export { canonicalAustralianZoneId };
 
 export function searchAustralianZones(query: string) {
   const needle = query.trim().toLocaleLowerCase('en-AU');
