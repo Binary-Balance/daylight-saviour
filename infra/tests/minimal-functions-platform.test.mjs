@@ -149,6 +149,14 @@ describe('minimal Functions platform Bicep module', () => {
       appSettings.AzureWebJobsStorage__credential,
       'managedidentity',
     );
+    assert.equal(
+      appSettings.REMINDER_MANAGED_IDENTITY_CLIENT_ID,
+      "[parameters('runtimeIdentityClientId')]",
+    );
+    assert.equal(
+      appSettings.REMINDER_STORAGE_ACCOUNT_NAME,
+      "[parameters('storageAccountName')]",
+    );
     assert.equal(appSettings.KEY_VAULT_URI, "[parameters('keyVaultUri')]");
     assert.equal(appSettings.BUILD_VERSION, "[parameters('buildVersion')]");
   });

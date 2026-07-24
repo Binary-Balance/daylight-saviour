@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
-import { DefaultAzureCredential } from '@azure/identity';
+import { ManagedIdentityCredential } from '@azure/identity';
 import { odata, TableClient } from '@azure/data-tables';
 import type {
   HttpFunctionOptions,
@@ -75,6 +75,17 @@ interface ThrottleTable {
     entity: Record<string, unknown>,
     etag: string,
   ) => Promise<void>;
+}
+
+interface AzureReminderSubscriptionStoreDependencies {
+  readonly createCredential: (
+    clientId: string,
+  ) => Pick<ManagedIdentityCredential, 'getToken'>;
+  readonly createTableClient: (
+    endpoint: string,
+    tableName: string,
+    credential: Pick<ManagedIdentityCredential, 'getToken'>,
+  ) => TableClient;
 }
 
 export interface ReminderSubscriptionStore {
@@ -397,19 +408,37 @@ export function createTableReminderSubscriptionStore(
   };
 }
 
-export function createAzureReminderSubscriptionStore(): ReminderSubscriptionStore {
-  const accountName = process.env.REMINDER_STORAGE_ACCOUNT_NAME;
+const azureReminderSubscriptionStoreDependencies: AzureReminderSubscriptionStoreDependencies =
+  {
+    createCredential: (clientId) => new ManagedIdentityCredential(clientId),
+    createTableClient: (endpoint, tableName, credential) =>
+      new TableClient(endpoint, tableName, credential),
+  };
+
+export function createAzureReminderSubscriptionStore(
+  environment: NodeJS.ProcessEnv = process.env,
+  dependencies: AzureReminderSubscriptionStoreDependencies = azureReminderSubscriptionStoreDependencies,
+): ReminderSubscriptionStore {
+  const accountName = environment.REMINDER_STORAGE_ACCOUNT_NAME?.trim();
   if (accountName === undefined || accountName.length === 0) {
     throw new Error('REMINDER_STORAGE_ACCOUNT_NAME is required');
   }
+  const managedIdentityClientId =
+    environment.REMINDER_MANAGED_IDENTITY_CLIENT_ID?.trim();
+  if (
+    managedIdentityClientId === undefined ||
+    managedIdentityClientId.length === 0
+  ) {
+    throw new Error('REMINDER_MANAGED_IDENTITY_CLIENT_ID is required');
+  }
   const endpoint = `https://${accountName}.table.core.windows.net`;
-  const credential = new DefaultAzureCredential();
-  const subscriptions = new TableClient(
+  const credential = dependencies.createCredential(managedIdentityClientId);
+  const subscriptions = dependencies.createTableClient(
     endpoint,
     'ReminderSubscriptions',
     credential,
   );
-  const throttles = new TableClient(
+  const throttles = dependencies.createTableClient(
     endpoint,
     'ReminderRegistrationThrottle',
     credential,
@@ -464,13 +493,21 @@ export function createAzureReminderSubscriptionStore(): ReminderSubscriptionStor
   );
 }
 
+export function createReminderSubscriptionHandler(
+  createStore: () => ReminderSubscriptionStore = createAzureReminderSubscriptionStore,
+) {
+  return async (request: HttpRequest): Promise<HttpResponseInit> => {
+    try {
+      return await registerReminderSubscription(request, createStore());
+    } catch {
+      return response(503, 'Registration unavailable');
+    }
+  };
+}
+
 export const reminderSubscriptionOptions: HttpFunctionOptions = {
   authLevel: 'anonymous' as const,
-  handler: (request: HttpRequest) =>
-    registerReminderSubscription(
-      request,
-      createAzureReminderSubscriptionStore(),
-    ),
+  handler: createReminderSubscriptionHandler(),
   methods: ['POST'],
   route: 'reminder-subscriptions',
 };

@@ -88,6 +88,7 @@ resource appSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     BUILD_VERSION: buildVersion
     FUNCTIONS_EXTENSION_VERSION: '~4'
     KEY_VAULT_URI: keyVaultUri
+    REMINDER_MANAGED_IDENTITY_CLIENT_ID: runtimeIdentityClientId
     REMINDER_STORAGE_ACCOUNT_NAME: storageAccountName
   }
 }
