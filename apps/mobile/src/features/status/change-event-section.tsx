@@ -140,7 +140,10 @@ export default function ChangeEventSection({
         accessibilityRole="alert"
         style={[
           styles.expiredCard,
-          { backgroundColor: palette.surface, borderColor: palette.accent },
+          {
+            backgroundColor: palette.surface,
+            borderColor: palette.decisionNoticeBorder,
+          },
         ]}
         testID={
           report.freshness === 'expired'
@@ -148,7 +151,7 @@ export default function ChangeEventSection({
             : 'unavailable-civil-time-report'
         }
       >
-        <Text style={[styles.metadata, { color: palette.accent }]}>
+        <Text style={[styles.metadata, { color: palette.decisionNoticeText }]}>
           {copy.civilTimeReport.decisionUnavailable.label(report.freshness)}
         </Text>
         <Text
@@ -191,7 +194,7 @@ export default function ChangeEventSection({
         <Text
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
-          style={[styles.noEventMark, { color: palette.accent }]}
+          style={[styles.noEventMark, { color: palette.noEventMark }]}
         >
           {copy.civilTimeReport.noEvent.mark}
         </Text>
@@ -208,7 +211,7 @@ export default function ChangeEventSection({
       reducedMotion={reducedMotion}
     >
       <View
-        style={[styles.eventCard, { borderColor: palette.rule }]}
+        style={[styles.eventCard, { borderColor: palette.solarGoldStructure }]}
         testID={`${report.phase}-civil-time-report`}
       >
         <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
@@ -221,13 +224,13 @@ export default function ChangeEventSection({
           {report.event.date}
         </Text>
         <View style={styles.directionRow}>
-          <Text style={[styles.direction, { color: palette.accent }]}>
+          <Text style={[styles.direction, { color: palette.solarGold }]}>
             {report.event.direction}
           </Text>
           <Text
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
-            style={[styles.direction, { color: palette.accent }]}
+            style={[styles.direction, { color: palette.solarGold }]}
           >
             {copy.civilTimeReport.changeEvent.directionArrow(
               report.event.direction,

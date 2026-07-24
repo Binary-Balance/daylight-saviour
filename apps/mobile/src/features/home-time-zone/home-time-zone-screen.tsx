@@ -116,7 +116,7 @@ function ZoneChooser({
           style={[
             styles.search,
             {
-              borderColor: palette.rule,
+              borderColor: palette.controlBoundary,
               color: palette.ink,
               backgroundColor: palette.surface,
             },
@@ -289,9 +289,17 @@ export default function HomeTimeZoneScreen({
                 zoneId: snapshot.zoneId,
               })
             }
-            style={[styles.primaryButton, { backgroundColor: palette.accent }]}
+            style={[
+              styles.primaryButton,
+              { backgroundColor: palette.actionFill },
+            ]}
           >
-            <Text style={styles.primaryButtonText}>
+            <Text
+              style={[
+                styles.primaryButtonText,
+                { color: palette.onActionFill },
+              ]}
+            >
               {copy.homeTimeZone.confirmation.useSuggestedButton}
             </Text>
           </Pressable>
@@ -299,7 +307,10 @@ export default function HomeTimeZoneScreen({
             accessibilityRole="button"
             disabled={snapshot.saving}
             onPress={() => session.dispatch({ type: 'choose-zone' })}
-            style={[styles.secondaryButton, { borderColor: palette.rule }]}
+            style={[
+              styles.secondaryButton,
+              { borderColor: palette.controlBoundary },
+            ]}
           >
             <Text style={[styles.buttonText, { color: palette.ink }]}>
               {copy.homeTimeZone.confirmation.chooseAnotherButton}
@@ -330,7 +341,10 @@ export default function HomeTimeZoneScreen({
           <Pressable
             accessibilityRole="button"
             onPress={() => session.dispatch({ type: 'retry-load' })}
-            style={[styles.secondaryButton, { borderColor: palette.rule }]}
+            style={[
+              styles.secondaryButton,
+              { borderColor: palette.controlBoundary },
+            ]}
           >
             <Text style={[styles.buttonText, { color: palette.ink }]}>
               {copy.homeTimeZone.loading.retryButton}
@@ -352,7 +366,7 @@ const styles = StyleSheet.create({
   listContent: { padding: 24 },
   metadata: { fontSize: 12, fontWeight: '700', letterSpacing: 1.1 },
   primaryButton: { alignItems: 'center', minHeight: 52, padding: 16 },
-  primaryButtonText: { color: '#FFF9EA', fontSize: 17, fontWeight: '800' },
+  primaryButtonText: { fontSize: 17, fontWeight: '800' },
   safeArea: { flex: 1 },
   search: { borderWidth: 1, fontSize: 17, minHeight: 52, padding: 14 },
   secondaryButton: {

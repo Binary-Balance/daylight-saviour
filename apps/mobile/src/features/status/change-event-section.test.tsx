@@ -50,7 +50,7 @@ describe('ChangeEventSection', () => {
         ReactNative.StyleSheet.flatten(
           screen.getByText('Backward Change').props.style,
         ).color,
-      ).toBe(palette.accent);
+      ).toBe(palette.solarGold);
     },
   );
 

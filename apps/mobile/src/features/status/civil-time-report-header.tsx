@@ -6,6 +6,7 @@ import type { DaylightSaviourPalette } from '../../theme';
 
 export interface CivilTimeReportHeaderFacts {
   readonly friendlyZoneLabel: string;
+  readonly packVersion: string;
   readonly zoneId: string;
 }
 
@@ -25,14 +26,19 @@ export default function CivilTimeReportHeader({
       <View
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
-        style={[styles.utilityHeader, { borderBottomColor: palette.rule }]}
+        style={[
+          styles.utilityHeader,
+          { borderBottomColor: palette.solarGoldStructure },
+        ]}
       >
-        <Text style={[styles.documentLabel, { color: palette.secondaryInk }]}>
-          {copy.civilTimeReport.document.label}
-        </Text>
-        <Text style={[styles.reference, { color: palette.accent }]}>
-          {copy.civilTimeReport.document.reference}
-        </Text>
+        <View style={styles.utilityIdentity} testID="utility-identity">
+          <Text style={[styles.documentLabel, { color: palette.secondaryInk }]}>
+            {copy.civilTimeReport.document.label}
+          </Text>
+          <Text style={[styles.reference, { color: palette.solarGold }]}>
+            {facts.packVersion}
+          </Text>
+        </View>
       </View>
 
       <Pressable
@@ -52,7 +58,7 @@ export default function CivilTimeReportHeader({
           styles.zoneControl,
           {
             backgroundColor: palette.surface,
-            borderColor: palette.rule,
+            borderColor: palette.controlBoundary,
             opacity: pressed ? 0.78 : 1,
           },
         ]}
@@ -73,7 +79,6 @@ export default function CivilTimeReportHeader({
 
 const styles = StyleSheet.create({
   documentLabel: {
-    flex: 1,
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 1.2,
@@ -93,13 +98,14 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   utilityHeader: {
-    alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: 16,
     minHeight: 48,
     paddingBottom: 16,
     paddingRight: 92,
+  },
+  utilityIdentity: {
+    flexShrink: 1,
+    gap: 4,
   },
   zone: {
     fontSize: 28,

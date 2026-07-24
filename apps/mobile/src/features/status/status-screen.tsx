@@ -124,7 +124,11 @@ export default function StatusScreen({
         contentInsetAdjustmentBehavior="automatic"
       >
         <CivilTimeReportHeader
-          facts={viewModel}
+          facts={{
+            friendlyZoneLabel: viewModel.friendlyZoneLabel,
+            packVersion: viewModel.packVersion,
+            zoneId: viewModel.zoneId,
+          }}
           onChooseZone={onChooseZone}
           palette={palette}
         />
