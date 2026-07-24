@@ -27,11 +27,13 @@ function exactKeys(input, expected) {
 export function parseReminderSubscriptionRegistration(value) {
   const input = object(value);
   exactKeys(input, [
+    'attemptGeneration',
     'deviceToken',
     'homeTimeZone',
     'oneDayEnabled',
     'oneWeekEnabled',
     'platform',
+    'registrationRequestId',
   ]);
   if (!reminderSubscriptionPlatforms.includes(input.platform))
     throw new ReminderSubscriptionValidationError('Unsupported platform');
@@ -42,6 +44,19 @@ export function parseReminderSubscriptionRegistration(value) {
       : /^[A-Za-z0-9_:.-]{20,4096}$/.test(input.deviceToken));
   if (!validToken)
     throw new ReminderSubscriptionValidationError('Invalid device token');
+  if (
+    typeof input.registrationRequestId !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(input.registrationRequestId)
+  )
+    throw new ReminderSubscriptionValidationError(
+      'Invalid registration request ID',
+    );
+  if (
+    !Number.isSafeInteger(input.attemptGeneration) ||
+    input.attemptGeneration < 1 ||
+    input.attemptGeneration > 2_147_483_647
+  )
+    throw new ReminderSubscriptionValidationError('Invalid attempt generation');
   if (
     typeof input.homeTimeZone !== 'string' ||
     !/^[A-Za-z0-9._+-]+(?:\/[A-Za-z0-9._+-]+)+$/.test(input.homeTimeZone)

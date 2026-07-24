@@ -9,6 +9,7 @@ export type ChangeReminderSessionSnapshot =
   | { readonly kind: 'untouched' }
   | { readonly kind: 'explainer' }
   | { readonly kind: 'saving' }
+  | { readonly kind: 'retry-pending' }
   | { readonly kind: 'zone-mismatch' }
   | { readonly kind: 'permission-revoked' }
   | ChangeReminderEnableResult;
@@ -54,6 +55,13 @@ export function createChangeReminderSession({
         publish({ kind: 'unavailable' });
       } else if (result.kind === 'unregistered') {
         publish({ kind: 'untouched' });
+      } else if (result.kind === 'pending') {
+        publish({
+          kind:
+            result.homeTimeZone === homeTimeZone
+              ? 'retry-pending'
+              : 'zone-mismatch',
+        });
       } else if (result.registration.homeTimeZone !== homeTimeZone) {
         publish({ kind: 'zone-mismatch' });
       } else if (!result.notificationPermissionGranted) {
@@ -70,7 +78,8 @@ export function createChangeReminderSession({
     if (
       snapshot.kind !== 'explainer' &&
       snapshot.kind !== 'failed' &&
-      snapshot.kind !== 'permission-denied'
+      snapshot.kind !== 'permission-denied' &&
+      snapshot.kind !== 'retry-pending'
     ) {
       return;
     }

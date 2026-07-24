@@ -2,11 +2,13 @@ import * as runtime from './reminder-subscription-runtime.js';
 
 export type ReminderSubscriptionPlatform = 'android' | 'ios';
 export interface ReminderSubscriptionRegistration {
+  readonly attemptGeneration: number;
   readonly deviceToken: string;
   readonly homeTimeZone: string;
   readonly oneDayEnabled: boolean;
   readonly oneWeekEnabled: boolean;
   readonly platform: ReminderSubscriptionPlatform;
+  readonly registrationRequestId: string;
 }
 export interface ReminderSubscriptionRegistrationResponse {
   readonly credential: string;
