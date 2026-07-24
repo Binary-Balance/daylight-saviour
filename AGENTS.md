@@ -67,6 +67,10 @@ Test observable behavior. Cover domain logic with unit tests and screens with Re
 
 Use concise imperative subjects, for example `Add daylight offset calculator`. Keep commits focused. Pull requests must explain purpose, link relevant issues, list verification commands, and include screenshots for UI changes. Call out native configuration, permissions, migrations, and Azure infrastructure changes.
 
+Keep pull-request bodies compact and human-readable. Structure them with the linked issue and closure keyword, purpose, evidence or screenshots, verification commands and results, and remaining runtime or deployment gaps. For every multiline description, write Markdown to a temporary file and use `gh pr create --body-file <path>` or `gh pr edit --body-file <path>`. Never encode multiline Markdown as literal escaped `\n` sequences in a `--body` argument.
+
+Immediately after creating or editing a pull request, fetch the stored body with `gh pr view --json body --jq .body` or an equivalent API query. Verify headings, blank lines, lists, links, and code spans are readable and no literal escaped `\n` sequences remain. Correct formatting immediately with `gh pr edit --body-file <path>` and verify again before handoff or merge.
+
 ## CI/CD & Security
 
 GitHub Actions is the CI/CD system. Untrusted public pull requests run only on isolated GitHub-hosted runners; never run them on this Azure VM. Azure deployment controls for every environment follow ADR 0004: separate least-privilege branch-bound OIDC identities, manual apply, same-commit reviewed what-if evidence, and explicit confirmation. Never claim protected-branch or protected-environment enforcement while the current GitHub plan lacks it. Never commit credentials, signing keys, generated secrets, or `.env` files; provide sanitized `.env.example` entries instead.
