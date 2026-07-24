@@ -14,10 +14,19 @@ export interface StoredChangeReminderRegistration {
   readonly version: 1;
 }
 
+export type ChangeReminderRestoreResult =
+  | { readonly kind: 'unavailable' }
+  | { readonly kind: 'unregistered' }
+  | {
+      readonly kind: 'registered';
+      readonly notificationPermissionGranted: boolean;
+      readonly registration: StoredChangeReminderRegistration;
+    };
+
 export interface ChangeReminderAdapters {
   readonly enable: (
     homeTimeZone: string,
   ) => Promise<ChangeReminderEnableResult>;
-  readonly load: () => Promise<StoredChangeReminderRegistration | null>;
   readonly openSettings: () => Promise<void>;
+  readonly restore: () => Promise<ChangeReminderRestoreResult>;
 }

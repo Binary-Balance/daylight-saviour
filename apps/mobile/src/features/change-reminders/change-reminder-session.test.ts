@@ -33,8 +33,8 @@ function adapters(
 ): ChangeReminderAdapters {
   return {
     enable: jest.fn(async () => ({ kind: 'enabled' as const })),
-    load: jest.fn(async () => null),
     openSettings: jest.fn(async () => undefined),
+    restore: jest.fn(async () => ({ kind: 'unregistered' as const })),
     ...overrides,
   };
 }
@@ -42,7 +42,11 @@ function adapters(
 describe('Change Reminder session', () => {
   it('restores one stored registration on relaunch without registering again', async () => {
     const boundary = adapters({
-      load: jest.fn(async () => registration),
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration,
+      })),
     });
     const session = createChangeReminderSession({
       adapters: boundary,
@@ -53,7 +57,7 @@ describe('Change Reminder session', () => {
     expect(
       await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
     ).toEqual({ kind: 'enabled' });
-    expect(boundary.load).toHaveBeenCalledTimes(1);
+    expect(boundary.restore).toHaveBeenCalledTimes(1);
     expect(boundary.enable).not.toHaveBeenCalled();
     stop();
   });
@@ -85,10 +89,10 @@ describe('Change Reminder session', () => {
       enable: jest.fn(async () => {
         throw new Error('adapter failed');
       }),
-      load: jest
+      restore: jest
         .fn()
         .mockRejectedValueOnce(new Error('SecureStore failed'))
-        .mockResolvedValueOnce(null),
+        .mockResolvedValueOnce({ kind: 'unregistered' }),
     });
     const session = createChangeReminderSession({
       adapters: boundary,
@@ -112,11 +116,11 @@ describe('Change Reminder session', () => {
   });
 
   it('ignores late completions after stop', async () => {
-    let resolveLoad!: (value: null) => void;
+    let resolveLoad!: (value: { readonly kind: 'unregistered' }) => void;
     const boundary = adapters({
-      load: jest.fn(
+      restore: jest.fn(
         () =>
-          new Promise<null>((resolve) => {
+          new Promise<{ readonly kind: 'unregistered' }>((resolve) => {
             resolveLoad = resolve;
           }),
       ),
@@ -127,8 +131,55 @@ describe('Change Reminder session', () => {
     });
     const stop = session.start();
     stop();
-    resolveLoad(null);
+    resolveLoad({ kind: 'unregistered' });
     await Promise.resolve();
     expect(session.getSnapshot()).toEqual({ kind: 'loading' });
+  });
+
+  it('does not claim an old-zone registration covers the current Home Time Zone', async () => {
+    const session = createChangeReminderSession({
+      adapters: adapters({
+        restore: jest.fn(async () => ({
+          kind: 'registered' as const,
+          notificationPermissionGranted: true,
+          registration: {
+            ...registration,
+            homeTimeZone: 'Australia/Brisbane',
+          },
+        })),
+      }),
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'zone-mismatch',
+      ),
+    ).toEqual({ kind: 'zone-mismatch' });
+    stop();
+  });
+
+  it('does not claim delivery after OS permission is revoked', async () => {
+    const session = createChangeReminderSession({
+      adapters: adapters({
+        restore: jest.fn(async () => ({
+          kind: 'registered' as const,
+          notificationPermissionGranted: false,
+          registration,
+        })),
+      }),
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'permission-revoked',
+      ),
+    ).toEqual({ kind: 'permission-revoked' });
+    stop();
   });
 });

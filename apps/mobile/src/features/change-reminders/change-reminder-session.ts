@@ -9,6 +9,8 @@ export type ChangeReminderSessionSnapshot =
   | { readonly kind: 'untouched' }
   | { readonly kind: 'explainer' }
   | { readonly kind: 'saving' }
+  | { readonly kind: 'zone-mismatch' }
+  | { readonly kind: 'permission-revoked' }
   | ChangeReminderEnableResult;
 
 export type ChangeReminderSessionEvent =
@@ -46,11 +48,19 @@ export function createChangeReminderSession({
 
   async function restore(expectedGeneration: number) {
     try {
-      const registration = await adapters.load();
+      const result = await adapters.restore();
       if (!current(expectedGeneration)) return;
-      publish({
-        kind: registration === null ? 'untouched' : 'enabled',
-      });
+      if (result.kind === 'unavailable') {
+        publish({ kind: 'unavailable' });
+      } else if (result.kind === 'unregistered') {
+        publish({ kind: 'untouched' });
+      } else if (result.registration.homeTimeZone !== homeTimeZone) {
+        publish({ kind: 'zone-mismatch' });
+      } else if (!result.notificationPermissionGranted) {
+        publish({ kind: 'permission-revoked' });
+      } else {
+        publish({ kind: 'enabled' });
+      }
     } catch {
       if (current(expectedGeneration)) publish({ kind: 'load-failed' });
     }

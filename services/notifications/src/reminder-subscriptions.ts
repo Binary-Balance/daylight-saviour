@@ -80,7 +80,7 @@ export function homeTimeZonePartitionKey(homeTimeZone: string) {
 }
 
 export function normalizeClientAddress(value: string | null) {
-  if (value === null) return 'unavailable';
+  if (value === null) return null;
   let candidate = value.trim();
   const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(candidate);
   if (bracketed?.[1] !== undefined) {
@@ -101,13 +101,14 @@ export function normalizeClientAddress(value: string | null) {
     const hostname = new URL(`http://[${candidate}]/`).hostname;
     return hostname.slice(1, -1).toLowerCase();
   }
-  return 'unavailable';
+  return null;
 }
 
 export function sourceAddressHash(request: HttpRequest) {
-  const source = normalizeClientAddress(
-    request.headers.get('x-azure-clientip'),
-  );
+  const source = normalizeClientAddress(request.headers.get('client-ip'));
+  if (source === null) {
+    throw new Error('Trusted client address unavailable');
+  }
   return hashOpaqueValue(source);
 }
 

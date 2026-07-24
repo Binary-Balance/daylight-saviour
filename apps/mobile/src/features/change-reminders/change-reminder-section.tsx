@@ -36,22 +36,28 @@ export default function ChangeReminderSection({
           ? copy.changeReminders.enabled
           : snapshot.kind === 'os-blocked'
             ? copy.changeReminders.osBlocked
-            : snapshot.kind === 'unavailable'
-              ? copy.changeReminders.webUnavailable
-              : snapshot.kind === 'loading'
-                ? null
-                : snapshot.kind === 'saving'
-                  ? null
-                  : snapshot.kind === 'load-failed'
-                    ? copy.changeReminders.loadFailed
-                    : snapshot.kind === 'permission-denied'
-                      ? copy.changeReminders.permissionDenied
-                      : copy.changeReminders.failed;
+            : snapshot.kind === 'permission-revoked'
+              ? copy.changeReminders.permissionRevoked
+              : snapshot.kind === 'zone-mismatch'
+                ? copy.changeReminders.zoneMismatch
+                : snapshot.kind === 'unavailable'
+                  ? copy.changeReminders.webUnavailable
+                  : snapshot.kind === 'loading'
+                    ? null
+                    : snapshot.kind === 'saving'
+                      ? null
+                      : snapshot.kind === 'load-failed'
+                        ? copy.changeReminders.loadFailed
+                        : snapshot.kind === 'permission-denied'
+                          ? copy.changeReminders.permissionDenied
+                          : copy.changeReminders.failed;
   const errorState =
     snapshot.kind === 'failed' ||
     snapshot.kind === 'load-failed' ||
     snapshot.kind === 'os-blocked' ||
-    snapshot.kind === 'permission-denied';
+    snapshot.kind === 'permission-denied' ||
+    snapshot.kind === 'permission-revoked' ||
+    snapshot.kind === 'zone-mismatch';
 
   return (
     <View
@@ -138,7 +144,8 @@ export default function ChangeReminderSection({
           </Text>
         </Pressable>
       ) : null}
-      {snapshot.kind === 'os-blocked' ? (
+      {snapshot.kind === 'os-blocked' ||
+      snapshot.kind === 'permission-revoked' ? (
         <Pressable
           accessibilityHint={
             copy.changeReminders.accessibility.openSettingsHint
@@ -150,7 +157,9 @@ export default function ChangeReminderSection({
           style={[styles.button, { borderColor: palette.controlBoundary }]}
         >
           <Text style={[styles.buttonText, { color: palette.ink }]}>
-            {copy.changeReminders.osBlocked.openSettings}
+            {snapshot.kind === 'os-blocked'
+              ? copy.changeReminders.osBlocked.openSettings
+              : copy.changeReminders.permissionRevoked.openSettings}
           </Text>
         </Pressable>
       ) : null}

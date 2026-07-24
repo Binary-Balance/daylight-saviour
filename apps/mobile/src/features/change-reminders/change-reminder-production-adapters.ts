@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
 import { Linking, Platform } from 'react-native';
 import { parseReminderSubscriptionRegistrationResponse } from '@daylight-saviour/contracts';
+import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
 import type {
   ChangeReminderAdapters,
@@ -62,7 +63,8 @@ function parseStoredRegistration(
   if (
     candidate.version !== 1 ||
     typeof candidate.homeTimeZone !== 'string' ||
-    candidate.homeTimeZone.length === 0 ||
+    canonicalAustralianZoneId(candidate.homeTimeZone) !==
+      candidate.homeTimeZone ||
     candidate.oneDayEnabled !== true ||
     candidate.oneWeekEnabled !== true
   ) {
@@ -127,9 +129,17 @@ export function createProductionChangeReminderAdapters({
   timeoutMs = requestTimeoutMs,
 }: ProductionAdapterDependencies): ChangeReminderAdapters {
   return {
-    async load() {
+    async restore() {
+      if (platform === 'web') return { kind: 'unavailable' };
       const saved = await secureStore.getItemAsync(registrationKey);
-      return saved === null ? null : parseStoredRegistration(saved);
+      if (saved === null) return { kind: 'unregistered' };
+      const registration = parseStoredRegistration(saved);
+      const permission = await notifications.getPermissionsAsync();
+      return {
+        kind: 'registered',
+        notificationPermissionGranted: permission.granted,
+        registration,
+      };
     },
     async enable(homeTimeZone) {
       if (platform === 'web') return { kind: 'unavailable' };

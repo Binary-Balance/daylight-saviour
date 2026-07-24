@@ -35,10 +35,19 @@ export const changeReminders = Object.freeze({
     heading: 'NOTIFICATIONS NOT ALLOWED',
     retry: 'Ask again',
   }),
+  permissionRevoked: Object.freeze({
+    body: 'Change Reminders remain registered, but notifications are blocked by your device settings and cannot arrive.',
+    heading: 'REGISTERED, NOT DELIVERABLE',
+    openSettings: 'Open notification settings',
+  }),
   saving: 'Registering reminders…',
   untouched: Object.freeze({
     action: 'Warn me before time misbehaves',
     body: 'Get one-week and one-day warnings before your Home Time Zone changes.',
+  }),
+  zoneMismatch: Object.freeze({
+    body: 'Saved Change Reminders still follow a different Home Time Zone. They are not enabled for this Home Time Zone.',
+    heading: 'REMINDER ZONE CHANGED',
   }),
   webUnavailable: Object.freeze({
     body: 'Change Reminders require the Android or iOS app. Web preview does not request notification permission.',

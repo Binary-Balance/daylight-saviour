@@ -38,7 +38,7 @@ function request(
         );
   const headers = new Headers({ 'content-type': contentType });
   if (contentLength !== undefined) headers.set('content-length', contentLength);
-  if (source !== null) headers.set('x-azure-clientip', source);
+  if (source !== null) headers.set('client-ip', source);
   return {
     body: new ReadableStream<Uint8Array>({
       start(controller) {
@@ -159,8 +159,8 @@ describe('reminder subscription registration', () => {
       {
         body,
         headers: new Headers({
+          'client-ip': '198.51.100.7',
           'content-type': 'application/json',
-          'x-azure-clientip': '198.51.100.7',
         }),
       } as never,
       store(),
@@ -195,6 +195,26 @@ describe('reminder subscription registration', () => {
     assert.deepEqual(storageFailure.jsonBody, {
       error: 'Registration unavailable',
     });
+  });
+
+  it('fails closed before throttling when trusted client address is unavailable', async () => {
+    let allowanceChecks = 0;
+    for (const source of [null, 'spoofed, 198.51.100.7', 'not-an-ip']) {
+      const result = await registerReminderSubscription(
+        request(validRegistration, { source }),
+        store({
+          takeSourceAllowance: async () => {
+            allowanceChecks += 1;
+            return true;
+          },
+        }),
+      );
+      assert.equal(result.status, 503);
+      assert.deepEqual(result.jsonBody, {
+        error: 'Registration unavailable',
+      });
+    }
+    assert.equal(allowanceChecks, 0);
   });
 
   it('returns retry guidance without exposing request values when throttled', async () => {
@@ -252,10 +272,11 @@ describe('source address normalization', () => {
   for (const [input, expected] of [
     ['198.51.100.7:43125', '198.51.100.7'],
     ['::ffff:198.51.100.7', '198.51.100.7'],
+    ['[::ffff:198.51.100.7]:43125', '198.51.100.7'],
     ['[2001:0db8:0:0:0:0:0:1]:443', '2001:db8::1'],
     ['2001:db8::1', '2001:db8::1'],
-    ['spoofed, 198.51.100.7', 'unavailable'],
-    [null, 'unavailable'],
+    ['spoofed, 198.51.100.7', null],
+    [null, null],
   ] as const) {
     it(`normalizes ${String(input)}`, () => {
       assert.equal(normalizeClientAddress(input), expected);
@@ -263,10 +284,10 @@ describe('source address normalization', () => {
   }
 
   it('hashes normalized addresses without retaining raw values', () => {
-    assert.equal(
-      hashOpaqueValue(normalizeClientAddress('198.51.100.7:43125')),
-      hashOpaqueValue('198.51.100.7'),
-    );
+    const normalized = normalizeClientAddress('198.51.100.7:43125');
+    assert.notEqual(normalized, null);
+    if (normalized === null) assert.fail('expected valid client address');
+    assert.equal(hashOpaqueValue(normalized), hashOpaqueValue('198.51.100.7'));
   });
 });
 

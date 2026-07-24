@@ -14,8 +14,8 @@ import {
 jest.mock('../change-reminders/change-reminder-production-adapters', () => ({
   productionChangeReminderAdapters: {
     enable: jest.fn(),
-    load: jest.fn(() => new Promise(() => undefined)),
     openSettings: jest.fn(),
+    restore: jest.fn(() => new Promise(() => undefined)),
   },
 }));
 

@@ -202,13 +202,43 @@ describe('production Change Reminder adapters', () => {
       oneWeekEnabled: true,
       version: 1,
     });
-    await expect(test.adapters.load()).resolves.toEqual({
-      ...responseBody,
-      homeTimeZone: 'Australia/Sydney',
-      oneDayEnabled: true,
-      oneWeekEnabled: true,
-      version: 1,
+    await expect(test.adapters.restore()).resolves.toEqual({
+      kind: 'registered',
+      notificationPermissionGranted: true,
+      registration: {
+        ...responseBody,
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        version: 1,
+      },
     });
+  });
+
+  it('reports web unavailable without touching native or secure APIs', async () => {
+    const test = harness({ platform: 'web' });
+
+    await expect(test.adapters.restore()).resolves.toEqual({
+      kind: 'unavailable',
+    });
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'unavailable',
+    });
+    expect(test.dependencies.secureStore.getItemAsync).not.toHaveBeenCalled();
+    expect(test.dependencies.secureStore.setItemAsync).not.toHaveBeenCalled();
+    expect(
+      test.dependencies.notifications.getPermissionsAsync,
+    ).not.toHaveBeenCalled();
+    expect(
+      test.dependencies.notifications.requestPermissionsAsync,
+    ).not.toHaveBeenCalled();
+    expect(
+      test.dependencies.notifications.getDevicePushTokenAsync,
+    ).not.toHaveBeenCalled();
+    expect(
+      test.dependencies.notifications.setNotificationChannelAsync,
+    ).not.toHaveBeenCalled();
+    expect(test.dependencies.fetch).not.toHaveBeenCalled();
   });
 
   it('reports write, read, fetch, and response validation failures', async () => {
@@ -243,7 +273,23 @@ describe('production Change Reminder adapters', () => {
     jest
       .mocked(invalidStored.dependencies.secureStore.getItemAsync)
       .mockResolvedValueOnce('{"version":2}');
-    await expect(invalidStored.adapters.load()).rejects.toThrow(
+    await expect(invalidStored.adapters.restore()).rejects.toThrow(
+      'Invalid stored reminder registration',
+    );
+
+    const noncanonicalStored = harness();
+    jest
+      .mocked(noncanonicalStored.dependencies.secureStore.getItemAsync)
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          ...responseBody,
+          homeTimeZone: 'Australia/ACT',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          version: 1,
+        }),
+      );
+    await expect(noncanonicalStored.adapters.restore()).rejects.toThrow(
       'Invalid stored reminder registration',
     );
   });

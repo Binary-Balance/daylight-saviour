@@ -15,8 +15,8 @@ function adapters(
 ): ChangeReminderAdapters {
   return {
     enable: jest.fn(async () => ({ kind: 'enabled' as const })),
-    load: jest.fn(async () => null),
     openSettings: jest.fn(async () => undefined),
+    restore: jest.fn(async () => ({ kind: 'unregistered' as const })),
     ...overrides,
   };
 }
@@ -50,13 +50,17 @@ it('does not request a reminder before explicit confirmation', async () => {
 
 it('renders restored registration truthfully without another enable action', async () => {
   const boundary = adapters({
-    load: jest.fn(async () => ({
-      credential: 'c'.repeat(43),
-      homeTimeZone: 'Australia/Sydney',
-      installationId: 'i'.repeat(43),
-      oneDayEnabled: true,
-      oneWeekEnabled: true,
-      version: 1 as const,
+    restore: jest.fn(async () => ({
+      kind: 'registered' as const,
+      notificationPermissionGranted: true,
+      registration: {
+        credential: 'c'.repeat(43),
+        homeTimeZone: 'Australia/Sydney',
+        installationId: 'i'.repeat(43),
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        version: 1 as const,
+      },
     })),
   });
   renderSection(boundary);
@@ -78,10 +82,10 @@ it('shows accessible load and registration failures with recovery actions', asyn
     enable: jest.fn(async () => {
       throw new Error('adapter rejected');
     }),
-    load: jest
+    restore: jest
       .fn()
       .mockRejectedValueOnce(new Error('SecureStore read failed'))
-      .mockResolvedValueOnce(null),
+      .mockResolvedValueOnce({ kind: 'unregistered' }),
   });
   renderSection(boundary);
 
@@ -129,4 +133,48 @@ it('keeps saving state bounded to pending adapter work', async () => {
       screen.getByRole('button', { name: 'Try registration again' }),
     ).toBeTruthy(),
   );
+});
+
+it('renders truthful zone-mismatch and revoked-permission restore states', async () => {
+  const stored = {
+    credential: 'c'.repeat(43),
+    homeTimeZone: 'Australia/Brisbane',
+    installationId: 'i'.repeat(43),
+    oneDayEnabled: true,
+    oneWeekEnabled: true,
+    version: 1 as const,
+  };
+  const mismatch = renderSection(
+    adapters({
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration: stored,
+      })),
+    }),
+  );
+  expect(
+    await screen.findByText(/not enabled for this Home Time Zone/i),
+  ).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Enable reminders' })).toBeNull();
+  mismatch.unmount();
+
+  const openSettings = jest.fn(async () => undefined);
+  renderSection(
+    adapters({
+      openSettings,
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: false,
+        registration: { ...stored, homeTimeZone: 'Australia/Sydney' },
+      })),
+    }),
+  );
+  expect(
+    await screen.findByText(/registered, but notifications are blocked/i),
+  ).toBeTruthy();
+  fireEvent.press(
+    screen.getByRole('button', { name: 'Open notification settings' }),
+  );
+  expect(openSettings).toHaveBeenCalledTimes(1);
 });
