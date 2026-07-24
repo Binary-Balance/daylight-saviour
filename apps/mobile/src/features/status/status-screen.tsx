@@ -13,6 +13,8 @@ import CivilTimeReportHeader from './civil-time-report-header';
 import DataFreshnessSection from './data-freshness-section';
 import DaylightSavingStatusHero from './daylight-saving-status-hero';
 import SettingsSheet from './settings-sheet';
+import ChangeReminderSection from '../change-reminders/change-reminder-section';
+import { productionChangeReminderAdapters } from '../change-reminders/change-reminder-production-adapters';
 import { createStatusViewModel } from './status-view-model';
 import type { TimeZoneDataPackSnapshot } from '../time-zone-data/time-zone-data-manager';
 
@@ -145,6 +147,12 @@ export default function StatusScreen({
           palette={palette}
           reducedMotion={reducedMotion}
           report={viewModel}
+        />
+
+        <ChangeReminderSection
+          adapters={productionChangeReminderAdapters}
+          homeTimeZone={viewModel.zoneId}
+          palette={palette}
         />
 
         <DataFreshnessSection

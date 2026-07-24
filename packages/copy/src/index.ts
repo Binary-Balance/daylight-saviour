@@ -2,6 +2,7 @@ import { dataFreshness } from './data-freshness.ts';
 import { homeTimeZone } from './home-time-zone.ts';
 import { civilTimeReport } from './civil-time-report.ts';
 import { settings } from './settings.ts';
+import { changeReminders } from './change-reminders.ts';
 
 export type { DataFreshnessState, DataPackSource } from './data-freshness.ts';
 export type {
@@ -18,4 +19,5 @@ export const australianEnglish = Object.freeze({
   homeTimeZone,
   civilTimeReport,
   settings,
+  changeReminders,
 });
