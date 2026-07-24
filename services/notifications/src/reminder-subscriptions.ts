@@ -15,24 +15,45 @@ const maxRequestBytes = 8 * 1024;
 const throttleWindowMs = 10 * 60 * 1000;
 const throttleRetentionMs = 30 * 24 * 60 * 60 * 1000;
 const throttleLimit = 5;
-const throttleRetryLimit = 12;
+const tableMutationRetryLimit = 12;
+const subscriptionPartitionKey = 'subscriptions-v1';
 
 interface ReminderSubscriptionRegistration {
+  readonly attemptGeneration: number;
   readonly deviceToken: string;
   readonly homeTimeZone: string;
   readonly oneDayEnabled: boolean;
   readonly oneWeekEnabled: boolean;
   readonly platform: 'android' | 'ios';
+  readonly registrationRequestId: string;
 }
 
-interface ReminderSubscriptionRecord extends ReminderSubscriptionRegistration {
+interface ReminderSubscriptionRecord extends Omit<
+  ReminderSubscriptionRegistration,
+  'registrationRequestId'
+> {
   readonly credentialHash: string;
   readonly installationId: string;
   readonly registeredAt: Date;
 }
 
+interface SubscriptionEntity {
+  readonly attemptGeneration: number;
+  readonly etag: string;
+  readonly partitionKey: string;
+  readonly rowKey: string;
+}
+
 interface SubscriptionTable {
   readonly create: (entity: Record<string, unknown>) => Promise<void>;
+  readonly get: (
+    partitionKey: string,
+    rowKey: string,
+  ) => Promise<SubscriptionEntity>;
+  readonly replace: (
+    entity: Record<string, unknown>,
+    etag: string,
+  ) => Promise<void>;
 }
 
 interface ThrottleEntity {
@@ -60,7 +81,7 @@ export interface ReminderSubscriptionStore {
   readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
   readonly saveSubscription: (
     record: ReminderSubscriptionRecord,
-  ) => Promise<void>;
+  ) => Promise<'accepted' | 'stale'>;
   readonly takeSourceAllowance: (
     sourceHash: string,
     now: Date,
@@ -75,8 +96,10 @@ export function hashOpaqueValue(value: string) {
   return createHash('sha256').update(value).digest('base64url');
 }
 
-export function homeTimeZonePartitionKey(homeTimeZone: string) {
-  return `zone-${hashOpaqueValue(homeTimeZone)}`;
+export function deriveInstallationId(registrationRequestId: string) {
+  return hashOpaqueValue(
+    `daylight-saviour:reminder-registration:v1:${registrationRequestId}`,
+  );
 }
 
 export function normalizeClientAddress(value: string | null) {
@@ -224,14 +247,24 @@ export async function registerReminderSubscription(
       );
     }
     const registration = await readRegistration(request);
-    const installationId = opaqueRandomValue();
+    const installationId = deriveInstallationId(
+      registration.registrationRequestId,
+    );
     const credential = opaqueRandomValue();
-    await store.saveSubscription({
-      ...registration,
+    const saveResult = await store.saveSubscription({
+      attemptGeneration: registration.attemptGeneration,
       credentialHash: hashOpaqueValue(credential),
+      deviceToken: registration.deviceToken,
+      homeTimeZone: registration.homeTimeZone,
       installationId,
+      oneDayEnabled: registration.oneDayEnabled,
+      oneWeekEnabled: registration.oneWeekEnabled,
+      platform: registration.platform,
       registeredAt: now,
     });
+    if (saveResult === 'stale') {
+      return response(409, 'Registration attempt superseded');
+    }
     return {
       status: 201,
       headers: { 'Cache-Control': 'no-store' },
@@ -263,9 +296,10 @@ export function createTableReminderSubscriptionStore(
 ): ReminderSubscriptionStore {
   return {
     async saveSubscription(record) {
-      await subscriptions.create({
-        partitionKey: homeTimeZonePartitionKey(record.homeTimeZone),
+      const entity = {
+        partitionKey: subscriptionPartitionKey,
         rowKey: record.installationId,
+        attemptGeneration: record.attemptGeneration,
         credentialHash: record.credentialHash,
         deviceToken: record.deviceToken,
         homeTimeZone: record.homeTimeZone,
@@ -273,7 +307,37 @@ export function createTableReminderSubscriptionStore(
         oneWeekEnabled: record.oneWeekEnabled,
         platform: record.platform,
         registeredAt: record.registeredAt,
-      });
+      };
+
+      for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
+        let existing: SubscriptionEntity;
+        try {
+          existing = await subscriptions.get(
+            subscriptionPartitionKey,
+            record.installationId,
+          );
+        } catch (error) {
+          if (statusCode(error) !== 404) throw error;
+          try {
+            await subscriptions.create(entity);
+            return 'accepted';
+          } catch (createError) {
+            if (statusCode(createError) !== 409) throw createError;
+            continue;
+          }
+        }
+        if (existing.attemptGeneration >= record.attemptGeneration) {
+          return 'stale';
+        }
+        try {
+          await subscriptions.replace(entity, existing.etag);
+          return 'accepted';
+        } catch (updateError) {
+          const updateStatus = statusCode(updateError);
+          if (updateStatus !== 409 && updateStatus !== 412) throw updateError;
+        }
+      }
+      throw new Error('Subscription update contention exceeded retry limit');
     },
     async takeSourceAllowance(sourceHash, now) {
       const window = Math.floor(now.getTime() / throttleWindowMs);
@@ -282,7 +346,7 @@ export function createTableReminderSubscriptionStore(
         window * throttleWindowMs + throttleRetentionMs,
       );
 
-      for (let attempt = 0; attempt < throttleRetryLimit; attempt += 1) {
+      for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
         let entity: ThrottleEntity;
         try {
           entity = await throttles.get(sourceHash, rowKey);
@@ -354,6 +418,20 @@ export function createAzureReminderSubscriptionStore(): ReminderSubscriptionStor
     {
       create: async (entity) => {
         await subscriptions.createEntity(entity as never);
+      },
+      get: async (partitionKey, rowKey) => {
+        const entity = await subscriptions.getEntity<{
+          attemptGeneration: number;
+        }>(partitionKey, rowKey);
+        return {
+          attemptGeneration: entity.attemptGeneration,
+          etag: entity.etag,
+          partitionKey,
+          rowKey,
+        };
+      },
+      replace: async (entity, etag) => {
+        await subscriptions.updateEntity(entity as never, 'Replace', { etag });
       },
     },
     {

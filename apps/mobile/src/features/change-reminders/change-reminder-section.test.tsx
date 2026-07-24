@@ -54,12 +54,15 @@ it('renders restored registration truthfully without another enable action', asy
       kind: 'registered' as const,
       notificationPermissionGranted: true,
       registration: {
+        attemptGeneration: 1,
         credential: 'c'.repeat(43),
         homeTimeZone: 'Australia/Sydney',
         installationId: 'i'.repeat(43),
         oneDayEnabled: true,
         oneWeekEnabled: true,
-        version: 1 as const,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered' as const,
+        version: 2 as const,
       },
     })),
   });
@@ -135,14 +138,37 @@ it('keeps saving state bounded to pending adapter work', async () => {
   );
 });
 
+it('renders restored pending state as retryable without claiming enablement', async () => {
+  const boundary = adapters({
+    restore: jest.fn(async () => ({
+      homeTimeZone: 'Australia/Sydney',
+      kind: 'pending' as const,
+    })),
+  });
+  renderSection(boundary);
+
+  expect(await screen.findByText(/registration did not finish/i)).toBeTruthy();
+  expect(screen.queryByText(/reminders are enabled/i)).toBeNull();
+  fireEvent.press(screen.getByRole('button', { name: 'Retry registration' }));
+  expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
+  expect(
+    await screen.findByText(
+      /one-week and one-day Change Reminders are enabled/i,
+    ),
+  ).toBeTruthy();
+});
+
 it('renders truthful zone-mismatch and revoked-permission restore states', async () => {
   const stored = {
+    attemptGeneration: 1,
     credential: 'c'.repeat(43),
     homeTimeZone: 'Australia/Brisbane',
     installationId: 'i'.repeat(43),
     oneDayEnabled: true,
     oneWeekEnabled: true,
-    version: 1 as const,
+    registrationRequestId: 'a'.repeat(64),
+    state: 'registered' as const,
+    version: 2 as const,
   };
   const mismatch = renderSection(
     adapters({

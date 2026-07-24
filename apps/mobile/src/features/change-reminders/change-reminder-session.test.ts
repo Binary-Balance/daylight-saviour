@@ -6,12 +6,15 @@ import {
 } from './change-reminder-session';
 
 const registration = {
+  attemptGeneration: 1,
   credential: 'c'.repeat(43),
   homeTimeZone: 'Australia/Sydney',
   installationId: 'i'.repeat(43),
   oneDayEnabled: true,
   oneWeekEnabled: true,
-  version: 1 as const,
+  registrationRequestId: 'a'.repeat(64),
+  state: 'registered' as const,
+  version: 2 as const,
 };
 
 async function waitForSnapshot(
@@ -77,6 +80,33 @@ describe('Change Reminder session', () => {
     expect(session.getSnapshot()).toEqual({ kind: 'explainer' });
     session.dispatch({ type: 'enable' });
     expect(session.getSnapshot()).toEqual({ kind: 'saving' });
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
+    ).toEqual({ kind: 'enabled' });
+    expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
+    stop();
+  });
+
+  it('keeps pending registration retryable after Home Time Zone changes', async () => {
+    const boundary = adapters({
+      restore: jest.fn(async () => ({
+        homeTimeZone: 'Australia/Brisbane',
+        kind: 'pending' as const,
+      })),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'retry-pending',
+      ),
+    ).toEqual({ kind: 'retry-pending' });
+    session.dispatch({ type: 'enable' });
     expect(
       await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
     ).toEqual({ kind: 'enabled' });

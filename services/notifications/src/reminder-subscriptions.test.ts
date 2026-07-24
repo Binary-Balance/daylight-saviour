@@ -3,19 +3,21 @@ import { describe, it } from 'node:test';
 
 import {
   createTableReminderSubscriptionStore,
+  deriveInstallationId,
   hashOpaqueValue,
-  homeTimeZonePartitionKey,
   normalizeClientAddress,
   registerReminderSubscription,
   type ReminderSubscriptionStore,
 } from './reminder-subscriptions.js';
 
 const validRegistration = {
+  attemptGeneration: 1,
   deviceToken: 'fcm-token:with_valid.characters-123',
   homeTimeZone: 'Australia/Sydney',
   oneDayEnabled: true,
   oneWeekEnabled: true,
   platform: 'android' as const,
+  registrationRequestId: 'a'.repeat(64),
 } as const;
 
 function request(
@@ -55,7 +57,7 @@ function store(
 ): ReminderSubscriptionStore {
   return {
     purgeExpiredThrottleRecords: async () => undefined,
-    saveSubscription: async () => undefined,
+    saveSubscription: async () => 'accepted',
     takeSourceAllowance: async () => true,
     ...overrides,
   };
@@ -63,6 +65,49 @@ function store(
 
 function azureError(statusCode: number) {
   return Object.assign(new Error(`Azure ${statusCode}`), { statusCode });
+}
+
+function subscriptionTable(
+  overrides: Partial<{
+    readonly create: (entity: Record<string, unknown>) => Promise<void>;
+    readonly get: (
+      partitionKey: string,
+      rowKey: string,
+    ) => Promise<{
+      readonly attemptGeneration: number;
+      readonly etag: string;
+      readonly partitionKey: string;
+      readonly rowKey: string;
+    }>;
+    readonly replace: (
+      entity: Record<string, unknown>,
+      etag: string,
+    ) => Promise<void>;
+  }> = {},
+) {
+  return {
+    create: async () => undefined,
+    get: async () => {
+      throw azureError(404);
+    },
+    replace: async () => undefined,
+    ...overrides,
+  };
+}
+
+function unusedThrottleTable() {
+  return {
+    create: async () => undefined,
+    delete: async () => undefined,
+    get: async () => {
+      throw azureError(404);
+    },
+    listExpired: () =>
+      (async function* () {
+        // Subscription-only tests never enumerate throttle rows.
+      })(),
+    replace: async () => undefined,
+  };
 }
 
 describe('reminder subscription registration', () => {
@@ -74,6 +119,7 @@ describe('reminder subscription registration', () => {
       store({
         saveSubscription: async (record) => {
           saved = { ...record };
+          return 'accepted';
         },
       }),
       now,
@@ -86,6 +132,8 @@ describe('reminder subscription registration', () => {
     assert.notEqual(saved?.credentialHash, body.credential);
     assert.equal(saved?.deviceToken, validRegistration.deviceToken);
     assert.equal(saved?.registeredAt, now);
+    assert.equal(saved?.attemptGeneration, 1);
+    assert.equal('registrationRequestId' in (saved ?? {}), false);
     assert.equal(new Headers(result.headers).get('Cache-Control'), 'no-store');
   });
 
@@ -136,6 +184,7 @@ describe('reminder subscription registration', () => {
         store({
           saveSubscription: async () => {
             saves += 1;
+            return 'accepted';
           },
         }),
       );
@@ -197,6 +246,60 @@ describe('reminder subscription registration', () => {
     });
   });
 
+  it('returns no secret when an attempt is superseded', async () => {
+    const result = await registerReminderSubscription(
+      request(validRegistration),
+      store({ saveSubscription: async () => 'stale' }),
+    );
+    assert.equal(result.status, 409);
+    assert.deepEqual(result.jsonBody, {
+      error: 'Registration attempt superseded',
+    });
+    const serialized = JSON.stringify(result);
+    assert.doesNotMatch(serialized, /fcm-token/);
+    assert.doesNotMatch(
+      serialized,
+      new RegExp(validRegistration.registrationRequestId),
+    );
+    assert.equal('credential' in (result.jsonBody as object), false);
+  });
+
+  it('derives one stable row while issuing fresh accepted credentials', async () => {
+    const saved: Record<string, unknown>[] = [];
+    const registrationStore = store({
+      saveSubscription: async (record) => {
+        saved.push({ ...record });
+        return 'accepted';
+      },
+    });
+    const first = await registerReminderSubscription(
+      request(validRegistration),
+      registrationStore,
+    );
+    const second = await registerReminderSubscription(
+      request({ ...validRegistration, attemptGeneration: 2 }),
+      registrationStore,
+    );
+    const firstBody = first.jsonBody as {
+      readonly credential: string;
+      readonly installationId: string;
+    };
+    const secondBody = second.jsonBody as {
+      readonly credential: string;
+      readonly installationId: string;
+    };
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+    assert.equal(firstBody.installationId, secondBody.installationId);
+    assert.equal(
+      firstBody.installationId,
+      deriveInstallationId(validRegistration.registrationRequestId),
+    );
+    assert.notEqual(firstBody.credential, secondBody.credential);
+    assert.notEqual(saved[0]?.credentialHash, firstBody.credential);
+    assert.notEqual(saved[1]?.credentialHash, secondBody.credential);
+  });
+
   it('fails closed before throttling when trusted client address is unavailable', async () => {
     let allowanceChecks = 0;
     for (const source of [null, 'spoofed, 198.51.100.7', 'not-an-ip']) {
@@ -230,14 +333,14 @@ describe('reminder subscription registration', () => {
 });
 
 describe('Azure Table mapping', () => {
-  it('uses a deterministic Table-safe zone partition and retains canonical zone', async () => {
+  it('uses a fixed subscription partition and retains canonical zone as data', async () => {
     let entity: Record<string, unknown> | undefined;
     const tableStore = createTableReminderSubscriptionStore(
-      {
+      subscriptionTable({
         create: async (candidate) => {
           entity = candidate;
         },
-      },
+      }),
       {
         create: async () => undefined,
         delete: async () => undefined,
@@ -258,12 +361,11 @@ describe('Azure Table mapping', () => {
       registeredAt: new Date('2026-07-24T05:00:00.000Z'),
     });
 
-    assert.equal(
-      entity?.partitionKey,
-      homeTimeZonePartitionKey('Australia/Sydney'),
-    );
+    assert.equal(entity?.partitionKey, 'subscriptions-v1');
     assert.doesNotMatch(String(entity?.partitionKey), /[\\/#?]/);
     assert.equal(entity?.homeTimeZone, 'Australia/Sydney');
+    assert.equal(entity?.attemptGeneration, 1);
+    assert.equal('registrationRequestId' in (entity ?? {}), false);
     assert.equal(entity?.rowKey, 'installation-id');
   });
 });
@@ -288,6 +390,144 @@ describe('source address normalization', () => {
     assert.notEqual(normalized, null);
     if (normalized === null) assert.fail('expected valid client address');
     assert.equal(hashOpaqueValue(normalized), hashOpaqueValue('198.51.100.7'));
+  });
+});
+
+describe('generation-ordered subscription persistence', () => {
+  function record(
+    attemptGeneration: number,
+    credentialHash = `credential-${attemptGeneration}`,
+  ) {
+    return {
+      attemptGeneration,
+      credentialHash,
+      deviceToken: `${validRegistration.deviceToken}-${attemptGeneration}`,
+      homeTimeZone: validRegistration.homeTimeZone,
+      installationId: deriveInstallationId(
+        validRegistration.registrationRequestId,
+      ),
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
+      platform: validRegistration.platform,
+      registeredAt: new Date(`2026-07-24T05:00:0${attemptGeneration}.000Z`),
+    };
+  }
+
+  function concurrentSubscriptionTable() {
+    const rows = new Map<string, Record<string, unknown>>();
+    let nextEtag = 0;
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
+    return {
+      create: async (entity: Record<string, unknown>) => {
+        await pause();
+        const key = `${String(entity.partitionKey)}/${String(entity.rowKey)}`;
+        if (rows.has(key)) throw azureError(409);
+        rows.set(key, { ...entity, etag: String(++nextEtag) });
+      },
+      get: async (partitionKey: string, rowKey: string) => {
+        await pause();
+        const row = rows.get(`${partitionKey}/${rowKey}`);
+        if (row === undefined) throw azureError(404);
+        return {
+          attemptGeneration: Number(row.attemptGeneration),
+          etag: String(row.etag),
+          partitionKey,
+          rowKey,
+        };
+      },
+      replace: async (
+        entity: Record<string, unknown>,
+        expectedEtag: string,
+      ) => {
+        await pause();
+        const key = `${String(entity.partitionKey)}/${String(entity.rowKey)}`;
+        const row = rows.get(key);
+        if (row === undefined) throw azureError(404);
+        if (row.etag !== expectedEtag) throw azureError(412);
+        rows.set(key, { ...entity, etag: String(++nextEtag) });
+      },
+      rows,
+    };
+  }
+
+  function onlyRow(rows: Map<string, Record<string, unknown>>) {
+    assert.equal(rows.size, 1);
+    const row = [...rows.values()][0];
+    assert.ok(row);
+    return row;
+  }
+
+  it('does not let a delayed older attempt overwrite a newer generation', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+
+    assert.equal(
+      await registrationStore.saveSubscription(record(2)),
+      'accepted',
+    );
+    assert.equal(await registrationStore.saveSubscription(record(1)), 'stale');
+    const stored = onlyRow(subscriptions.rows);
+    assert.equal(stored.attemptGeneration, 2);
+    assert.equal(stored.credentialHash, 'credential-2');
+    assert.equal(stored.deviceToken, `${validRegistration.deviceToken}-2`);
+  });
+
+  it('updates one stable row when a higher generation changes zone', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+
+    assert.equal(
+      await registrationStore.saveSubscription(record(1)),
+      'accepted',
+    );
+    assert.equal(
+      await registrationStore.saveSubscription({
+        ...record(2),
+        homeTimeZone: 'Australia/Brisbane',
+      }),
+      'accepted',
+    );
+
+    const stored = onlyRow(subscriptions.rows);
+    assert.equal(stored.attemptGeneration, 2);
+    assert.equal(stored.homeTimeZone, 'Australia/Brisbane');
+    assert.equal(stored.partitionKey, 'subscriptions-v1');
+  });
+
+  it('accepts one of concurrent equal attempts and keeps one row', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const results = await Promise.all([
+      registrationStore.saveSubscription(record(1, 'credential-left')),
+      registrationStore.saveSubscription(record(1, 'credential-right')),
+    ]);
+
+    assert.deepEqual(results.sort(), ['accepted', 'stale']);
+    assert.equal(onlyRow(subscriptions.rows).attemptGeneration, 1);
+  });
+
+  it('converges concurrent different generations on the higher attempt', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    await Promise.all([
+      registrationStore.saveSubscription(record(1)),
+      registrationStore.saveSubscription(record(2)),
+    ]);
+
+    assert.equal(onlyRow(subscriptions.rows).attemptGeneration, 2);
+    assert.equal(onlyRow(subscriptions.rows).credentialHash, 'credential-2');
   });
 });
 
@@ -350,7 +590,7 @@ describe('durable throttle', () => {
   it('permits only the fixed-window limit under concurrent requests', async () => {
     const throttles = createConcurrentTable();
     const tableStore = createTableReminderSubscriptionStore(
-      { create: async () => undefined },
+      subscriptionTable(),
       throttles,
     );
     const now = new Date('2026-07-24T05:00:00.000Z');
@@ -365,7 +605,7 @@ describe('durable throttle', () => {
 
   it('distinguishes missing rows, races, and Azure service errors', async () => {
     const readFailure = createTableReminderSubscriptionStore(
-      { create: async () => undefined },
+      subscriptionTable(),
       {
         ...createConcurrentTable(),
         get: async () => {
@@ -379,7 +619,7 @@ describe('durable throttle', () => {
     );
 
     const createFailure = createTableReminderSubscriptionStore(
-      { create: async () => undefined },
+      subscriptionTable(),
       {
         ...createConcurrentTable(),
         create: async () => {
@@ -396,7 +636,7 @@ describe('durable throttle', () => {
     );
 
     const updateFailure = createTableReminderSubscriptionStore(
-      { create: async () => undefined },
+      subscriptionTable(),
       {
         ...createConcurrentTable(),
         get: async () => ({
@@ -419,7 +659,7 @@ describe('durable throttle', () => {
   it('purges expired throttle rows and tolerates already-deleted races', async () => {
     const deleted: string[] = [];
     const tableStore = createTableReminderSubscriptionStore(
-      { create: async () => undefined },
+      subscriptionTable(),
       {
         create: async () => undefined,
         delete: async (partitionKey, rowKey) => {

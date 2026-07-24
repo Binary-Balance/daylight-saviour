@@ -7,11 +7,13 @@ import {
 } from '../src/reminder-subscription-runtime.js';
 
 const androidRegistration = {
+  attemptGeneration: 1,
   deviceToken: 'fcm-token:with_valid.characters-123',
   homeTimeZone: 'Australia/Sydney',
   oneDayEnabled: true,
   oneWeekEnabled: true,
   platform: 'android',
+  registrationRequestId: 'a'.repeat(64),
 };
 
 describe('reminder subscription registration contract', () => {
@@ -34,6 +36,30 @@ describe('reminder subscription registration contract', () => {
   for (const [name, registration] of [
     ['unknown fields', { ...androidRegistration, notificationText: 'No' }],
     ['unsupported platform', { ...androidRegistration, platform: 'web' }],
+    [
+      'short registration request ID',
+      { ...androidRegistration, registrationRequestId: 'a'.repeat(63) },
+    ],
+    [
+      'non-hex registration request ID',
+      { ...androidRegistration, registrationRequestId: 'g'.repeat(64) },
+    ],
+    [
+      'uppercase registration request ID',
+      { ...androidRegistration, registrationRequestId: 'A'.repeat(64) },
+    ],
+    [
+      'zero attempt generation',
+      { ...androidRegistration, attemptGeneration: 0 },
+    ],
+    [
+      'fractional attempt generation',
+      { ...androidRegistration, attemptGeneration: 1.5 },
+    ],
+    [
+      'oversized attempt generation',
+      { ...androidRegistration, attemptGeneration: 2_147_483_648 },
+    ],
     [
       'whitespace-only token',
       { ...androidRegistration, deviceToken: ' '.repeat(32) },

@@ -40,6 +40,11 @@ export const changeReminders = Object.freeze({
     heading: 'REGISTERED, NOT DELIVERABLE',
     openSettings: 'Open notification settings',
   }),
+  retryPending: Object.freeze({
+    body: 'Registration did not finish on this device. Reminders are not enabled until retry succeeds.',
+    heading: 'REMINDER REGISTRATION UNCONFIRMED',
+    retry: 'Retry registration',
+  }),
   saving: 'Registering reminders…',
   untouched: Object.freeze({
     action: 'Warn me before time misbehaves',
