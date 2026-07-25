@@ -18,10 +18,10 @@ Read [AGENTS.md](AGENTS.md) before contributing. It defines mandatory issue-rout
 
 Toolchain installation, pinned versions, dependency policy, and validation commands are documented in [development guide](docs/development.md).
 
-Install dependencies once from repository root with `npm ci`. Before opening a pull request, run `npm run format:check`, `npm run audit`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run dependencies:check`, and `npm run web:export`.
+Install dependencies from repository root with `npm ci`. Before opening a pull request, run `npm run format:check`, `npm run audit`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run dependencies:check`, and `npm run web:export`.
 
 Native `android/` and `ios/` projects are generated build outputs, not source of truth. Android builds run locally without an emulator. iOS builds require hosted macOS infrastructure.
 
 ## Licence
 
-Code and technical documentation are licensed under Apache-2.0. The Daylight Saviour name, app icon, store artwork, and distinctive product identity remain reserved; see forthcoming trademark notice before redistributing branded builds.
+Code and technical documentation are licensed under Apache-2.0. Daylight Saviour trademarks remain reserved; the licence grants no right to use them except as needed for reasonable and customary description of the work's source or origin.

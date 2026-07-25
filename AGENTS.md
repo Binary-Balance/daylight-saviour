@@ -22,38 +22,9 @@ Cross-repository work must be split into paired issues. Public issue describes p
 
 ## Development, Build & Validation
 
-After Expo scaffold exists, run from repository root:
+Follow [`docs/development.md`](docs/development.md) for the pinned toolchain, dependency policy, development commands, validation matrix, and Android build profiles. Run installs and checks from the repository root, keep one root `package-lock.json`, and add each dependency to its consuming workspace.
 
-- `npm ci` — install from lockfile.
-- `npx expo start` — run Metro for device or simulator development.
-- `npx expo start --web` — run browser preview.
-- `npm run web --workspace @daylight-saviour/mobile -- --port 8087 --localhost` — run browser preview at fixed `http://localhost:8087`; do not pass fixed-port flags through root `npm run web`, because its workspace wrapper does not forward them.
-- `npm run typecheck` — validate strict TypeScript.
-- `npm run lint` — run configured ESLint checks.
-- `npm test` — run unit and component tests.
-- `npx expo-doctor` — check Expo dependency and project compatibility.
-- `npx expo export --platform web` — verify web bundle.
-- `npx expo prebuild --clean` — regenerate native projects.
-
-Linux supports web and Android after Android tooling is installed. iOS builds run on GitHub-hosted macOS runners. Do not introduce EAS without revisiting ADR 0001.
-
-## Android Build Cost
-
-Routine Android validation compiles only `arm64-v8a`; full four-ABI compilation is reserved for release validation and major native or toolchain changes. JavaScript/TypeScript UI work should use Metro, tests, typecheck, lint, and web export without a native build unless behavior crosses the native boundary.
-
-Preserve native build caches during ordinary work. `npm ci` replaces `node_modules` and dependency-local CMake outputs; clean Expo prebuild replaces generated app-native outputs; `gradlew clean` removes Gradle outputs. Use clean operations for reproducibility, lockfile or native configuration changes, or explicit evidence—not every edit. CI caches Gradle and performs an arm64-only debug build. See `docs/development.md` for commands and measured profiles.
-
-## Dependency Management
-
-Use npm workspaces and the single root `package-lock.json`. Never commit nested lockfiles or run workspace-local installs that create a second dependency tree. CI and clean verification use `npm ci` from repository root.
-
-Put dependencies in the workspace that imports them. Root `devDependencies` are only for genuinely repository-wide tools. Mobile-only test packages, React renderers, Expo modules, and native dependencies belong in `apps/mobile/package.json`; service or shared-package dependencies belong to their owning workspace.
-
-Treat React and native modules as singletons. Keep `react`, `react-dom`, and `react-test-renderer` on the exact versions selected by the current Expo SDK, and mirror those versions in root npm `overrides` to prevent peer auto-install drift. Never accept duplicate React or native-module versions. After dependency changes, run `npm ls react react-dom react-test-renderer`, `npm dedupe`, Expo Doctor, typecheck, lint, tests, and relevant exports/builds.
-
-Use the project-local Expo CLI and `expo install` when adding or upgrading Expo/native packages so versions follow the installed SDK compatibility map. Inspect every manifest and lockfile diff. Prefer exact direct dependency versions; retain Expo-generated compatible ranges only where Expo deliberately manages them. Upgrade Expo SDKs as focused changes, then realign singleton overrides and regenerate native projects.
-
-Do not use `--legacy-peer-deps`, `npm audit fix --force`, unreviewed install-script approval, or broad opportunistic upgrades. Resolve peer conflicts explicitly. Review lifecycle scripts and package provenance before allowing them. Security fixes should identify affected runtime path, choose a compatible direct upgrade or override, and rerun the complete validation matrix.
+Generated native projects are disposable. Preserve native build caches during ordinary work; use clean or multi-ABI builds only when their documented evidence is relevant. Linux supports web and Android; iOS builds run on hosted macOS runners. Do not introduce EAS without revisiting ADR 0001.
 
 ## Coding Style & Naming
 

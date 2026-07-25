@@ -54,6 +54,7 @@ Every ADR is currently accepted. Status is recorded in each ADR's front matter.
 ## Component documentation
 
 - [Portable infrastructure](../infra/README.md) and [generic Bicep module contract](../infra/modules/README.md)
+- [Domain logic](../packages/domain/README.md)
 - [Runtime-validated contracts](../packages/contracts/README.md)
 - [Reviewed copy](../packages/copy/README.md)
 - [Time-zone data](../packages/time-zone-data/README.md)

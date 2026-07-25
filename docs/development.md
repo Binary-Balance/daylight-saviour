@@ -2,22 +2,21 @@
 
 ## Supported toolchain
 
-| Tool                   | Version           |
-| ---------------------- | ----------------- |
-| Node.js                | 24.18.0           |
-| npm                    | 11.16.0           |
-| Expo                   | 57.0.8            |
-| React                  | 19.2.3            |
-| React Native           | 0.86.0            |
-| TypeScript             | 6.0.3             |
-| Eclipse Temurin JDK    | 17.0.19+10        |
-| Gradle wrapper         | 9.3.1             |
-| Android Gradle Plugin  | 8.12.0            |
-| Android platform       | API 36            |
-| Android build tools    | 35.0.0 and 36.0.0 |
-| Android platform tools | 37.0.0            |
-| Android NDK            | 27.1.12297006     |
-| CMake                  | 3.22.1            |
+| Tool                  | Version           |
+| --------------------- | ----------------- |
+| Node.js               | 24.18.0           |
+| npm                   | 11.16.0           |
+| Expo                  | 57.0.8            |
+| React                 | 19.2.3            |
+| React Native          | 0.86.0            |
+| TypeScript            | 6.0.3             |
+| Eclipse Temurin JDK   | 17.0.19+10        |
+| Gradle wrapper        | 9.3.1             |
+| Android Gradle Plugin | 8.12.0            |
+| Android platform      | API 36            |
+| Android build tools   | 35.0.0 and 36.0.0 |
+| Android NDK           | 27.1.12297006     |
+| CMake                 | 3.22.1            |
 
 `.nvmrc`, `package.json`, `package-lock.json`, Expo configuration, and generated Gradle files are authoritative. Update this table in the same pull request when changing them.
 
@@ -50,7 +49,7 @@ The root `allowScripts` policy denies the optional `unrs-resolver@1.12.2` postin
 
 Android Gradle Plugin can run on newer JDKs, but React Native 0.86 requests a Java 17 Gradle toolchain. Use Temurin 17 rather than overriding generated upstream build configuration.
 
-The current Linux x64 archive is `OpenJDK17U-jdk_x64_linux_hotspot_17.0.19_10.tar.gz`. Verify SHA-256 before extraction:
+Use Linux x64 archive `OpenJDK17U-jdk_x64_linux_hotspot_17.0.19_10.tar.gz`. Verify SHA-256 before extraction:
 
 ```text
 d8afc263758141a66e0e3aafc321e783f7016696f4eaea067d340a269037d331
@@ -108,12 +107,6 @@ NODE_ENV=development apps/mobile/android/gradlew \
   assembleDebug \
   --no-daemon
 ```
-
-Reference measurements on the two-vCPU, 7.7 GiB RAM development VM:
-
-- Cold four-ABI build: 1 hour 4 minutes 30 seconds.
-- Clean arm64-only build: 18 minutes 9 seconds.
-- Unchanged warm arm64-only build: 1 minute 43 seconds; 403 of 422 Gradle tasks reused.
 
 Full clean multi-ABI builds are release or major native-toolchain checks, not routine development. JavaScript/TypeScript changes normally need Metro, tests, typecheck, lint, and web export only. Preserve caches unless validating reproducibility or responding to native changes. `npm ci`, clean Expo prebuild, `gradlew clean`, native dependency changes, and changes to Expo, React Native, Gradle, Android Gradle Plugin, NDK, or CMake invalidate expensive build outputs.
 
