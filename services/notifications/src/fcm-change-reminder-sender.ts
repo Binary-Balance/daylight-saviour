@@ -9,23 +9,14 @@ const installationIdPattern = /^[A-Za-z0-9_-]{32,128}$/;
 const deviceTokenPattern = /^[A-Za-z0-9_:.-]{20,4096}$/;
 const fcmMessageNamePattern =
   /^projects\/[a-z][a-z0-9-]{4,28}[a-z0-9]\/messages\/\S+$/;
-const googleRpcStatuses = new Set([
-  'ABORTED',
-  'ALREADY_EXISTS',
-  'CANCELLED',
-  'DATA_LOSS',
-  'DEADLINE_EXCEEDED',
-  'FAILED_PRECONDITION',
-  'INTERNAL',
-  'INVALID_ARGUMENT',
-  'NOT_FOUND',
-  'OUT_OF_RANGE',
-  'PERMISSION_DENIED',
-  'RESOURCE_EXHAUSTED',
-  'UNAUTHENTICATED',
-  'UNAVAILABLE',
-  'UNIMPLEMENTED',
-  'UNKNOWN',
+const supportedFcmErrorPairs = new Map<string, 'permanent' | 'transient'>([
+  ['400/INVALID_ARGUMENT', 'permanent'],
+  ['401/UNAUTHENTICATED', 'permanent'],
+  ['403/PERMISSION_DENIED', 'permanent'],
+  ['404/NOT_FOUND', 'permanent'],
+  ['429/RESOURCE_EXHAUSTED', 'transient'],
+  ['500/INTERNAL', 'transient'],
+  ['503/UNAVAILABLE', 'transient'],
 ]);
 
 export type ChangeDirection = 'forward' | 'backward';
@@ -96,6 +87,10 @@ export type FcmSubscriptionRemovalResult =
   | 'not-found'
   | 'token-replaced';
 
+export type FcmSubscriptionCleanupStatus =
+  | FcmSubscriptionRemovalResult
+  | 'failed';
+
 export interface FcmSubscriptionRemover {
   /**
    * Deletes one subscription only when both its installation ID and currently
@@ -122,7 +117,11 @@ export type FcmChangeReminderResult =
   | { readonly kind: 'malformed-response' }
   | {
       readonly kind: 'permanent-invalid-token';
-      readonly subscriptionRemoval: FcmSubscriptionRemovalResult;
+      /**
+       * Storage cleanup is independent from provider delivery. A failed cleanup
+       * must be retried without sending this already-rejected FCM message again.
+       */
+      readonly cleanupStatus: FcmSubscriptionCleanupStatus;
     }
   | { readonly kind: 'permanent-rejection' }
   | { readonly kind: 'transient-rejection' };
@@ -143,6 +142,7 @@ export interface FcmChangeReminderSenderDependencies {
 }
 
 interface ParsedProviderError {
+  readonly classification: 'permanent' | 'transient';
   readonly hasUnregisteredToken: boolean;
   readonly status: string;
 }
@@ -233,8 +233,7 @@ function parseProviderError(
     error.code !== statusCode ||
     typeof error.message !== 'string' ||
     error.message.length === 0 ||
-    typeof error.status !== 'string' ||
-    !googleRpcStatuses.has(error.status)
+    typeof error.status !== 'string'
   ) {
     return undefined;
   }
@@ -244,7 +243,12 @@ function parseProviderError(
   ) {
     return undefined;
   }
+  const classification = supportedFcmErrorPairs.get(
+    `${statusCode}/${error.status}`,
+  );
+  if (classification === undefined) return undefined;
   return {
+    classification,
     hasUnregisteredToken:
       Array.isArray(error.details) &&
       error.details.some((detail) => isUnregisteredTokenDetail(detail)),
@@ -252,18 +256,12 @@ function parseProviderError(
   };
 }
 
-function isTransientProviderError(statusCode: number, status: string) {
-  return (
-    [408, 429, 500, 502, 503, 504].includes(statusCode) ||
-    [
-      'ABORTED',
-      'DEADLINE_EXCEEDED',
-      'INTERNAL',
-      'RESOURCE_EXHAUSTED',
-      'UNAUTHENTICATED',
-      'UNAVAILABLE',
-    ].includes(status)
-  );
+function cleanupStatus(result: unknown): FcmSubscriptionCleanupStatus {
+  return result === 'removed' ||
+    result === 'not-found' ||
+    result === 'token-replaced'
+    ? result
+    : 'failed';
 }
 
 function assertReviewedFacts(
@@ -418,20 +416,22 @@ export function createFcmChangeReminderSender(
         if (response.status !== 404 || error.status !== 'NOT_FOUND') {
           return report(dependencies.logger, { kind: 'malformed-response' });
         }
+        let cleanup: FcmSubscriptionCleanupStatus = 'failed';
         try {
-          const subscriptionRemoval =
+          cleanup = cleanupStatus(
             await dependencies.subscriptionRemover.removeIfDeviceTokenMatches(
               subscription,
-            );
-          return report(dependencies.logger, {
-            kind: 'permanent-invalid-token',
-            subscriptionRemoval,
-          });
+            ),
+          );
         } catch {
-          return report(dependencies.logger, { kind: 'transient-rejection' });
+          // The FCM response stays permanent even when storage cleanup needs a retry.
         }
+        return report(dependencies.logger, {
+          kind: 'permanent-invalid-token',
+          cleanupStatus: cleanup,
+        });
       }
-      if (isTransientProviderError(response.status, error.status)) {
+      if (error.classification === 'transient') {
         return report(dependencies.logger, { kind: 'transient-rejection' });
       }
       return report(dependencies.logger, { kind: 'permanent-rejection' });

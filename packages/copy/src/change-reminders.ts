@@ -1,4 +1,4 @@
-import { changeReminderNotification } from './change-reminder-notification.js';
+import { changeReminderNotification } from './change-reminder-notification.ts';
 
 export const changeReminders = Object.freeze({
   accessibility: Object.freeze({

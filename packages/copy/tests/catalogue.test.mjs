@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { changeReminderNotification as runtimeChangeReminderNotification } from '@daylight-saviour/copy/change-reminder-notification';
-import { changeReminderNotification } from '../src/change-reminder-notification.js';
+import { changeReminderNotification } from '../src/change-reminder-notification.ts';
 import * as copyModule from '../src/index.ts';
 
 const { australianEnglish } = copyModule;
@@ -73,10 +73,11 @@ describe('Australian-English copy catalogue', () => {
       australianEnglish.changeReminders.notification,
       changeReminderNotification,
     );
-    assert.strictEqual(
+    assert.deepEqual(
       runtimeChangeReminderNotification,
       changeReminderNotification,
     );
+    assert.equal(Object.isFrozen(runtimeChangeReminderNotification), true);
     assert.equal(Object.isFrozen(changeReminderNotification), true);
     assert.deepEqual(changeReminderNotification, {
       body: 'Your Home Time Zone changes soon.',

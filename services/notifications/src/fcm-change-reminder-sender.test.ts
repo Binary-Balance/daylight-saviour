@@ -247,7 +247,7 @@ describe('FCM Change Reminder sender', () => {
 
     assert.deepEqual(result, {
       kind: 'permanent-invalid-token',
-      subscriptionRemoval: 'removed',
+      cleanupStatus: 'removed',
     });
     assert.deepEqual(test.removalRequests, [subscription]);
     assert.deepEqual(test.logs, [
@@ -276,7 +276,7 @@ describe('FCM Change Reminder sender', () => {
   });
 
   for (const [status, providerStatus] of [
-    [503, 'UNAVAILABLE'],
+    [400, 'UNAVAILABLE'],
     [404, 'UNAVAILABLE'],
   ] as const) {
     it(`rejects contradictory ${status}/${providerStatus} unregistered responses`, async () => {
@@ -300,6 +300,39 @@ describe('FCM Change Reminder sender', () => {
     assert.deepEqual(result, { kind: 'permanent-rejection' });
     assert.deepEqual(test.removalRequests, []);
     assert.deepEqual(test.logs, ['fcm-change-reminder-permanent-rejection']);
+  });
+
+  it('classifies each supported transient FCM error pair without cleanup', async () => {
+    for (const [status, providerStatus] of [
+      [429, 'RESOURCE_EXHAUSTED'],
+      [500, 'INTERNAL'],
+      [503, 'UNAVAILABLE'],
+    ] as const) {
+      const test = sender(response(status, fcmError(status, providerStatus)));
+
+      const result = await test.instance.send(subscription, facts);
+
+      assert.deepEqual(result, { kind: 'transient-rejection' });
+      assert.deepEqual(test.removalRequests, []);
+      assert.deepEqual(test.logs, ['fcm-change-reminder-transient-rejection']);
+    }
+  });
+
+  it('classifies each supported permanent FCM error pair without cleanup', async () => {
+    for (const [status, providerStatus] of [
+      [400, 'INVALID_ARGUMENT'],
+      [401, 'UNAUTHENTICATED'],
+      [403, 'PERMISSION_DENIED'],
+      [404, 'NOT_FOUND'],
+    ] as const) {
+      const test = sender(response(status, fcmError(status, providerStatus)));
+
+      const result = await test.instance.send(subscription, facts);
+
+      assert.deepEqual(result, { kind: 'permanent-rejection' });
+      assert.deepEqual(test.removalRequests, []);
+      assert.deepEqual(test.logs, ['fcm-change-reminder-permanent-rejection']);
+    }
   });
 
   it('treats failed keyless credential acquisition as transient', async () => {
@@ -330,6 +363,34 @@ describe('FCM Change Reminder sender', () => {
     assert.doesNotMatch(serialisedLogs, new RegExp(sensitiveProviderResponse));
   });
 
+  it('keeps permanent invalid-token truth when cleanup rejects', async () => {
+    const cleanupFailure = 'cleanup detail that must not log';
+    const test = sender(
+      response(404, fcmError(404, 'NOT_FOUND', unregisteredDetails)),
+      {
+        removeIfDeviceTokenMatches: async () => {
+          throw new Error(cleanupFailure);
+        },
+      },
+    );
+
+    const result = await test.instance.send(subscription, facts);
+
+    assert.deepEqual(result, {
+      kind: 'permanent-invalid-token',
+      cleanupStatus: 'failed',
+    });
+    assert.deepEqual(test.removalRequests, [subscription]);
+    assert.deepEqual(test.logs, [
+      'fcm-change-reminder-permanent-invalid-token',
+    ]);
+    const serialisedLogs = JSON.stringify(test.logs);
+    assert.doesNotMatch(serialisedLogs, new RegExp(fullDeviceToken));
+    assert.doesNotMatch(serialisedLogs, new RegExp(fullCredential));
+    assert.doesNotMatch(serialisedLogs, new RegExp(sensitiveProviderResponse));
+    assert.doesNotMatch(serialisedLogs, new RegExp(cleanupFailure));
+  });
+
   it('keeps a rotated token when the conditional remover finds a mismatch', async () => {
     const test = sender(
       response(404, fcmError(404, 'NOT_FOUND', unregisteredDetails)),
@@ -342,7 +403,7 @@ describe('FCM Change Reminder sender', () => {
 
     assert.deepEqual(result, {
       kind: 'permanent-invalid-token',
-      subscriptionRemoval: 'token-replaced',
+      cleanupStatus: 'token-replaced',
     });
     assert.deepEqual(test.removalRequests, [subscription]);
   });
