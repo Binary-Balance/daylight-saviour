@@ -70,11 +70,10 @@ describe('DaylightSavingStatusHero', () => {
       ).toMatchObject({
         alignItems: 'baseline',
         flexDirection: 'row',
-        flexWrap: 'nowrap',
+        flexWrap: 'wrap',
       });
       const clock = screen.getByTestId('clock-value');
       expect(clock.props.children).toBe(expectedClock);
-      expect(clock.props.maxFontSizeMultiplier).toBe(1.2);
       expect(ReactNative.StyleSheet.flatten(clock.props.style)).toMatchObject({
         color: palette.ink,
         fontSize: expectedClockSize,
@@ -85,7 +84,6 @@ describe('DaylightSavingStatusHero', () => {
       } else {
         const meridiem = screen.getByTestId('clock-meridiem');
         expect(meridiem.props.children).toBe(expectedMeridiem);
-        expect(meridiem.props.maxFontSizeMultiplier).toBe(1.2);
         expect(
           ReactNative.StyleSheet.flatten(meridiem.props.style),
         ).toMatchObject({
@@ -123,4 +121,25 @@ describe('DaylightSavingStatusHero', () => {
       ).toBe(palette.signalRed);
     },
   );
+
+  it('fits large text without capping the user font scale', () => {
+    ReactNative.Dimensions.set({
+      screen: { fontScale: 2, height: 789, scale: 1, width: 320 },
+      window: { fontScale: 2, height: 789, scale: 1, width: 320 },
+    });
+
+    render(
+      <DaylightSavingStatusHero
+        facts={facts}
+        palette={daylightSaviourPalettes.light}
+        uses24hourClock={false}
+      />,
+    );
+
+    const clock = screen.getByTestId('clock-value');
+    expect(clock.props.maxFontSizeMultiplier).toBeUndefined();
+    expect(
+      ReactNative.StyleSheet.flatten(clock.props.style).fontSize,
+    ).toBeCloseTo(49.45, 2);
+  });
 });

@@ -214,13 +214,13 @@ export default function ChangeEventSection({
         style={[styles.eventCard, { borderColor: palette.solarGoldStructure }]}
         testID={`${report.phase}-civil-time-report`}
       >
-        <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
-          {copy.civilTimeReport.changeEvent.heading(report.event.relation)}
-        </Text>
         <Text
           accessibilityRole="header"
-          style={[styles.eventDate, { color: palette.ink }]}
+          style={[styles.metadata, { color: palette.secondaryInk }]}
         >
+          {copy.civilTimeReport.changeEvent.heading(report.event.relation)}
+        </Text>
+        <Text style={[styles.eventDate, { color: palette.ink }]}>
           {report.event.date}
         </Text>
         <View style={styles.directionRow}>
@@ -275,6 +275,7 @@ export default function ChangeEventSection({
               accessibilityLabel={
                 report.event.countdownAccessibilityLabel ?? undefined
               }
+              accessibilityLiveRegion="none"
               style={[styles.countdown, { color: palette.ink }]}
             >
               {report.event.countdown}

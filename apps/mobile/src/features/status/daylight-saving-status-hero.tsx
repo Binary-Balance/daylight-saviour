@@ -24,8 +24,14 @@ export default function DaylightSavingStatusHero({
   palette,
   uses24hourClock,
 }: DaylightSavingStatusHeroProps) {
-  const { width } = useWindowDimensions();
-  const clockSize = Math.min(104, Math.max(72, (width - 48) * 0.25));
+  const { fontScale, width } = useWindowDimensions();
+  const baseClockSize = Math.min(104, Math.max(72, (width - 48) * 0.25));
+  // Keep the critical clock readable at every text scale without relying on a
+  // font-scale cap. A five-character clock needs roughly 2.75em of width.
+  const clockSize = Math.min(
+    baseClockSize,
+    (width - 48) / (2.75 * Math.max(fontScale, 1)),
+  );
   const [clockValue, clockMeridiem = null] = uses24hourClock
     ? [facts.clock, null]
     : facts.clock.split(' ');
@@ -44,7 +50,6 @@ export default function DaylightSavingStatusHero({
         <View accessible={false} style={styles.clockLine} testID="clock-line">
           <Text
             accessible={false}
-            maxFontSizeMultiplier={1.2}
             style={[
               styles.clock,
               {
@@ -60,7 +65,6 @@ export default function DaylightSavingStatusHero({
           {clockMeridiem === null ? null : (
             <Text
               accessible={false}
-              maxFontSizeMultiplier={1.2}
               style={[
                 styles.clockMeridiem,
                 {
@@ -131,7 +135,7 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     alignSelf: 'flex-start',
     flexDirection: 'row',
-    flexWrap: 'nowrap',
+    flexWrap: 'wrap',
     gap: 8,
   },
   clockMeridiem: {

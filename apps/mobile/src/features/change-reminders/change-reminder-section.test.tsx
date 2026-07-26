@@ -128,6 +128,9 @@ it('keeps saving state bounded to pending adapter work', async () => {
   );
   fireEvent.press(screen.getByRole('button', { name: 'Enable reminders' }));
   expect(screen.getByText('Registering reminders…')).toBeTruthy();
+  expect(
+    screen.getByText('Registering reminders…').props.accessibilityLiveRegion,
+  ).toBe('none');
   expect(screen.queryByRole('button')).toBeNull();
 
   await act(async () => resolve({ kind: 'failed' }));

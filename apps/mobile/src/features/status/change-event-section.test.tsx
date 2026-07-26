@@ -41,7 +41,9 @@ describe('ChangeEventSection', () => {
       );
 
       expect(screen.getByTestId('reminder-day-civil-time-report')).toBeTruthy();
-      expect(screen.getByRole('header', { name: '5 April 2026' })).toBeTruthy();
+      expect(
+        screen.getByRole('header', { name: 'NEXT CHANGE EVENT' }),
+      ).toBeTruthy();
       expect(screen.getByText('Backward Change')).toBeTruthy();
       expect(screen.getByText('3:00 am → 2:00 am')).toBeTruthy();
       expect(screen.getByText('UTC+11:00 → UTC+10:00')).toBeTruthy();
@@ -136,6 +138,9 @@ describe('ChangeEventSection', () => {
     expect(screen.getByTestId('motion-short-fade')).toBeTruthy();
     expect(screen.getByText('Forward Change')).toBeTruthy();
     expect(screen.queryAllByText('2:00 am → 3:00 am')).toHaveLength(1);
+    expect(screen.getByText('In 1 day').props.accessibilityLiveRegion).toBe(
+      'none',
+    );
     expect(loopSpy).not.toHaveBeenCalled();
   });
 

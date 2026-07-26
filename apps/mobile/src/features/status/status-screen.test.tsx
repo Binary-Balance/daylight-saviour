@@ -100,7 +100,9 @@ describe('StatusScreen facade', () => {
       expect(ReactNative.StyleSheet.flatten(status.props.style).color).toBe(
         daylightSaviourPalettes[appearance].ink,
       );
-      expect(screen.getByRole('header', { name: '5 April 2026' })).toBeTruthy();
+      expect(
+        screen.getByRole('header', { name: 'NEXT CHANGE EVENT' }),
+      ).toBeTruthy();
       expect(screen.getByText('Backward Change')).toBeTruthy();
       expect(screen.getByText('In 1 second')).toBeTruthy();
       expect(screen.getByLabelText(/bundled data current/)).toBeTruthy();
@@ -295,7 +297,7 @@ describe('StatusScreen facade', () => {
         label.startsWith('Home Time Zone current time,'),
       ),
       order.indexOf('Standard time applies'),
-      order.indexOf('4 October 2026'),
+      order.indexOf('NEXT CHANGE EVENT'),
       order.indexOf('COUNTDOWN'),
       order.findIndex((label) => label.startsWith('Time-Zone Data Pack')),
       order.indexOf('Settings'),
