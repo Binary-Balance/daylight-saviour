@@ -59,6 +59,7 @@ function store(
 ): ReminderSubscriptionStore {
   return {
     purgeExpiredThrottleRecords: async () => undefined,
+    removeIfDeviceTokenMatches: async () => 'not-found',
     saveSubscription: async () => 'accepted',
     takeSourceAllowance: async () => true,
     ...overrides,
@@ -72,11 +73,17 @@ function azureError(statusCode: number) {
 function subscriptionTable(
   overrides: Partial<{
     readonly create: (entity: Record<string, unknown>) => Promise<void>;
+    readonly delete: (
+      partitionKey: string,
+      rowKey: string,
+      etag: string,
+    ) => Promise<void>;
     readonly get: (
       partitionKey: string,
       rowKey: string,
     ) => Promise<{
       readonly attemptGeneration: number;
+      readonly deviceToken: string;
       readonly etag: string;
       readonly partitionKey: string;
       readonly rowKey: string;
@@ -89,6 +96,7 @@ function subscriptionTable(
 ) {
   return {
     create: async () => undefined,
+    delete: async () => undefined,
     get: async () => {
       throw azureError(404);
     },
@@ -478,6 +486,63 @@ describe('Azure Table mapping', () => {
     assert.equal('registrationRequestId' in (entity ?? {}), false);
     assert.equal(entity?.rowKey, 'installation-id');
   });
+
+  it('maps exact-token conditional deletion to the subscriptions table', async () => {
+    const deletions: {
+      readonly etag: string | undefined;
+      readonly partitionKey: string;
+      readonly rowKey: string;
+    }[] = [];
+    const subscriptions = {
+      deleteEntity: async (
+        partitionKey: string,
+        rowKey: string,
+        options: { readonly etag?: string },
+      ) => {
+        deletions.push({
+          etag: options.etag,
+          partitionKey,
+          rowKey,
+        });
+      },
+      getEntity: async () =>
+        ({
+          attemptGeneration: 1,
+          deviceToken: validRegistration.deviceToken,
+          etag: 'matching-etag',
+        }) as never,
+    };
+    const tableStore = createAzureReminderSubscriptionStore(
+      {
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      },
+      {
+        createCredential: () => ({
+          getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+        }),
+        createTableClient: (_endpoint, tableName) =>
+          tableName === 'ReminderSubscriptions'
+            ? (subscriptions as never)
+            : ({} as never),
+      },
+    );
+
+    assert.equal(
+      await tableStore.removeIfDeviceTokenMatches({
+        deviceToken: validRegistration.deviceToken,
+        installationId: 'installation-id',
+      }),
+      'removed',
+    );
+    assert.deepEqual(deletions, [
+      {
+        etag: 'matching-etag',
+        partitionKey: 'subscriptions-v1',
+        rowKey: 'installation-id',
+      },
+    ]);
+  });
 });
 
 describe('source address normalization', () => {
@@ -526,6 +591,7 @@ describe('generation-ordered subscription persistence', () => {
   function concurrentSubscriptionTable() {
     const rows = new Map<string, Record<string, unknown>>();
     let nextEtag = 0;
+    let beforeDelete: (() => Promise<void>) | undefined;
     const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
     return {
       create: async (entity: Record<string, unknown>) => {
@@ -534,12 +600,26 @@ describe('generation-ordered subscription persistence', () => {
         if (rows.has(key)) throw azureError(409);
         rows.set(key, { ...entity, etag: String(++nextEtag) });
       },
+      delete: async (
+        partitionKey: string,
+        rowKey: string,
+        expectedEtag: string,
+      ) => {
+        await pause();
+        await beforeDelete?.();
+        const key = `${partitionKey}/${rowKey}`;
+        const row = rows.get(key);
+        if (row === undefined) throw azureError(404);
+        if (row.etag !== expectedEtag) throw azureError(412);
+        rows.delete(key);
+      },
       get: async (partitionKey: string, rowKey: string) => {
         await pause();
         const row = rows.get(`${partitionKey}/${rowKey}`);
         if (row === undefined) throw azureError(404);
         return {
           attemptGeneration: Number(row.attemptGeneration),
+          deviceToken: String(row.deviceToken),
           etag: String(row.etag),
           partitionKey,
           rowKey,
@@ -557,6 +637,9 @@ describe('generation-ordered subscription persistence', () => {
         rows.set(key, { ...entity, etag: String(++nextEtag) });
       },
       rows,
+      setBeforeDelete: (callback: (() => Promise<void>) | undefined) => {
+        beforeDelete = callback;
+      },
     };
   }
 
@@ -638,6 +721,108 @@ describe('generation-ordered subscription persistence', () => {
 
     assert.equal(onlyRow(subscriptions.rows).attemptGeneration, 2);
     assert.equal(onlyRow(subscriptions.rows).credentialHash, 'credential-2');
+  });
+
+  it('removes only an exact matching subscription token', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const current = record(1);
+    await registrationStore.saveSubscription(current);
+
+    assert.equal(
+      await registrationStore.removeIfDeviceTokenMatches({
+        deviceToken: current.deviceToken,
+        installationId: current.installationId,
+      }),
+      'removed',
+    );
+    assert.equal(subscriptions.rows.size, 0);
+  });
+
+  it('reports missing and rotated subscriptions without deleting them', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const older = record(1);
+    const replacement = record(2);
+
+    assert.equal(
+      await registrationStore.removeIfDeviceTokenMatches({
+        deviceToken: older.deviceToken,
+        installationId: older.installationId,
+      }),
+      'not-found',
+    );
+    await registrationStore.saveSubscription(older);
+    await registrationStore.saveSubscription(replacement);
+    assert.equal(
+      await registrationStore.removeIfDeviceTokenMatches({
+        deviceToken: older.deviceToken,
+        installationId: older.installationId,
+      }),
+      'token-replaced',
+    );
+    assert.equal(
+      onlyRow(subscriptions.rows).deviceToken,
+      replacement.deviceToken,
+    );
+  });
+
+  it('preserves a token rotated between lookup and conditional deletion', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const older = record(1);
+    const replacement = record(2);
+    await registrationStore.saveSubscription(older);
+    subscriptions.setBeforeDelete(async () => {
+      subscriptions.setBeforeDelete(undefined);
+      await registrationStore.saveSubscription(replacement);
+    });
+
+    assert.equal(
+      await registrationStore.removeIfDeviceTokenMatches({
+        deviceToken: older.deviceToken,
+        installationId: older.installationId,
+      }),
+      'token-replaced',
+    );
+    assert.equal(
+      onlyRow(subscriptions.rows).deviceToken,
+      replacement.deviceToken,
+    );
+  });
+
+  it('bounds conditional deletion contention', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const current = record(1);
+    await registrationStore.saveSubscription(current);
+    let deleteAttempts = 0;
+    subscriptions.setBeforeDelete(async () => {
+      deleteAttempts += 1;
+      throw azureError(412);
+    });
+
+    await assert.rejects(
+      registrationStore.removeIfDeviceTokenMatches({
+        deviceToken: current.deviceToken,
+        installationId: current.installationId,
+      }),
+      /Subscription removal contention exceeded retry limit/,
+    );
+    assert.equal(deleteAttempts, 12);
+    assert.equal(onlyRow(subscriptions.rows).deviceToken, current.deviceToken);
   });
 });
 

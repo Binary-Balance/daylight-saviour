@@ -7,19 +7,34 @@ presentation grammar, and deterministic secondary copy.
 
 ## Public API
 
-The package exports one immutable value, `australianEnglish`. Mobile code
-imports it as `copy`. Its stable semantic paths follow user concepts:
+The package's application API exports one immutable value,
+`australianEnglish`. Mobile code imports it as `copy`. Its stable semantic paths
+follow user concepts:
 
 - `copy.homeTimeZone`
 - `copy.civilTimeReport`
 - `copy.dataFreshness`
 - `copy.settings`
+- `copy.changeReminders`
 
 Static messages are constants. Dynamic messages are typed functions accepting
 structured facts and returning one complete plain string. There is no mutable
 locale, generic message dispatcher, runtime localization framework, AI, network,
-storage, React, React Native, Expo, or Azure dependency. Notification copy will
-be added only with implemented notification journeys.
+storage, React, React Native, Expo, or Azure dependency. The implemented Change
+Reminder journey owns its fixed FCM notification title and body here. Other
+notification copy will be added only with implemented notification journeys.
+
+### Node runtime bridge
+
+The emitting notification service imports
+`@daylight-saviour/copy/change-reminder-notification`. Its authoritative source
+is `src/change-reminder-notification.ts`; `npm run build` emits its JavaScript
+and declaration to ignored `dist/`, and the public subpath resolves only to
+that compiled output. `pretest` builds it before copy tests. Notification
+`pretypecheck`, `pretest`, and `prebuild` build it first, so a clean checkout
+resolves the same runtime artifact during local checks and production builds.
+Tests assert source and public runtime wording plus immutability. No other copy
+may bypass the facade.
 
 ## Ownership boundaries
 

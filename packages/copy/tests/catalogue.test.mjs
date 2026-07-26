@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { changeReminderNotification as runtimeChangeReminderNotification } from '@daylight-saviour/copy/change-reminder-notification';
+import { changeReminderNotification } from '../src/change-reminder-notification.ts';
 import * as copyModule from '../src/index.ts';
 
 const { australianEnglish } = copyModule;
@@ -34,6 +36,7 @@ describe('Australian-English copy catalogue', () => {
     assert.equal(Object.isFrozen(australianEnglish.civilTimeReport), true);
     assert.equal(Object.isFrozen(australianEnglish.dataFreshness), true);
     assert.equal(Object.isFrozen(australianEnglish.settings), true);
+    assert.equal(Object.isFrozen(australianEnglish.changeReminders), true);
     assert.equal('notifications' in australianEnglish, false);
   });
 
@@ -63,6 +66,23 @@ describe('Australian-English copy catalogue', () => {
       homeTimeZone.errorMessage('future-runtime-failure'),
       'Something went wrong with Home Time Zone settings. Try again.',
     );
+  });
+
+  it('owns fixed Change Reminder notification wording', () => {
+    assert.strictEqual(
+      australianEnglish.changeReminders.notification,
+      changeReminderNotification,
+    );
+    assert.deepEqual(
+      runtimeChangeReminderNotification,
+      changeReminderNotification,
+    );
+    assert.equal(Object.isFrozen(runtimeChangeReminderNotification), true);
+    assert.equal(Object.isFrozen(changeReminderNotification), true);
+    assert.deepEqual(changeReminderNotification, {
+      body: 'Your Home Time Zone changes soon.',
+      title: 'Change Reminder',
+    });
   });
 
   it('formats Home Time Zone dates and times without ambient locale or zone', () => {

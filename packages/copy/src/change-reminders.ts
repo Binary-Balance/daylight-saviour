@@ -1,3 +1,5 @@
+import { changeReminderNotification } from './change-reminder-notification.ts';
+
 export const changeReminders = Object.freeze({
   accessibility: Object.freeze({
     enableHint:
@@ -25,6 +27,7 @@ export const changeReminders = Object.freeze({
     heading: 'REMINDER STATUS UNAVAILABLE',
     retry: 'Check reminder status again',
   }),
+  notification: changeReminderNotification,
   osBlocked: Object.freeze({
     body: 'Notifications are blocked by your device settings. Reminders are not enabled.',
     heading: 'NOTIFICATIONS BLOCKED',
