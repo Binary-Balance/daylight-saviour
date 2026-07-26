@@ -1,4 +1,11 @@
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Animated,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 import type { DaylightSavingStatus } from '@daylight-saviour/domain';
 
@@ -16,25 +23,46 @@ export interface DaylightSavingStatusHeroFacts {
 interface DaylightSavingStatusHeroProps {
   readonly facts: DaylightSavingStatusHeroFacts;
   readonly palette: DaylightSaviourPalette;
+  readonly reducedMotion?: boolean | null;
+  readonly statusTransitionKey?: string;
   readonly uses24hourClock: boolean;
 }
 
 export default function DaylightSavingStatusHero({
   facts,
   palette,
+  reducedMotion = null,
+  statusTransitionKey = facts.status,
   uses24hourClock,
 }: DaylightSavingStatusHeroProps) {
   const { fontScale, width } = useWindowDimensions();
   const baseClockSize = Math.min(104, Math.max(72, (width - 48) * 0.25));
-  // Keep the critical clock readable at every text scale without relying on a
-  // font-scale cap. A five-character clock needs roughly 2.75em of width.
-  const clockSize = Math.min(
-    baseClockSize,
-    (width - 48) / (2.75 * Math.max(fontScale, 1)),
-  );
+  const [statusOpacity] = useState(() => new Animated.Value(1));
+  const lastStatusTransitionKey = useRef(statusTransitionKey);
+  const largeText = fontScale >= 1.5;
+  const clockSize = baseClockSize;
   const [clockValue, clockMeridiem = null] = uses24hourClock
     ? [facts.clock, null]
     : facts.clock.split(' ');
+
+  useEffect(() => {
+    if (
+      reducedMotion === null ||
+      lastStatusTransitionKey.current === statusTransitionKey
+    ) {
+      return;
+    }
+    lastStatusTransitionKey.current = statusTransitionKey;
+    statusOpacity.stopAnimation();
+    statusOpacity.setValue(reducedMotion ? 0.85 : 0.72);
+    const animation = Animated.timing(statusOpacity, {
+      duration: reducedMotion ? 90 : 180,
+      toValue: 1,
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [reducedMotion, statusOpacity, statusTransitionKey]);
 
   return (
     <View style={styles.statusSection}>
@@ -47,7 +75,11 @@ export default function DaylightSavingStatusHero({
         accessibilityLiveRegion="none"
         accessible
       >
-        <View accessible={false} style={styles.clockLine} testID="clock-line">
+        <View
+          accessible={false}
+          style={[styles.clockLine, largeText && styles.clockLineLarge]}
+          testID="clock-line"
+        >
           <Text
             accessible={false}
             style={[
@@ -60,7 +92,7 @@ export default function DaylightSavingStatusHero({
             ]}
             testID="clock-value"
           >
-            {clockValue}
+            {largeText ? clockValue.replace(':', ':\n') : clockValue}
           </Text>
           {clockMeridiem === null ? null : (
             <Text
@@ -92,12 +124,24 @@ export default function DaylightSavingStatusHero({
       <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
         {copy.civilTimeReport.daylightSavingStatusHeading}
       </Text>
-      <Text
-        accessibilityRole="header"
-        style={[styles.status, { color: palette.ink }]}
+      <Animated.View
+        accessibilityLiveRegion="none"
+        style={{ opacity: statusOpacity }}
+        testID={
+          reducedMotion === null
+            ? 'status-motion-awaiting-preference'
+            : reducedMotion
+              ? 'status-motion-short-fade'
+              : 'status-motion-lock-in'
+        }
       >
-        {facts.status}
-      </Text>
+        <Text
+          accessibilityRole="header"
+          style={[styles.status, { color: palette.ink }]}
+        >
+          {facts.status}
+        </Text>
+      </Animated.View>
       <View
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
@@ -138,6 +182,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
+  clockLineLarge: { alignItems: 'flex-start', gap: 0 },
   clockMeridiem: {
     fontWeight: '800',
   },

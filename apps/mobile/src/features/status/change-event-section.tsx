@@ -129,6 +129,10 @@ function SemanticEventMotion({
   );
 }
 
+function displayedUnitKey(value: string | null) {
+  return value === null ? 'completed' : value.replace(/\d+/g, '#');
+}
+
 export default function ChangeEventSection({
   palette,
   reducedMotion,
@@ -207,7 +211,7 @@ export default function ChangeEventSection({
       direction={report.event.direction}
       echo={report.event.wallTimeChange}
       echoColor={palette.secondaryInk}
-      eventKey={`${report.event.instant}:${report.event.relation}`}
+      eventKey={`${report.event.instant}:${report.event.relation}:${displayedUnitKey(report.event.countdown)}`}
       reducedMotion={reducedMotion}
     >
       <View

@@ -139,6 +139,8 @@ export default function StatusScreen({
           <DaylightSavingStatusHero
             facts={viewModel}
             palette={palette}
+            reducedMotion={reducedMotion}
+            statusTransitionKey={`${viewModel.status}:${viewModel.event?.relation ?? 'none'}`}
             uses24hourClock={uses24hourClock}
           />
         ) : null}

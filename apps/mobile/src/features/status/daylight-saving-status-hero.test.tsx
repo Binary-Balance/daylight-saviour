@@ -122,7 +122,7 @@ describe('DaylightSavingStatusHero', () => {
     },
   );
 
-  it('fits large text without capping the user font scale', () => {
+  it('preserves large text scaling through an unambiguous clock reflow', () => {
     ReactNative.Dimensions.set({
       screen: { fontScale: 2, height: 789, scale: 1, width: 320 },
       window: { fontScale: 2, height: 789, scale: 1, width: 320 },
@@ -138,8 +138,10 @@ describe('DaylightSavingStatusHero', () => {
 
     const clock = screen.getByTestId('clock-value');
     expect(clock.props.maxFontSizeMultiplier).toBeUndefined();
+    expect(clock.props.children).toBe('10:\n17');
+    expect(ReactNative.StyleSheet.flatten(clock.props.style).fontSize).toBe(72);
     expect(
-      ReactNative.StyleSheet.flatten(clock.props.style).fontSize,
-    ).toBeCloseTo(49.45, 2);
+      ReactNative.StyleSheet.flatten(clock.props.style).fontSize * 2,
+    ).toBeGreaterThan(72);
   });
 });

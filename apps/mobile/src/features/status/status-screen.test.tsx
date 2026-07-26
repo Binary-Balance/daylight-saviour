@@ -127,13 +127,16 @@ describe('StatusScreen facade', () => {
   it('updates status atomically while mounted', () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-04-04T15:59:59.000Z'));
+    const timingSpy = jest.spyOn(ReactNative.Animated, 'timing');
 
     render(<StatusScreen reducedMotion />);
+    const initialMotionCalls = timingSpy.mock.calls.length;
 
     expect(
       screen.getByRole('header', { name: 'Daylight saving time applies' }),
     ).toBeTruthy();
     expect(screen.getByText('Backward Change')).toBeTruthy();
+    expect(screen.getByTestId('status-motion-short-fade')).toBeTruthy();
 
     act(() => jest.advanceTimersByTime(1_000));
 
@@ -145,6 +148,8 @@ describe('StatusScreen facade', () => {
       screen.getByText('CHANGE RECORDED', { includeHiddenElements: true }),
     ).toBeTruthy();
     expect(screen.getByText('Applied now')).toBeTruthy();
+    expect(screen.getByTestId('status-motion-short-fade')).toBeTruthy();
+    expect(timingSpy.mock.calls.length).toBeGreaterThan(initialMotionCalls);
     expect(screen.queryByText('Forward Change')).toBeNull();
   });
 
@@ -282,7 +287,7 @@ describe('StatusScreen facade', () => {
     expect(acknowledge).toHaveBeenCalledTimes(1);
   });
 
-  it('orders zone through freshness before visual-header settings', () => {
+  it('orders every critical fact and action before visual-header settings', () => {
     const result = render(
       <StatusScreen
         now={new Date('2026-10-02T16:00:00.000Z')}
@@ -299,6 +304,7 @@ describe('StatusScreen facade', () => {
       order.indexOf('Standard time applies'),
       order.indexOf('NEXT CHANGE EVENT'),
       order.indexOf('COUNTDOWN'),
+      order.indexOf('CHANGE REMINDERS'),
       order.findIndex((label) => label.startsWith('Time-Zone Data Pack')),
       order.indexOf('Settings'),
     ];
@@ -307,5 +313,9 @@ describe('StatusScreen facade', () => {
     expect(positions).toEqual(
       [...positions].sort((left, right) => left - right),
     );
+    expect(
+      screen.getByTestId('phase-stamp', { includeHiddenElements: true }).props
+        .accessibilityElementsHidden,
+    ).toBe(true);
   });
 });
