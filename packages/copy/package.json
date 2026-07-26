@@ -7,10 +7,7 @@
   "types": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./change-reminder-notification": {
-      "types": "./src/change-reminder-notification.d.ts",
-      "default": "./src/change-reminder-notification.js"
-    }
+    "./change-reminder-notification": "./src/change-reminder-notification.js"
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs",

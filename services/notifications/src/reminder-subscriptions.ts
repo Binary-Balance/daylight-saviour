@@ -11,6 +11,8 @@ import type {
 import { parseReminderSubscriptionRegistration } from '@daylight-saviour/contracts/reminder-subscription-runtime';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
+import type { FcmSubscriptionRemover } from './fcm-change-reminder-sender.js';
+
 const maxRequestBytes = 8 * 1024;
 const throttleWindowMs = 10 * 60 * 1000;
 const throttleRetentionMs = 30 * 24 * 60 * 60 * 1000;
@@ -39,6 +41,7 @@ interface ReminderSubscriptionRecord extends Omit<
 
 interface SubscriptionEntity {
   readonly attemptGeneration: number;
+  readonly deviceToken: string;
   readonly etag: string;
   readonly partitionKey: string;
   readonly rowKey: string;
@@ -46,6 +49,11 @@ interface SubscriptionEntity {
 
 interface SubscriptionTable {
   readonly create: (entity: Record<string, unknown>) => Promise<void>;
+  readonly delete: (
+    partitionKey: string,
+    rowKey: string,
+    etag: string,
+  ) => Promise<void>;
   readonly get: (
     partitionKey: string,
     rowKey: string,
@@ -88,7 +96,7 @@ interface AzureReminderSubscriptionStoreDependencies {
   ) => TableClient;
 }
 
-export interface ReminderSubscriptionStore {
+export interface ReminderSubscriptionStore extends FcmSubscriptionRemover {
   readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
   readonly saveSubscription: (
     record: ReminderSubscriptionRecord,
@@ -306,6 +314,41 @@ export function createTableReminderSubscriptionStore(
   throttles: ThrottleTable,
 ): ReminderSubscriptionStore {
   return {
+    async removeIfDeviceTokenMatches(subscription) {
+      for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
+        let existing: SubscriptionEntity;
+        try {
+          existing = await subscriptions.get(
+            subscriptionPartitionKey,
+            subscription.installationId,
+          );
+        } catch (error) {
+          if (statusCode(error) === 404) return 'not-found';
+          throw error;
+        }
+        if (existing.deviceToken !== subscription.deviceToken) {
+          return 'token-replaced';
+        }
+        try {
+          await subscriptions.delete(
+            subscriptionPartitionKey,
+            subscription.installationId,
+            existing.etag,
+          );
+          return 'removed';
+        } catch (error) {
+          const deleteStatus = statusCode(error);
+          if (
+            deleteStatus !== 404 &&
+            deleteStatus !== 409 &&
+            deleteStatus !== 412
+          ) {
+            throw error;
+          }
+        }
+      }
+      throw new Error('Subscription removal contention exceeded retry limit');
+    },
     async saveSubscription(record) {
       const entity = {
         partitionKey: subscriptionPartitionKey,
@@ -451,9 +494,14 @@ export function createAzureReminderSubscriptionStore(
       get: async (partitionKey, rowKey) => {
         const entity = await subscriptions.getEntity<{
           attemptGeneration: number;
+          deviceToken: string;
         }>(partitionKey, rowKey);
+        if (typeof entity.deviceToken !== 'string') {
+          throw new Error('Stored subscription device token is invalid');
+        }
         return {
           attemptGeneration: entity.attemptGeneration,
+          deviceToken: entity.deviceToken,
           etag: entity.etag,
           partitionKey,
           rowKey,
@@ -461,6 +509,9 @@ export function createAzureReminderSubscriptionStore(
       },
       replace: async (entity, etag) => {
         await subscriptions.updateEntity(entity as never, 'Replace', { etag });
+      },
+      delete: async (partitionKey, rowKey, etag) => {
+        await subscriptions.deleteEntity(partitionKey, rowKey, { etag });
       },
     },
     {

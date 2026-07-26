@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { changeReminderNotification as runtimeChangeReminderNotification } from '@daylight-saviour/copy/change-reminder-notification';
 import { changeReminderNotification } from '../src/change-reminder-notification.js';
 import * as copyModule from '../src/index.ts';
 
@@ -70,6 +71,10 @@ describe('Australian-English copy catalogue', () => {
   it('owns fixed Change Reminder notification wording', () => {
     assert.strictEqual(
       australianEnglish.changeReminders.notification,
+      changeReminderNotification,
+    );
+    assert.strictEqual(
+      runtimeChangeReminderNotification,
       changeReminderNotification,
     );
     assert.equal(Object.isFrozen(changeReminderNotification), true);

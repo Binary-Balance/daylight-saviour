@@ -7,8 +7,9 @@ presentation grammar, and deterministic secondary copy.
 
 ## Public API
 
-The package exports one immutable value, `australianEnglish`. Mobile code
-imports it as `copy`. Its stable semantic paths follow user concepts:
+The package's application API exports one immutable value,
+`australianEnglish`. Mobile code imports it as `copy`. Its stable semantic paths
+follow user concepts:
 
 - `copy.homeTimeZone`
 - `copy.civilTimeReport`
@@ -22,6 +23,18 @@ locale, generic message dispatcher, runtime localization framework, AI, network,
 storage, React, React Native, Expo, or Azure dependency. The implemented Change
 Reminder journey owns its fixed FCM notification title and body here. Other
 notification copy will be added only with implemented notification journeys.
+
+### Node runtime bridge
+
+The emitting notification service imports
+`@daylight-saviour/copy/change-reminder-notification`. This narrow JavaScript
+runtime leaf is necessary because the application facade is TypeScript source;
+an emitting NodeNext service cannot consume its `.ts` import graph directly.
+It follows the existing `@daylight-saviour/domain` and
+`@daylight-saviour/contracts` runtime-export pattern: immutable JavaScript with
+an adjacent `.d.ts` contract. It is the exact same object as
+`copy.changeReminders.notification`; tests assert public-export resolution,
+identity, immutability, and wording. No other copy may bypass the facade.
 
 ## Ownership boundaries
 

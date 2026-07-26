@@ -91,6 +91,11 @@ export interface FcmHttpTransport {
   readonly post: (request: FcmHttpRequest) => Promise<FcmHttpResponse>;
 }
 
+export type FcmSubscriptionRemovalResult =
+  | 'removed'
+  | 'not-found'
+  | 'token-replaced';
+
 export interface FcmSubscriptionRemover {
   /**
    * Deletes one subscription only when both its installation ID and currently
@@ -98,7 +103,7 @@ export interface FcmSubscriptionRemover {
    */
   readonly removeIfDeviceTokenMatches: (
     subscription: FcmChangeReminderSubscription,
-  ) => Promise<'removed' | 'not-found' | 'token-replaced'>;
+  ) => Promise<FcmSubscriptionRemovalResult>;
 }
 
 export type FcmChangeReminderLogEvent =
@@ -115,7 +120,10 @@ export interface FcmChangeReminderLogger {
 export type FcmChangeReminderResult =
   | { readonly kind: 'accepted' }
   | { readonly kind: 'malformed-response' }
-  | { readonly kind: 'permanent-invalid-token' }
+  | {
+      readonly kind: 'permanent-invalid-token';
+      readonly subscriptionRemoval: FcmSubscriptionRemovalResult;
+    }
   | { readonly kind: 'permanent-rejection' }
   | { readonly kind: 'transient-rejection' };
 
@@ -407,16 +415,21 @@ export function createFcmChangeReminderSender(
         return report(dependencies.logger, { kind: 'malformed-response' });
       }
       if (error.hasUnregisteredToken) {
+        if (response.status !== 404 || error.status !== 'NOT_FOUND') {
+          return report(dependencies.logger, { kind: 'malformed-response' });
+        }
         try {
-          await dependencies.subscriptionRemover.removeIfDeviceTokenMatches(
-            subscription,
-          );
+          const subscriptionRemoval =
+            await dependencies.subscriptionRemover.removeIfDeviceTokenMatches(
+              subscription,
+            );
+          return report(dependencies.logger, {
+            kind: 'permanent-invalid-token',
+            subscriptionRemoval,
+          });
         } catch {
           return report(dependencies.logger, { kind: 'transient-rejection' });
         }
-        return report(dependencies.logger, {
-          kind: 'permanent-invalid-token',
-        });
       }
       if (isTransientProviderError(response.status, error.status)) {
         return report(dependencies.logger, { kind: 'transient-rejection' });

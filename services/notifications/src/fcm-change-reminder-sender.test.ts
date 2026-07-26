@@ -9,6 +9,7 @@ import {
   type FcmHttpRequest,
   type FcmHttpResponse,
   type FcmChangeReminderSubscription,
+  type FcmSubscriptionRemovalResult,
 } from './fcm-change-reminder-sender.js';
 
 const now = new Date('2026-07-26T00:00:00.000Z');
@@ -27,6 +28,13 @@ const facts = {
   homeTimeZone: 'Australia/Sydney',
   timing: 'one-week' as const,
 };
+
+const unregisteredDetails = [
+  {
+    '@type': 'type.googleapis.com/google.firebase.fcm.v1.FcmError',
+    errorCode: 'UNREGISTERED',
+  },
+] as const;
 
 function fcmError(
   status: number,
@@ -54,9 +62,7 @@ function sender(
       readonly expiresAt: Date;
       readonly value: string;
     }>;
-    readonly removeIfDeviceTokenMatches?: () => Promise<
-      'removed' | 'not-found' | 'token-replaced'
-    >;
+    readonly removeIfDeviceTokenMatches?: () => Promise<FcmSubscriptionRemovalResult>;
     readonly post?: (request: FcmHttpRequest) => Promise<FcmHttpResponse>;
   } = {},
 ) {
@@ -234,20 +240,15 @@ describe('FCM Change Reminder sender', () => {
 
   it('removes only the provider-rejected matching subscription', async () => {
     const test = sender(
-      response(
-        404,
-        fcmError(404, 'NOT_FOUND', [
-          {
-            '@type': 'type.googleapis.com/google.firebase.fcm.v1.FcmError',
-            errorCode: 'UNREGISTERED',
-          },
-        ]),
-      ),
+      response(404, fcmError(404, 'NOT_FOUND', unregisteredDetails)),
     );
 
     const result = await test.instance.send(subscription, facts);
 
-    assert.deepEqual(result, { kind: 'permanent-invalid-token' });
+    assert.deepEqual(result, {
+      kind: 'permanent-invalid-token',
+      subscriptionRemoval: 'removed',
+    });
     assert.deepEqual(test.removalRequests, [subscription]);
     assert.deepEqual(test.logs, [
       'fcm-change-reminder-permanent-invalid-token',
@@ -273,6 +274,23 @@ describe('FCM Change Reminder sender', () => {
     assert.deepEqual(test.removalRequests, []);
     assert.deepEqual(test.logs, ['fcm-change-reminder-malformed-response']);
   });
+
+  for (const [status, providerStatus] of [
+    [503, 'UNAVAILABLE'],
+    [404, 'UNAVAILABLE'],
+  ] as const) {
+    it(`rejects contradictory ${status}/${providerStatus} unregistered responses`, async () => {
+      const test = sender(
+        response(status, fcmError(status, providerStatus, unregisteredDetails)),
+      );
+
+      const result = await test.instance.send(subscription, facts);
+
+      assert.deepEqual(result, { kind: 'malformed-response' });
+      assert.deepEqual(test.removalRequests, []);
+      assert.deepEqual(test.logs, ['fcm-change-reminder-malformed-response']);
+    });
+  }
 
   it('distinguishes a permanent non-token provider rejection', async () => {
     const test = sender(response(400, fcmError(400, 'INVALID_ARGUMENT')));
@@ -301,15 +319,7 @@ describe('FCM Change Reminder sender', () => {
 
   it('does not expose tokens, credentials, or provider responses through logs', async () => {
     const test = sender(
-      response(
-        404,
-        fcmError(404, 'NOT_FOUND', [
-          {
-            '@type': 'type.googleapis.com/google.firebase.fcm.v1.FcmError',
-            errorCode: 'UNREGISTERED',
-          },
-        ]),
-      ),
+      response(404, fcmError(404, 'NOT_FOUND', unregisteredDetails)),
     );
 
     await test.instance.send(subscription, facts);
@@ -322,15 +332,7 @@ describe('FCM Change Reminder sender', () => {
 
   it('keeps a rotated token when the conditional remover finds a mismatch', async () => {
     const test = sender(
-      response(
-        404,
-        fcmError(404, 'NOT_FOUND', [
-          {
-            '@type': 'type.googleapis.com/google.firebase.fcm.v1.FcmError',
-            errorCode: 'UNREGISTERED',
-          },
-        ]),
-      ),
+      response(404, fcmError(404, 'NOT_FOUND', unregisteredDetails)),
       {
         removeIfDeviceTokenMatches: async () => 'token-replaced',
       },
@@ -338,7 +340,10 @@ describe('FCM Change Reminder sender', () => {
 
     const result = await test.instance.send(subscription, facts);
 
-    assert.deepEqual(result, { kind: 'permanent-invalid-token' });
+    assert.deepEqual(result, {
+      kind: 'permanent-invalid-token',
+      subscriptionRemoval: 'token-replaced',
+    });
     assert.deepEqual(test.removalRequests, [subscription]);
   });
 });
