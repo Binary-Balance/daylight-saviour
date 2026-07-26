@@ -18,6 +18,7 @@
     "@azure/data-tables": "13.3.2",
     "@azure/functions": "4.16.2",
     "@azure/identity": "4.13.1",
+    "@daylight-saviour/copy": "*",
     "@daylight-saviour/contracts": "*",
     "@daylight-saviour/domain": "*"
   },

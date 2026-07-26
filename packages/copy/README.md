@@ -14,12 +14,14 @@ imports it as `copy`. Its stable semantic paths follow user concepts:
 - `copy.civilTimeReport`
 - `copy.dataFreshness`
 - `copy.settings`
+- `copy.changeReminders`
 
 Static messages are constants. Dynamic messages are typed functions accepting
 structured facts and returning one complete plain string. There is no mutable
 locale, generic message dispatcher, runtime localization framework, AI, network,
-storage, React, React Native, Expo, or Azure dependency. Notification copy will
-be added only with implemented notification journeys.
+storage, React, React Native, Expo, or Azure dependency. The implemented Change
+Reminder journey owns its fixed FCM notification title and body here. Other
+notification copy will be added only with implemented notification journeys.
 
 ## Ownership boundaries
 
