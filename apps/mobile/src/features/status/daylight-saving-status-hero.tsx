@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -41,6 +42,7 @@ export default function DaylightSavingStatusHero({
   const [previousStatus, setPreviousStatus] = useState<string | null>(null);
   const [currentOpacity] = useState(() => new Animated.Value(1));
   const [previousOpacity] = useState(() => new Animated.Value(0));
+  const currentStatusRef = useRef(facts.status);
   const lastStatusTransitionKey = useRef(statusTransitionKey);
   const largeText = fontScale >= 1.5;
   const clockSize = baseClockSize;
@@ -56,7 +58,8 @@ export default function DaylightSavingStatusHero({
       return;
     }
     lastStatusTransitionKey.current = statusTransitionKey;
-    setPreviousStatus(currentStatus);
+    setPreviousStatus(currentStatusRef.current);
+    currentStatusRef.current = facts.status;
     setCurrentStatus(facts.status);
     currentOpacity.setValue(reducedMotion ? 0.85 : 0.7);
     previousOpacity.setValue(1);
@@ -76,7 +79,6 @@ export default function DaylightSavingStatusHero({
     return () => animation.stop();
   }, [
     currentOpacity,
-    currentStatus,
     facts.status,
     previousOpacity,
     reducedMotion,
@@ -99,20 +101,44 @@ export default function DaylightSavingStatusHero({
           style={[styles.clockLine, largeText && styles.clockLineLarge]}
           testID="clock-line"
         >
-          <Text
-            accessible={false}
-            style={[
-              styles.clock,
-              {
-                color: palette.ink,
-                fontSize: clockSize,
-                lineHeight: clockSize * 1.05,
-              },
-            ]}
-            testID="clock-value"
-          >
-            {clockValue}
-          </Text>
+          {largeText ? (
+            <ScrollView
+              accessible={false}
+              horizontal
+              style={styles.clockOverflow}
+              testID="clock-overflow"
+            >
+              <Text
+                accessible={false}
+                style={[
+                  styles.clock,
+                  {
+                    color: palette.ink,
+                    fontSize: clockSize,
+                    lineHeight: clockSize * 1.05,
+                  },
+                ]}
+                testID="clock-value"
+              >
+                {clockValue}
+              </Text>
+            </ScrollView>
+          ) : (
+            <Text
+              accessible={false}
+              style={[
+                styles.clock,
+                {
+                  color: palette.ink,
+                  fontSize: clockSize,
+                  lineHeight: clockSize * 1.05,
+                },
+              ]}
+              testID="clock-value"
+            >
+              {clockValue}
+            </Text>
+          )}
           {clockMeridiem === null ? null : (
             <Text
               accessible={false}
@@ -218,6 +244,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   clockLineLarge: { alignItems: 'flex-start', flexDirection: 'column', gap: 0 },
+  clockOverflow: { alignSelf: 'stretch', maxWidth: '100%' },
   clockMeridiem: {
     fontWeight: '800',
   },

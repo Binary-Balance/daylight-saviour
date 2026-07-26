@@ -131,10 +131,12 @@ function SemanticEventMotion({
 
 function CountdownTransition({
   accessibilityLabel,
+  color,
   reducedMotion,
   value,
 }: {
   readonly accessibilityLabel?: string;
+  readonly color: string;
   readonly reducedMotion: boolean | null;
   readonly value: string;
 }) {
@@ -181,7 +183,7 @@ function CountdownTransition({
           style={[
             styles.countdown,
             styles.countdownPrevious,
-            { opacity: previousOpacity },
+            { color, opacity: previousOpacity },
           ]}
         >
           {previousValue}
@@ -190,7 +192,7 @@ function CountdownTransition({
       <Animated.Text
         accessibilityLabel={accessibilityLabel}
         accessibilityLiveRegion="none"
-        style={[styles.countdown, { opacity: currentOpacity }]}
+        style={[styles.countdown, { color, opacity: currentOpacity }]}
         testID="countdown-current"
       >
         {value}
@@ -345,6 +347,7 @@ export default function ChangeEventSection({
               accessibilityLabel={
                 report.event.countdownAccessibilityLabel ?? undefined
               }
+              color={palette.ink}
               reducedMotion={reducedMotion}
               value={report.event.countdown}
             />

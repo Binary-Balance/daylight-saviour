@@ -144,9 +144,88 @@ describe('DaylightSavingStatusHero', () => {
         screen.getByTestId('clock-line').props.style,
       ).flexDirection,
     ).toBe('column');
+    const overflow = screen.getByTestId('clock-overflow');
+    expect(ReactNative.StyleSheet.flatten(overflow.props.style)).toMatchObject({
+      alignSelf: 'stretch',
+      maxWidth: '100%',
+    });
+    expect(overflow.props.horizontal).toBe(true);
+    expect(
+      screen.getByLabelText(/Home Time Zone current time, 10:17 pm/),
+    ).toBeTruthy();
     expect(ReactNative.StyleSheet.flatten(clock.props.style).fontSize).toBe(72);
     expect(
       ReactNative.StyleSheet.flatten(clock.props.style).fontSize * 2,
     ).toBeGreaterThan(72);
   });
+
+  it.each([
+    [false, 180, 'status-motion-lock-in'],
+    [true, 90, 'status-motion-short-fade'],
+  ] as const)(
+    'cleans previous status after %s-motion lock-in completion',
+    (reducedMotion, duration, motionTestId) => {
+      const timingSpy = jest
+        .spyOn(ReactNative.Animated, 'timing')
+        .mockImplementation(((
+          value: { setValue: (nextValue: number) => void },
+          config: { duration?: number; toValue: number },
+        ) => ({
+          start: (callback?: (result: { finished: boolean }) => void) => {
+            value.setValue(config.toValue);
+            callback?.({ finished: true });
+          },
+          stop: jest.fn(),
+        })) as never);
+      jest.spyOn(ReactNative.Animated, 'parallel').mockImplementation(((
+        animations: {
+          start: (callback?: (result: { finished: boolean }) => void) => void;
+        }[],
+      ) => ({
+        start: (callback?: (result: { finished: boolean }) => void) => {
+          animations.forEach((animation) => animation.start());
+          callback?.({ finished: true });
+        },
+        stop: jest.fn(),
+      })) as never);
+      const rendered = render(
+        <DaylightSavingStatusHero
+          facts={facts}
+          palette={daylightSaviourPalettes.light}
+          reducedMotion={reducedMotion}
+          statusTransitionKey="standard"
+          uses24hourClock={false}
+        />,
+      );
+
+      act(() => {
+        rendered.rerender(
+          <DaylightSavingStatusHero
+            facts={{ ...facts, status: 'Daylight saving time applies' }}
+            palette={daylightSaviourPalettes.light}
+            reducedMotion={reducedMotion}
+            statusTransitionKey="daylight-saving"
+            uses24hourClock={false}
+          />,
+        );
+      });
+
+      expect(screen.getByTestId(motionTestId)).toBeTruthy();
+      expect(screen.queryByText('Standard time applies')).toBeNull();
+      expect(
+        screen.getByRole('header', { name: 'Daylight saving time applies' }),
+      ).toBeTruthy();
+      expect(timingSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(
+        timingSpy.mock.calls.filter(
+          ([, config]) => config.duration === duration,
+        ),
+      ).toHaveLength(2);
+      expect(
+        timingSpy.mock.calls.every(
+          ([, config]) => config.toValue === 1 || config.toValue === 0,
+        ),
+      ).toBe(true);
+    },
+  );
 });
