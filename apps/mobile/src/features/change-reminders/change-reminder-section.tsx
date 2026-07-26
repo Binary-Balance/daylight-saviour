@@ -77,7 +77,7 @@ export default function ChangeReminderSection({
       </Text>
       {content === null ? (
         <Text
-          accessibilityLiveRegion="polite"
+          accessibilityLiveRegion="none"
           style={[styles.body, { color: palette.ink }]}
         >
           {snapshot.kind === 'loading'

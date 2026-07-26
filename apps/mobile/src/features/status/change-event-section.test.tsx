@@ -41,11 +41,18 @@ describe('ChangeEventSection', () => {
       );
 
       expect(screen.getByTestId('reminder-day-civil-time-report')).toBeTruthy();
-      expect(screen.getByRole('header', { name: '5 April 2026' })).toBeTruthy();
+      expect(
+        screen.getByRole('header', { name: 'NEXT CHANGE EVENT' }),
+      ).toBeTruthy();
       expect(screen.getByText('Backward Change')).toBeTruthy();
       expect(screen.getByText('3:00 am → 2:00 am')).toBeTruthy();
       expect(screen.getByText('UTC+11:00 → UTC+10:00')).toBeTruthy();
       expect(screen.getByText('In 1 second')).toBeTruthy();
+      expect(
+        ReactNative.StyleSheet.flatten(
+          screen.getByTestId('countdown-current').props.style,
+        ).color,
+      ).toBe(palette.ink);
       expect(
         ReactNative.StyleSheet.flatten(
           screen.getByText('Backward Change').props.style,
@@ -136,6 +143,9 @@ describe('ChangeEventSection', () => {
     expect(screen.getByTestId('motion-short-fade')).toBeTruthy();
     expect(screen.getByText('Forward Change')).toBeTruthy();
     expect(screen.queryAllByText('2:00 am → 3:00 am')).toHaveLength(1);
+    expect(screen.getByText('In 1 day').props.accessibilityLiveRegion).toBe(
+      'none',
+    );
     expect(loopSpy).not.toHaveBeenCalled();
   });
 
@@ -166,6 +176,64 @@ describe('ChangeEventSection', () => {
       />,
     );
     expect(screen.getByTestId('motion-short-fade')).toBeTruthy();
+  });
+
+  it('crossfades every mounted countdown value without replaying event motion', () => {
+    const timingSpy = jest.spyOn(ReactNative.Animated, 'timing');
+    const loopSpy = jest.spyOn(ReactNative.Animated, 'loop');
+    const rendered = render(
+      <ChangeEventSection
+        palette={daylightSaviourPalettes.light}
+        reducedMotion
+        report={report('2026-04-04T15:59:58.000Z')}
+      />,
+    );
+    const eventMotionCalls = timingSpy.mock.calls.length;
+
+    rendered.rerender(
+      <ChangeEventSection
+        palette={daylightSaviourPalettes.light}
+        reducedMotion
+        report={report('2026-04-04T15:59:59.000Z')}
+      />,
+    );
+
+    expect(screen.getByTestId('countdown-current').props.children).toBe(
+      'In 1 second',
+    );
+    expect(timingSpy.mock.calls.length).toBe(eventMotionCalls + 2);
+    expect(loopSpy).not.toHaveBeenCalled();
+  });
+
+  it('replaces unit-shaped countdown facts without exposing the previous value', () => {
+    const loopSpy = jest.spyOn(ReactNative.Animated, 'loop');
+    const rendered = render(
+      <ChangeEventSection
+        palette={daylightSaviourPalettes.light}
+        reducedMotion={false}
+        report={report('2026-04-04T15:58:00.000Z')}
+      />,
+    );
+    const directionalCalls = jest.spyOn(ReactNative.Animated, 'timing').mock
+      .calls.length;
+    rendered.rerender(
+      <ChangeEventSection
+        palette={daylightSaviourPalettes.light}
+        reducedMotion={false}
+        report={report('2026-04-04T15:59:59.000Z')}
+      />,
+    );
+    expect(
+      screen.getByTestId('countdown-current').props.accessibilityLiveRegion,
+    ).toBe('none');
+    const previous = screen
+      .getAllByText(/In /, { includeHiddenElements: true })
+      .find((node) => node.props.accessibilityElementsHidden);
+    expect(previous).toBeDefined();
+    expect(jest.spyOn(ReactNative.Animated, 'timing').mock.calls.length).toBe(
+      directionalCalls + 2,
+    );
+    expect(loopSpy).not.toHaveBeenCalled();
   });
 
   it('themes decorative Backward echo through its palette', () => {

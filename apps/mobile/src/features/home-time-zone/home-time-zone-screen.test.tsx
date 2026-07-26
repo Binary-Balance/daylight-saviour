@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, ScrollView } from 'react-native';
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
 import appConfig from '../../../app.json';
@@ -134,6 +134,21 @@ describe('HomeTimeZoneScreen', () => {
       }),
     ).toBeTruthy();
     expect(screen.queryByText('Australia/Sydney')).toBeNull();
+  });
+
+  it('keeps onboarding actions scrollable at maximum text scale', async () => {
+    const adapters = createAdapters({ deviceZone: 'Australia/Sydney' });
+    render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+
+    await screen.findByRole('header', {
+      name: 'Sydney, Canberra & most of NSW',
+    });
+    expect(
+      screen.UNSAFE_getByType(ScrollView).props.contentContainerStyle,
+    ).toMatchObject({ flexGrow: 1 });
+    expect(
+      screen.getByRole('button', { name: 'Use this Home Time Zone' }),
+    ).toBeTruthy();
   });
 
   it('bypasses onboarding after a canonical selection', async () => {

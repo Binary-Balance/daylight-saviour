@@ -1,5 +1,12 @@
 import { Fragment, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
@@ -56,10 +63,11 @@ export default function SettingsSheet({
           testID="settings-modal-safe-area"
         >
           <View style={styles.modalBackdrop}>
-            <View
+            <ScrollView
               accessibilityViewIsModal
+              contentContainerStyle={styles.settingsSheet}
               style={[
-                styles.settingsSheet,
+                styles.settingsScroll,
                 { backgroundColor: palette.surface },
               ]}
             >
@@ -95,7 +103,7 @@ export default function SettingsSheet({
                   {copy.settings.closeButton}
                 </Text>
               </Pressable>
-            </View>
+            </ScrollView>
           </View>
         </SafeAreaView>
       </Modal>
@@ -155,7 +163,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.7,
   },
   settingsSheet: {
+    flexGrow: 1,
     gap: 16,
     padding: 24,
   },
+  settingsScroll: { maxHeight: '100%' },
 });

@@ -57,13 +57,14 @@ function explicitAccessibilityOrder(node: RenderNode | string | null) {
     )
       return;
     const label = current.props?.accessibilityLabel;
-    if (label !== undefined) order.push(label);
-    else if (current.props?.accessibilityRole === 'header') {
-      const text = current.children?.filter(
-        (child): child is string => typeof child === 'string',
-      );
-      if (text?.length) order.push(text.join(''));
+    if (label !== undefined) {
+      order.push(label);
+      return;
     }
+    const text = current.children?.filter(
+      (child): child is string => typeof child === 'string',
+    );
+    if (text?.length) order.push(text.join(''));
     current.children?.forEach(visit);
   }
   if (node !== null) visit(node);
@@ -100,7 +101,9 @@ describe('StatusScreen facade', () => {
       expect(ReactNative.StyleSheet.flatten(status.props.style).color).toBe(
         daylightSaviourPalettes[appearance].ink,
       );
-      expect(screen.getByRole('header', { name: '5 April 2026' })).toBeTruthy();
+      expect(
+        screen.getByRole('header', { name: 'NEXT CHANGE EVENT' }),
+      ).toBeTruthy();
       expect(screen.getByText('Backward Change')).toBeTruthy();
       expect(screen.getByText('In 1 second')).toBeTruthy();
       expect(screen.getByLabelText(/bundled data current/)).toBeTruthy();
@@ -125,13 +128,16 @@ describe('StatusScreen facade', () => {
   it('updates status atomically while mounted', () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-04-04T15:59:59.000Z'));
+    const timingSpy = jest.spyOn(ReactNative.Animated, 'timing');
 
     render(<StatusScreen reducedMotion />);
+    const initialMotionCalls = timingSpy.mock.calls.length;
 
     expect(
       screen.getByRole('header', { name: 'Daylight saving time applies' }),
     ).toBeTruthy();
     expect(screen.getByText('Backward Change')).toBeTruthy();
+    expect(screen.getByTestId('status-motion-short-fade')).toBeTruthy();
 
     act(() => jest.advanceTimersByTime(1_000));
 
@@ -143,6 +149,8 @@ describe('StatusScreen facade', () => {
       screen.getByText('CHANGE RECORDED', { includeHiddenElements: true }),
     ).toBeTruthy();
     expect(screen.getByText('Applied now')).toBeTruthy();
+    expect(screen.getByTestId('status-motion-short-fade')).toBeTruthy();
+    expect(timingSpy.mock.calls.length).toBeGreaterThan(initialMotionCalls);
     expect(screen.queryByText('Forward Change')).toBeNull();
   });
 
@@ -280,7 +288,7 @@ describe('StatusScreen facade', () => {
     expect(acknowledge).toHaveBeenCalledTimes(1);
   });
 
-  it('orders zone through freshness before visual-header settings', () => {
+  it('orders every critical fact and action before visual-header settings', () => {
     const result = render(
       <StatusScreen
         now={new Date('2026-10-02T16:00:00.000Z')}
@@ -295,8 +303,18 @@ describe('StatusScreen facade', () => {
         label.startsWith('Home Time Zone current time,'),
       ),
       order.indexOf('Standard time applies'),
+      order.indexOf('NEXT CHANGE EVENT'),
       order.indexOf('4 October 2026'),
+      order.indexOf('Forward Change'),
+      order.indexOf('2:00 am → 3:00 am'),
+      order.indexOf('UTC+10:00 → UTC+11:00'),
+      order.indexOf('Clocks move 1 hour · Home Time Zone'),
       order.indexOf('COUNTDOWN'),
+      order.findIndex((label) =>
+        label.startsWith('Countdown, 1 day until Change Event'),
+      ),
+      order.indexOf('CHANGE REMINDERS'),
+      order.indexOf('Checking reminder registration…'),
       order.findIndex((label) => label.startsWith('Time-Zone Data Pack')),
       order.indexOf('Settings'),
     ];
@@ -305,5 +323,27 @@ describe('StatusScreen facade', () => {
     expect(positions).toEqual(
       [...positions].sort((left, right) => left - right),
     );
+    expect(
+      screen.getByTestId('phase-stamp', { includeHiddenElements: true }).props
+        .accessibilityElementsHidden,
+    ).toBe(true);
+    expect(
+      screen.getByText('→', { includeHiddenElements: true }).props
+        .accessibilityElementsHidden,
+    ).toBe(true);
+    expect(screen.getAllByText('2:00 am → 3:00 am')).toHaveLength(1);
+    expect(screen.getAllByText('UTC+10:00 → UTC+11:00')).toHaveLength(1);
+
+    result.unmount();
+    render(
+      <StatusScreen
+        now={new Date('2026-04-04T15:59:59.000Z')}
+        reducedMotion={false}
+      />,
+    );
+    const echo = screen
+      .getAllByText('3:00 am → 2:00 am', { includeHiddenElements: true })
+      .find((node) => node.props.accessibilityElementsHidden);
+    expect(echo).toBeDefined();
   });
 });

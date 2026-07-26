@@ -18,7 +18,7 @@ export const daylightSaviourPalettes = {
   dark: {
     actionFill: '#FF6A4D',
     background: '#081426',
-    controlBoundary: '#405067',
+    controlBoundary: '#6F809B',
     decisionNoticeBorder: '#FF6A4D',
     decisionNoticeText: '#FF6A4D',
     ink: '#F6F0DE',

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { Modal, StyleSheet } from 'react-native';
+import { Modal, ScrollView, StyleSheet } from 'react-native';
 
 import { daylightSaviourPalettes } from '../../theme';
 import SettingsSheet from './settings-sheet';
@@ -34,6 +34,9 @@ describe('SettingsSheet', () => {
       );
       fireEvent.press(settings);
       expect(screen.getByRole('header', { name: 'Settings' })).toBeTruthy();
+      expect(
+        screen.UNSAFE_getByType(ScrollView).props.contentContainerStyle,
+      ).toMatchObject({ flexGrow: 1 });
       expect(screen.getByText(/Home Time Zone: Sydney/)).toBeTruthy();
       expect(screen.queryByText(/not available|version|arrive/i)).toBeNull();
       expect(

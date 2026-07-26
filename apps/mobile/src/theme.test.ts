@@ -49,7 +49,7 @@ describe('daylightSaviourPalettes', () => {
     expect(daylightSaviourPalettes.dark).toEqual({
       actionFill: '#FF6A4D',
       background: '#081426',
-      controlBoundary: '#405067',
+      controlBoundary: '#6F809B',
       decisionNoticeBorder: '#FF6A4D',
       decisionNoticeText: '#FF6A4D',
       ink: '#F6F0DE',
@@ -73,6 +73,16 @@ describe('daylightSaviourPalettes', () => {
     expect(
       contrastRatio(palette.solarGold, palette.surface),
     ).toBeGreaterThanOrEqual(4.5);
+    expect(
+      contrastRatio(palette.controlBoundary, palette.background),
+    ).toBeGreaterThanOrEqual(3);
+    expect(
+      contrastRatio(palette.controlBoundary, palette.surface),
+    ).toBeGreaterThanOrEqual(3);
+  });
+
+  it('keeps dark neutral controls above contrast thresholds', () => {
+    const palette = daylightSaviourPalettes.dark;
     expect(
       contrastRatio(palette.controlBoundary, palette.background),
     ).toBeGreaterThanOrEqual(3);

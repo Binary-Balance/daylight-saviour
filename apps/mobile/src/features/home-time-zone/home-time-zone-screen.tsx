@@ -3,6 +3,7 @@ import {
   AppState,
   Pressable,
   SectionList,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -67,64 +68,66 @@ function ZoneChooser({
       edges={['top', 'right', 'bottom', 'left']}
       style={[styles.safeArea, { backgroundColor: palette.background }]}
     >
-      <View style={styles.chooserHeader}>
-        {onCancel === undefined ? null : (
-          <Pressable
-            accessibilityHint={copy.homeTimeZone.accessibility.cancelHint}
-            accessibilityLabel={copy.homeTimeZone.accessibility.cancelLabel}
-            accessibilityRole="button"
-            disabled={saving}
-            onPress={onCancel}
-            style={styles.cancelButton}
-          >
-            <Text style={[styles.buttonText, { color: palette.ink }]}>
-              {copy.homeTimeZone.chooser.cancelButton}
-            </Text>
-          </Pressable>
-        )}
-        <Text
-          accessibilityRole="header"
-          style={[styles.title, { color: palette.ink }]}
-        >
-          {copy.homeTimeZone.chooser.heading}
-        </Text>
-        <Text style={[styles.body, { color: palette.secondaryInk }]}>
-          {copy.homeTimeZone.chooser.introduction}
-        </Text>
-        {notice === null ? null : (
-          <Text
-            accessibilityRole="alert"
-            style={[styles.body, { color: palette.ink }]}
-          >
-            {copy.homeTimeZone.notice(notice)}
-          </Text>
-        )}
-        {saveError === null ? null : (
-          <Text
-            accessibilityRole="alert"
-            style={[styles.body, { color: palette.ink }]}
-          >
-            {copy.homeTimeZone.errorMessage(saveError)}
-          </Text>
-        )}
-        <TextInput
-          accessibilityLabel={copy.homeTimeZone.accessibility.searchLabel}
-          autoCapitalize="none"
-          onChangeText={setQuery}
-          placeholder={copy.homeTimeZone.chooser.searchPlaceholder}
-          placeholderTextColor={palette.secondaryInk}
-          style={[
-            styles.search,
-            {
-              borderColor: palette.controlBoundary,
-              color: palette.ink,
-              backgroundColor: palette.surface,
-            },
-          ]}
-          value={query}
-        />
-      </View>
       <SectionList
+        ListHeaderComponent={
+          <View style={styles.chooserHeader}>
+            {onCancel === undefined ? null : (
+              <Pressable
+                accessibilityHint={copy.homeTimeZone.accessibility.cancelHint}
+                accessibilityLabel={copy.homeTimeZone.accessibility.cancelLabel}
+                accessibilityRole="button"
+                disabled={saving}
+                onPress={onCancel}
+                style={styles.cancelButton}
+              >
+                <Text style={[styles.buttonText, { color: palette.ink }]}>
+                  {copy.homeTimeZone.chooser.cancelButton}
+                </Text>
+              </Pressable>
+            )}
+            <Text
+              accessibilityRole="header"
+              style={[styles.title, { color: palette.ink }]}
+            >
+              {copy.homeTimeZone.chooser.heading}
+            </Text>
+            <Text style={[styles.body, { color: palette.secondaryInk }]}>
+              {copy.homeTimeZone.chooser.introduction}
+            </Text>
+            {notice === null ? null : (
+              <Text
+                accessibilityRole="alert"
+                style={[styles.body, { color: palette.ink }]}
+              >
+                {copy.homeTimeZone.notice(notice)}
+              </Text>
+            )}
+            {saveError === null ? null : (
+              <Text
+                accessibilityRole="alert"
+                style={[styles.body, { color: palette.ink }]}
+              >
+                {copy.homeTimeZone.errorMessage(saveError)}
+              </Text>
+            )}
+            <TextInput
+              accessibilityLabel={copy.homeTimeZone.accessibility.searchLabel}
+              autoCapitalize="none"
+              onChangeText={setQuery}
+              placeholder={copy.homeTimeZone.chooser.searchPlaceholder}
+              placeholderTextColor={palette.secondaryInk}
+              style={[
+                styles.search,
+                {
+                  borderColor: palette.controlBoundary,
+                  color: palette.ink,
+                  backgroundColor: palette.surface,
+                },
+              ]}
+              value={query}
+            />
+          </View>
+        }
         contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
@@ -245,7 +248,7 @@ export default function HomeTimeZoneScreen({
         edges={['top', 'right', 'bottom', 'left']}
         style={[styles.safeArea, { backgroundColor: palette.background }]}
       >
-        <View style={styles.confirmation}>
+        <ScrollView contentContainerStyle={styles.confirmation}>
           <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
             {copy.homeTimeZone.confirmation.heading}
           </Text>
@@ -316,7 +319,7 @@ export default function HomeTimeZoneScreen({
               {copy.homeTimeZone.confirmation.chooseAnotherButton}
             </Text>
           </Pressable>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -326,7 +329,7 @@ export default function HomeTimeZoneScreen({
       edges={['top', 'right', 'bottom', 'left']}
       style={[styles.safeArea, { backgroundColor: palette.background }]}
     >
-      <View style={styles.confirmation}>
+      <ScrollView contentContainerStyle={styles.confirmation}>
         <Text
           accessibilityRole={
             snapshot.kind === 'load-error' ? 'alert' : undefined
@@ -351,7 +354,7 @@ export default function HomeTimeZoneScreen({
             </Text>
           </Pressable>
         ) : null}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -361,7 +364,7 @@ const styles = StyleSheet.create({
   buttonText: { fontSize: 17, fontWeight: '700' },
   cancelButton: { alignSelf: 'flex-start', minHeight: 44, paddingVertical: 10 },
   chooserHeader: { gap: 12, paddingHorizontal: 24, paddingTop: 24 },
-  confirmation: { flex: 1, gap: 20, justifyContent: 'center', padding: 24 },
+  confirmation: { flexGrow: 1, gap: 20, justifyContent: 'center', padding: 24 },
   identifier: { fontSize: 14 },
   listContent: { padding: 24 },
   metadata: { fontSize: 12, fontWeight: '700', letterSpacing: 1.1 },
