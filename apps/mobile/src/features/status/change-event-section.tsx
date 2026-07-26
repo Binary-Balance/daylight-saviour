@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 import type { ChangeDirection } from '@daylight-saviour/domain';
@@ -129,8 +129,74 @@ function SemanticEventMotion({
   );
 }
 
-function displayedUnitKey(value: string | null) {
-  return value === null ? 'completed' : value.replace(/\d+/g, '#');
+function CountdownTransition({
+  accessibilityLabel,
+  reducedMotion,
+  value,
+}: {
+  readonly accessibilityLabel?: string;
+  readonly reducedMotion: boolean | null;
+  readonly value: string;
+}) {
+  const [currentOpacity] = useState(() => new Animated.Value(1));
+  const [previousOpacity] = useState(() => new Animated.Value(0));
+  const [previousValue, setPreviousValue] = useState<string | null>(null);
+  const lastValue = useRef(value);
+
+  useEffect(() => {
+    if (lastValue.current === value) return;
+    setPreviousValue(lastValue.current);
+    lastValue.current = value;
+    if (reducedMotion === null) {
+      setPreviousValue(null);
+      return;
+    }
+
+    currentOpacity.setValue(reducedMotion ? 0.85 : 0.7);
+    previousOpacity.setValue(1);
+    const animation = Animated.parallel([
+      Animated.timing(previousOpacity, {
+        duration: reducedMotion ? 90 : 140,
+        toValue: 0,
+        useNativeDriver: true,
+      }),
+      Animated.timing(currentOpacity, {
+        duration: reducedMotion ? 90 : 140,
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+    ]);
+    animation.start(() => {
+      setPreviousValue(null);
+    });
+    return () => animation.stop();
+  }, [currentOpacity, previousOpacity, reducedMotion, value]);
+
+  return (
+    <View style={styles.countdownTransition}>
+      {previousValue === null ? null : (
+        <Animated.Text
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={[
+            styles.countdown,
+            styles.countdownPrevious,
+            { opacity: previousOpacity },
+          ]}
+        >
+          {previousValue}
+        </Animated.Text>
+      )}
+      <Animated.Text
+        accessibilityLabel={accessibilityLabel}
+        accessibilityLiveRegion="none"
+        style={[styles.countdown, { opacity: currentOpacity }]}
+        testID="countdown-current"
+      >
+        {value}
+      </Animated.Text>
+    </View>
+  );
 }
 
 export default function ChangeEventSection({
@@ -211,7 +277,7 @@ export default function ChangeEventSection({
       direction={report.event.direction}
       echo={report.event.wallTimeChange}
       echoColor={palette.secondaryInk}
-      eventKey={`${report.event.instant}:${report.event.relation}:${displayedUnitKey(report.event.countdown)}`}
+      eventKey={`${report.event.instant}:${report.event.relation}`}
       reducedMotion={reducedMotion}
     >
       <View
@@ -275,15 +341,13 @@ export default function ChangeEventSection({
             >
               {copy.civilTimeReport.changeEvent.countdownHeading}
             </Text>
-            <Text
+            <CountdownTransition
               accessibilityLabel={
                 report.event.countdownAccessibilityLabel ?? undefined
               }
-              accessibilityLiveRegion="none"
-              style={[styles.countdown, { color: palette.ink }]}
-            >
-              {report.event.countdown}
-            </Text>
+              reducedMotion={reducedMotion}
+              value={report.event.countdown}
+            />
           </View>
         )}
       </View>
@@ -308,6 +372,8 @@ const styles = StyleSheet.create({
     lineHeight: 34,
     paddingTop: 6,
   },
+  countdownPrevious: { left: 0, position: 'absolute', top: 6 },
+  countdownTransition: { minHeight: 40, paddingTop: 0, position: 'relative' },
   decorativeEcho: {
     fontSize: 24,
     fontVariant: ['tabular-nums'],

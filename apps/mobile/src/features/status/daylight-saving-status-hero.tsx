@@ -37,7 +37,10 @@ export default function DaylightSavingStatusHero({
 }: DaylightSavingStatusHeroProps) {
   const { fontScale, width } = useWindowDimensions();
   const baseClockSize = Math.min(104, Math.max(72, (width - 48) * 0.25));
-  const [statusOpacity] = useState(() => new Animated.Value(1));
+  const [currentStatus, setCurrentStatus] = useState(facts.status);
+  const [previousStatus, setPreviousStatus] = useState<string | null>(null);
+  const [currentOpacity] = useState(() => new Animated.Value(1));
+  const [previousOpacity] = useState(() => new Animated.Value(0));
   const lastStatusTransitionKey = useRef(statusTransitionKey);
   const largeText = fontScale >= 1.5;
   const clockSize = baseClockSize;
@@ -53,16 +56,32 @@ export default function DaylightSavingStatusHero({
       return;
     }
     lastStatusTransitionKey.current = statusTransitionKey;
-    statusOpacity.stopAnimation();
-    statusOpacity.setValue(reducedMotion ? 0.85 : 0.72);
-    const animation = Animated.timing(statusOpacity, {
-      duration: reducedMotion ? 90 : 180,
-      toValue: 1,
-      useNativeDriver: true,
-    });
-    animation.start();
+    setPreviousStatus(currentStatus);
+    setCurrentStatus(facts.status);
+    currentOpacity.setValue(reducedMotion ? 0.85 : 0.7);
+    previousOpacity.setValue(1);
+    const animation = Animated.parallel([
+      Animated.timing(previousOpacity, {
+        duration: reducedMotion ? 90 : 180,
+        toValue: 0,
+        useNativeDriver: true,
+      }),
+      Animated.timing(currentOpacity, {
+        duration: reducedMotion ? 90 : 180,
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+    ]);
+    animation.start(() => setPreviousStatus(null));
     return () => animation.stop();
-  }, [reducedMotion, statusOpacity, statusTransitionKey]);
+  }, [
+    currentOpacity,
+    currentStatus,
+    facts.status,
+    previousOpacity,
+    reducedMotion,
+    statusTransitionKey,
+  ]);
 
   return (
     <View style={styles.statusSection}>
@@ -92,7 +111,7 @@ export default function DaylightSavingStatusHero({
             ]}
             testID="clock-value"
           >
-            {largeText ? clockValue.replace(':', ':\n') : clockValue}
+            {clockValue}
           </Text>
           {clockMeridiem === null ? null : (
             <Text
@@ -126,7 +145,7 @@ export default function DaylightSavingStatusHero({
       </Text>
       <Animated.View
         accessibilityLiveRegion="none"
-        style={{ opacity: statusOpacity }}
+        style={styles.statusTransition}
         testID={
           reducedMotion === null
             ? 'status-motion-awaiting-preference'
@@ -135,12 +154,28 @@ export default function DaylightSavingStatusHero({
               : 'status-motion-lock-in'
         }
       >
-        <Text
+        {previousStatus === null ? null : (
+          <Animated.Text
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            style={[
+              styles.status,
+              styles.previousStatus,
+              { color: palette.ink, opacity: previousOpacity },
+            ]}
+          >
+            {previousStatus}
+          </Animated.Text>
+        )}
+        <Animated.Text
           accessibilityRole="header"
-          style={[styles.status, { color: palette.ink }]}
+          style={[
+            styles.status,
+            { color: palette.ink, opacity: currentOpacity },
+          ]}
         >
-          {facts.status}
-        </Text>
+          {currentStatus}
+        </Animated.Text>
       </Animated.View>
       <View
         accessibilityElementsHidden
@@ -182,7 +217,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
-  clockLineLarge: { alignItems: 'flex-start', gap: 0 },
+  clockLineLarge: { alignItems: 'flex-start', flexDirection: 'column', gap: 0 },
   clockMeridiem: {
     fontWeight: '800',
   },
@@ -219,7 +254,9 @@ const styles = StyleSheet.create({
     letterSpacing: -1,
     lineHeight: 45,
   },
+  previousStatus: { left: 0, position: 'absolute', top: 0 },
   statusSection: {
     gap: 12,
   },
+  statusTransition: { minHeight: 45, position: 'relative' },
 });

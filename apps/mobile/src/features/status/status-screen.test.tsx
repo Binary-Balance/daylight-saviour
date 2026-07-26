@@ -57,13 +57,14 @@ function explicitAccessibilityOrder(node: RenderNode | string | null) {
     )
       return;
     const label = current.props?.accessibilityLabel;
-    if (label !== undefined) order.push(label);
-    else if (current.props?.accessibilityRole === 'header') {
-      const text = current.children?.filter(
-        (child): child is string => typeof child === 'string',
-      );
-      if (text?.length) order.push(text.join(''));
+    if (label !== undefined) {
+      order.push(label);
+      return;
     }
+    const text = current.children?.filter(
+      (child): child is string => typeof child === 'string',
+    );
+    if (text?.length) order.push(text.join(''));
     current.children?.forEach(visit);
   }
   if (node !== null) visit(node);
@@ -303,8 +304,17 @@ describe('StatusScreen facade', () => {
       ),
       order.indexOf('Standard time applies'),
       order.indexOf('NEXT CHANGE EVENT'),
+      order.indexOf('4 October 2026'),
+      order.indexOf('Forward Change'),
+      order.indexOf('2:00 am → 3:00 am'),
+      order.indexOf('UTC+10:00 → UTC+11:00'),
+      order.indexOf('Clocks move 1 hour · Home Time Zone'),
       order.indexOf('COUNTDOWN'),
+      order.findIndex((label) =>
+        label.startsWith('Countdown, 1 day until Change Event'),
+      ),
       order.indexOf('CHANGE REMINDERS'),
+      order.indexOf('Checking reminder registration…'),
       order.findIndex((label) => label.startsWith('Time-Zone Data Pack')),
       order.indexOf('Settings'),
     ];
@@ -317,5 +327,23 @@ describe('StatusScreen facade', () => {
       screen.getByTestId('phase-stamp', { includeHiddenElements: true }).props
         .accessibilityElementsHidden,
     ).toBe(true);
+    expect(
+      screen.getByText('→', { includeHiddenElements: true }).props
+        .accessibilityElementsHidden,
+    ).toBe(true);
+    expect(screen.getAllByText('2:00 am → 3:00 am')).toHaveLength(1);
+    expect(screen.getAllByText('UTC+10:00 → UTC+11:00')).toHaveLength(1);
+
+    result.unmount();
+    render(
+      <StatusScreen
+        now={new Date('2026-04-04T15:59:59.000Z')}
+        reducedMotion={false}
+      />,
+    );
+    const echo = screen
+      .getAllByText('3:00 am → 2:00 am', { includeHiddenElements: true })
+      .find((node) => node.props.accessibilityElementsHidden);
+    expect(echo).toBeDefined();
   });
 });

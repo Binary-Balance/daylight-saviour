@@ -173,6 +173,33 @@ describe('ChangeEventSection', () => {
     expect(screen.getByTestId('motion-short-fade')).toBeTruthy();
   });
 
+  it('crossfades every mounted countdown value without replaying event motion', () => {
+    const timingSpy = jest.spyOn(ReactNative.Animated, 'timing');
+    const loopSpy = jest.spyOn(ReactNative.Animated, 'loop');
+    const rendered = render(
+      <ChangeEventSection
+        palette={daylightSaviourPalettes.light}
+        reducedMotion
+        report={report('2026-04-04T15:59:58.000Z')}
+      />,
+    );
+    const eventMotionCalls = timingSpy.mock.calls.length;
+
+    rendered.rerender(
+      <ChangeEventSection
+        palette={daylightSaviourPalettes.light}
+        reducedMotion
+        report={report('2026-04-04T15:59:59.000Z')}
+      />,
+    );
+
+    expect(screen.getByTestId('countdown-current').props.children).toBe(
+      'In 1 second',
+    );
+    expect(timingSpy.mock.calls.length).toBe(eventMotionCalls + 2);
+    expect(loopSpy).not.toHaveBeenCalled();
+  });
+
   it('themes decorative Backward echo through its palette', () => {
     render(
       <ChangeEventSection
