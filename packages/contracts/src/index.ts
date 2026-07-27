@@ -15,11 +15,14 @@ export {
 export {
   parseReminderSubscriptionRegistration,
   parseReminderSubscriptionRegistrationResponse,
+  parseChangeReminderNotification,
+  ChangeReminderNotificationValidationError,
   reminderSubscriptionPlatforms,
   ReminderSubscriptionValidationError,
   type ReminderSubscriptionPlatform,
   type ReminderSubscriptionRegistration,
   type ReminderSubscriptionRegistrationResponse,
+  type ChangeReminderNotification,
 } from './reminder-subscription.ts';
 
 export interface TimeZoneState {

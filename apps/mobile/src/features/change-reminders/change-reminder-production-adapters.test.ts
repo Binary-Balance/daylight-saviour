@@ -9,6 +9,7 @@ const responseBody = {
 
 function harness({
   createRegistrationRequestId = async () => 'a'.repeat(64),
+  currentToken = 'fcm-token:with_valid.characters-123',
   endpoint = 'https://reminders.example.test/reminder-subscriptions',
   existingPermission = { canAskAgain: true, granted: true },
   fetchImplementation = async () => Response.json(responseBody),
@@ -19,6 +20,7 @@ function harness({
   timeoutMs = 100,
 }: {
   readonly createRegistrationRequestId?: () => Promise<string>;
+  readonly currentToken?: string;
   readonly endpoint?: string;
   readonly existingPermission?: {
     readonly canAskAgain: boolean;
@@ -59,7 +61,7 @@ function harness({
       ),
       getDevicePushTokenAsync: jest.fn(async () => {
         calls.push('token');
-        return { data: 'fcm-token:with_valid.characters-123' };
+        return { data: currentToken };
       }),
       getPermissionsAsync: jest.fn(async () => {
         calls.push('permission:get');
@@ -289,12 +291,13 @@ describe('production Change Reminder adapters', () => {
     expect(JSON.parse(test.stored() ?? '')).toEqual({
       ...responseBody,
       attemptGeneration: 1,
+      deviceToken: 'fcm-token:with_valid.characters-123',
       homeTimeZone: 'Australia/Sydney',
       oneDayEnabled: true,
       oneWeekEnabled: true,
       registrationRequestId: 'a'.repeat(64),
       state: 'registered',
-      version: 2,
+      version: 3,
     });
     await expect(test.adapters.restore()).resolves.toEqual({
       kind: 'registered',
@@ -302,12 +305,13 @@ describe('production Change Reminder adapters', () => {
       registration: {
         ...responseBody,
         attemptGeneration: 1,
+        deviceToken: 'fcm-token:with_valid.characters-123',
         homeTimeZone: 'Australia/Sydney',
         oneDayEnabled: true,
         oneWeekEnabled: true,
         registrationRequestId: 'a'.repeat(64),
         state: 'registered',
-        version: 2,
+        version: 3,
       },
     });
   });
@@ -316,12 +320,13 @@ describe('production Change Reminder adapters', () => {
     const storage = {
       value: JSON.stringify({
         attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
         homeTimeZone: 'Australia/Sydney',
         oneDayEnabled: true,
         oneWeekEnabled: true,
         registrationRequestId: 'b'.repeat(64),
         state: 'pending',
-        version: 2,
+        version: 3,
       }),
     };
     const relaunched = harness({ storage });
@@ -379,6 +384,69 @@ describe('production Change Reminder adapters', () => {
     expect(JSON.parse(storage.value ?? '')).toMatchObject({
       attemptGeneration: 2,
       state: 'registered',
+    });
+  });
+
+  it('reconciles an offline token rotation during restore before reporting enabled', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 7,
+        deviceToken: 'fcm-token:old_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 3,
+      }),
+    };
+    const test = harness({
+      currentToken: 'fcm-token:replacement_valid.characters-456',
+      storage,
+    });
+
+    await expect(test.adapters.restore()).resolves.toMatchObject({
+      kind: 'registered',
+      notificationPermissionGranted: true,
+      registration: {
+        attemptGeneration: 8,
+        deviceToken: 'fcm-token:replacement_valid.characters-456',
+        registrationRequestId: 'a'.repeat(64),
+        version: 3,
+      },
+    });
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({
+      attemptGeneration: 8,
+      deviceToken: 'fcm-token:replacement_valid.characters-456',
+      registrationRequestId: 'a'.repeat(64),
+    });
+  });
+
+  it('migrates legacy v2 registration through one token reconciliation', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 3,
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 2,
+      }),
+    };
+    const test = harness({ storage });
+
+    await expect(test.adapters.restore()).resolves.toMatchObject({
+      kind: 'registered',
+      registration: {
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        version: 3,
+      },
     });
   });
 
@@ -449,6 +517,43 @@ describe('production Change Reminder adapters', () => {
     listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(test.dependencies.fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps failed token refresh pending and retries the same token', async () => {
+    const fetchImplementation = jest
+      .fn()
+      .mockResolvedValueOnce(Response.json(responseBody))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(
+        Response.json(responseBody),
+      ) as jest.MockedFunction<typeof fetch>;
+    const test = harness({ fetchImplementation });
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove: jest.fn() };
+      });
+    await test.adapters.enable('Australia/Sydney');
+    test.adapters.startTokenRefresh('Australia/Sydney');
+    const replacement = 'fcm-token:replacement_valid.characters-456';
+    listener?.({ data: replacement });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 2,
+      deviceToken: replacement,
+      state: 'pending',
+    });
+    listener?.({ data: replacement });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 3,
+      deviceToken: replacement,
+      state: 'registered',
+    });
   });
 
   it('reports web unavailable without touching native or secure APIs', async () => {

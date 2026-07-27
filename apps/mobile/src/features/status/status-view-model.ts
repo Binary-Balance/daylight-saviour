@@ -2,6 +2,7 @@ import {
   CivilTimeDecisionUnavailableError,
   createCivilTimeReport,
   getAustralianZone,
+  resolveCivilTimeReportEvent,
   type ChangeDirection,
   type CivilTimeDecisionUnavailableReason,
   type DaylightSavingStatus,
@@ -11,7 +12,7 @@ import type { ActivatedTimeZoneDataPack } from '@daylight-saviour/contracts';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import type { TimeZoneDataPackFreshness } from '../time-zone-data/time-zone-data-manager';
-import type { ChangeReminderTap } from '../change-reminders/change-reminder-notifications';
+import type { ChangeReminderTap } from '../change-reminders/change-reminder-notification-runtime';
 
 export type ChangeReminderTapContext =
   | { readonly kind: 'matched'; readonly relation: 'past' | 'upcoming' }
@@ -80,22 +81,21 @@ export function createStatusViewModel(
       if (notificationTap.homeTimeZone !== zoneId) {
         notificationContext = { kind: 'zone-mismatch' };
       } else {
-        const transition = activePack.zones
-          .find((zone) => zone.id === zoneId)
-          ?.transitions.find(
-            (candidate) => candidate.at === notificationTap.changeEventAt,
-          );
-        const direction =
-          transition === undefined
-            ? null
-            : transition.utcOffsetSeconds > transition.offsetBeforeSeconds
-              ? 'forward'
-              : 'backward';
+        const event = resolveCivilTimeReportEvent(
+          activePack,
+          zoneId,
+          notificationTap.changeEventAt,
+          now,
+        );
+        const expectedDirection =
+          notificationTap.changeDirection === 'forward'
+            ? 'Forward Change'
+            : 'Backward Change';
         const secondsSinceReminderEvent =
           (now.getTime() - Date.parse(notificationTap.changeEventAt)) / 1_000;
         if (
-          transition === undefined ||
-          direction !== notificationTap.changeDirection ||
+          event === null ||
+          event.direction !== expectedDirection ||
           secondsSinceReminderEvent >= 48 * 60 * 60
         ) {
           notificationContext = { kind: 'stale' };

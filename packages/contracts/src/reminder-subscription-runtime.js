@@ -7,6 +7,13 @@ export class ReminderSubscriptionValidationError extends Error {
   }
 }
 
+export class ChangeReminderNotificationValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ChangeReminderNotificationValidationError';
+  }
+}
+
 function object(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     throw new ReminderSubscriptionValidationError('Expected an object');
@@ -21,6 +28,17 @@ function exactKeys(input, expected) {
   )
     throw new ReminderSubscriptionValidationError(
       'Unexpected registration fields',
+    );
+}
+
+function notificationExactKeys(input, expected) {
+  const actual = Object.keys(input).sort();
+  if (
+    actual.length !== expected.length ||
+    actual.some((key, index) => key !== expected[index])
+  )
+    throw new ChangeReminderNotificationValidationError(
+      'Unexpected Change Reminder fields',
     );
 }
 
@@ -85,5 +103,47 @@ export function parseReminderSubscriptionRegistrationResponse(value) {
     throw new ReminderSubscriptionValidationError(
       'Invalid registration response',
     );
+  return input;
+}
+
+export function parseChangeReminderNotification(value) {
+  const input = object(value);
+  notificationExactKeys(input, [
+    'changeDirection',
+    'changeEventAt',
+    'homeTimeZone',
+    'reminderKind',
+    'reminderTiming',
+  ]);
+  if (input.reminderKind !== 'change-reminder')
+    throw new ChangeReminderNotificationValidationError(
+      'Invalid reminder kind',
+    );
+  if (!['forward', 'backward'].includes(input.changeDirection))
+    throw new ChangeReminderNotificationValidationError(
+      'Invalid Change direction',
+    );
+  if (!['one-week', 'one-day'].includes(input.reminderTiming))
+    throw new ChangeReminderNotificationValidationError(
+      'Invalid reminder timing',
+    );
+  if (
+    typeof input.changeEventAt !== 'string' ||
+    !Number.isFinite(Date.parse(input.changeEventAt)) ||
+    new Date(Date.parse(input.changeEventAt)).toISOString() !==
+      input.changeEventAt
+  ) {
+    throw new ChangeReminderNotificationValidationError(
+      'Invalid Change Event instant',
+    );
+  }
+  if (
+    typeof input.homeTimeZone !== 'string' ||
+    !/^[A-Za-z0-9._+-]+(?:\/[A-Za-z0-9._+-]+)+$/.test(input.homeTimeZone)
+  ) {
+    throw new ChangeReminderNotificationValidationError(
+      'Invalid Home Time Zone',
+    );
+  }
   return input;
 }

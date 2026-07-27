@@ -1,8 +1,9 @@
 import {
   createChangeReminderNotificationRuntime,
+  createChangeReminderTapVisit,
   parseChangeReminderTap,
   type ChangeReminderNotificationContent,
-} from './change-reminder-notifications';
+} from './change-reminder-notification-runtime';
 
 const payload = {
   changeDirection: 'forward',
@@ -134,5 +135,45 @@ describe('Change Reminder notification runtime', () => {
     test.emitResponse({ ...response(), actionIdentifier: 'dismiss' });
     test.emitResponse(response({ title: 'Unreviewed title' }));
     expect(test.taps).toHaveLength(1);
+  });
+
+  it('keeps a warm response when an older cold response resolves later', async () => {
+    let resolveCold!: (value: ReturnType<typeof response> | null) => void;
+    const test = harness();
+    test.notifications.getLastNotificationResponseAsync.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCold = resolve;
+        }),
+    );
+    const starting = test.runtime.start();
+    test.emitResponse(
+      response({
+        data: { ...payload, reminderTiming: 'one-day' },
+      }),
+    );
+    resolveCold(response());
+    await starting;
+
+    expect(test.taps).toEqual([
+      expect.objectContaining({ reminderTiming: 'one-day' }),
+    ]);
+  });
+
+  it('clears a tap after one foreground visit and ignores responses while backgrounded', () => {
+    const values: unknown[] = [];
+    const visit = createChangeReminderTapVisit({
+      onChange: (value) => values.push(value),
+    });
+    const tap = parseChangeReminderTap(payload);
+    if (tap === null) throw new Error('Expected valid tap');
+
+    visit.receive(tap);
+    visit.setAppState('background');
+    visit.receive(tap);
+    visit.setAppState('active');
+    visit.receive(tap);
+
+    expect(values).toEqual([tap, null, tap]);
   });
 });

@@ -7,11 +7,12 @@ export type ChangeReminderEnableResult =
 
 interface StoredChangeReminderBase {
   readonly attemptGeneration: number;
+  readonly deviceToken: string;
   readonly homeTimeZone: string;
   readonly oneDayEnabled: boolean;
   readonly oneWeekEnabled: boolean;
   readonly registrationRequestId: string;
-  readonly version: 2;
+  readonly version: 3;
 }
 
 export interface StoredChangeReminderPending extends StoredChangeReminderBase {
@@ -24,6 +25,18 @@ export interface StoredChangeReminderRegistration extends StoredChangeReminderBa
   readonly state: 'registered';
 }
 
+export interface StoredLegacyChangeReminderRegistration {
+  readonly attemptGeneration: number;
+  readonly credential: string;
+  readonly homeTimeZone: string;
+  readonly installationId: string;
+  readonly oneDayEnabled: boolean;
+  readonly oneWeekEnabled: boolean;
+  readonly registrationRequestId: string;
+  readonly state: 'registered';
+  readonly version: 2;
+}
+
 export type ChangeReminderRestoreResult =
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'unregistered' }
@@ -34,12 +47,15 @@ export type ChangeReminderRestoreResult =
   | {
       readonly kind: 'registered';
       readonly notificationPermissionGranted: boolean;
-      readonly registration: StoredChangeReminderRegistration;
+      readonly registration:
+        | StoredChangeReminderRegistration
+        | StoredLegacyChangeReminderRegistration;
     };
 
 export type StoredChangeReminderState =
   | StoredChangeReminderPending
-  | StoredChangeReminderRegistration;
+  | StoredChangeReminderRegistration
+  | StoredLegacyChangeReminderRegistration;
 
 export interface ChangeReminderAdapters {
   readonly enable: (

@@ -66,6 +66,23 @@ export interface CivilTimeReportContext {
   readonly requestedEventAt?: string | null;
 }
 
+/** Resolves one exact verified transition without exposing pack traversal. */
+export function resolveCivilTimeReportEvent(
+  pack: ActivatedTimeZoneDataPack,
+  zoneId: string,
+  eventAt: string,
+  now: Date,
+): ChangeEvent | null {
+  assertActivatedTimeZoneDataPack(pack);
+  const zone = pack.zones.find((candidate) => candidate.id === zoneId);
+  const transition = zone?.transitions.find(
+    (candidate) => candidate.at === eventAt,
+  );
+  return transition === undefined
+    ? null
+    : changeEventFromTransition(transition, now.getTime());
+}
+
 export interface CivilTimeDecision {
   readonly abbreviation: string;
   readonly daylightSavingStatus: DaylightSavingStatus;
@@ -265,7 +282,7 @@ export function createCivilTimeReport(
       instantMilliseconds,
     );
     if (
-      requestedEvent.secondsUntil >= -aftermathSeconds &&
+      requestedEvent.secondsUntil > -aftermathSeconds &&
       requestedEvent.secondsUntil <= 0
     ) {
       return {

@@ -1,4 +1,5 @@
 import { changeReminderNotification } from '@daylight-saviour/copy/change-reminder-notification';
+import type { ChangeReminderNotification } from '@daylight-saviour/contracts/reminder-subscription-runtime';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
 const fcmOrigin = 'https://fcm.googleapis.com';
@@ -52,13 +53,7 @@ export interface FcmChangeReminderPayload {
       };
       readonly priority: 'HIGH';
     };
-    readonly data: {
-      readonly changeDirection: ChangeDirection;
-      readonly changeEventAt: string;
-      readonly homeTimeZone: string;
-      readonly reminderKind: 'change-reminder';
-      readonly reminderTiming: ChangeReminderTiming;
-    };
+    readonly data: ChangeReminderNotification;
     readonly notification: {
       readonly body: string;
       readonly title: string;

@@ -29,7 +29,7 @@ import {
 } from '../../theme';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
 import { createHomeTimeZoneSession } from './home-time-zone-session';
-import type { ChangeReminderTap } from '../change-reminders/change-reminder-notifications';
+import type { ChangeReminderTap } from '../change-reminders/change-reminder-notification-runtime';
 
 interface HomeTimeZoneScreenProps {
   readonly adapters: HomeTimeZoneAdapters;

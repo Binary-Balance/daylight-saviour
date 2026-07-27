@@ -3,11 +3,11 @@ import { productionHomeTimeZoneAdapters } from '../src/features/home-time-zone/h
 import { useProductionChangeReminderTap } from '../src/features/change-reminders/change-reminder-notifications';
 
 export default function Index() {
-  const notificationTap = useProductionChangeReminderTap();
+  const notification = useProductionChangeReminderTap();
   return (
     <HomeTimeZoneScreen
       adapters={productionHomeTimeZoneAdapters}
-      notificationTap={notificationTap}
+      notificationTap={notification.tap}
     />
   );
 }

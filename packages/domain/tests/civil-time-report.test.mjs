@@ -116,6 +116,37 @@ describe('createCivilTimeReport', () => {
     );
   });
 
+  it('does not reopen a requested reminder event at or after exactly 48 hours', () => {
+    const context = { requestedEventAt: '2026-10-03T16:00:00.000Z' };
+    assert.equal(
+      createCivilTimeReport(
+        pack,
+        'Australia/Sydney',
+        atSecondsAfter(48 * 3_600 - 0.001),
+        context,
+      ).phase,
+      'aftermath',
+    );
+    assert.equal(
+      createCivilTimeReport(
+        pack,
+        'Australia/Sydney',
+        atSecondsAfter(48 * 3_600),
+        context,
+      ).phase,
+      'ordinary',
+    );
+    assert.equal(
+      createCivilTimeReport(
+        pack,
+        'Australia/Sydney',
+        atSecondsAfter(48 * 3_600 + 0.001),
+        context,
+      ).phase,
+      'ordinary',
+    );
+  });
+
   it('derives Forward, Backward, Lord Howe, and no-event phases from pack data', () => {
     const forward = createCivilTimeReport(
       pack,

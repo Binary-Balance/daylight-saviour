@@ -170,6 +170,29 @@ describe('StatusScreen facade', () => {
     expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
   });
 
+  it('renders literal alert context for stale reminder taps', () => {
+    render(
+      <StatusScreen
+        now={new Date('2026-09-26T16:00:00.000Z')}
+        notificationTap={{
+          changeDirection: 'forward',
+          changeEventAt: '2028-10-03T16:00:00.000Z',
+          homeTimeZone: 'Australia/Sydney',
+          reminderTiming: 'one-week',
+        }}
+        reducedMotion
+      />,
+    );
+    expect(
+      screen.getByRole('alert', {
+        name: /reminder event unavailable/i,
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/no longer available in verified time-zone data/i),
+    ).toBeTruthy();
+  });
+
   it.each([
     [
       '2026-09-05T15:59:59.000Z',

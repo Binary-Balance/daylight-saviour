@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  ChangeReminderNotificationValidationError,
+  parseChangeReminderNotification,
   parseReminderSubscriptionRegistration,
   ReminderSubscriptionValidationError,
 } from '../src/reminder-subscription-runtime.js';
@@ -17,6 +19,23 @@ const androidRegistration = {
 };
 
 describe('reminder subscription registration contract', () => {
+  it('activates only exact fixed Change Reminder fields', () => {
+    const notification = {
+      changeDirection: 'forward',
+      changeEventAt: '2026-10-03T16:00:00.000Z',
+      homeTimeZone: 'Australia/Sydney',
+      reminderKind: 'change-reminder',
+      reminderTiming: 'one-week',
+    };
+    assert.deepEqual(
+      parseChangeReminderNotification(notification),
+      notification,
+    );
+    assert.throws(
+      () => parseChangeReminderNotification({ ...notification, extra: true }),
+      ChangeReminderNotificationValidationError,
+    );
+  });
   it('accepts native platform token shapes', () => {
     assert.deepEqual(
       parseReminderSubscriptionRegistration(androidRegistration),

@@ -1,8 +1,8 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
-import type { DaylightSaviourPalette } from '../../theme';
-import type { ChangeReminderTapContext } from './status-view-model';
+import type { DaylightSaviourPalette } from '../src/theme';
+import type { ChangeReminderTapContext } from '../src/features/status/status-view-model';
 
 export default function ChangeReminderNotificationContext({
   context,
@@ -25,7 +25,9 @@ export default function ChangeReminderNotificationContext({
         : copy.changeReminders.notificationContext.zoneMismatch;
   return (
     <View
+      accessibilityLabel={`${content.heading}. ${content.body}`}
       accessibilityRole="alert"
+      accessible
       style={[
         styles.card,
         {
