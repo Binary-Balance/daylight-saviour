@@ -37,6 +37,16 @@ export function useProductionChangeReminderTap() {
   );
 
   useEffect(() => {
+    visit.setAppState(
+      AppState.currentState === 'active' ? 'active' : 'background',
+    );
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      visit.setAppState(nextState === 'active' ? 'active' : 'background');
+    });
+    return () => subscription.remove();
+  }, [visit]);
+
+  useEffect(() => {
     let stop: (() => void) | undefined;
     let active = true;
     void runtime
@@ -51,13 +61,6 @@ export function useProductionChangeReminderTap() {
       stop?.();
     };
   }, [runtime]);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextState) => {
-      visit.setAppState(nextState === 'active' ? 'active' : 'background');
-    });
-    return () => subscription.remove();
-  }, [visit]);
 
   return { onAppStateChange: visit.setAppState, tap };
 }

@@ -66,21 +66,39 @@ export interface CivilTimeReportContext {
   readonly requestedEventAt?: string | null;
 }
 
-/** Resolves one exact verified transition without exposing pack traversal. */
+export type CivilTimeReportEventResolution =
+  | { readonly kind: 'missing' }
+  | { readonly event: ChangeEvent; readonly kind: 'direction-mismatch' }
+  | { readonly event: ChangeEvent; readonly kind: 'upcoming' }
+  | { readonly event: ChangeEvent; readonly kind: 'recent-past' }
+  | { readonly event: ChangeEvent; readonly kind: 'aged-out' };
+
+/**
+ * Resolves an exact verified transition for a reminder tap. The result owns
+ * direction and aftermath boundaries, so callers cannot recreate them.
+ */
 export function resolveCivilTimeReportEvent(
   pack: ActivatedTimeZoneDataPack,
   zoneId: string,
   eventAt: string,
+  expectedDirection: ChangeDirection,
   now: Date,
-): ChangeEvent | null {
+): CivilTimeReportEventResolution {
   assertActivatedTimeZoneDataPack(pack);
   const zone = pack.zones.find((candidate) => candidate.id === zoneId);
   const transition = zone?.transitions.find(
     (candidate) => candidate.at === eventAt,
   );
-  return transition === undefined
-    ? null
-    : changeEventFromTransition(transition, now.getTime());
+  if (transition === undefined) return { kind: 'missing' };
+  const event = changeEventFromTransition(transition, now.getTime());
+  if (event.direction !== expectedDirection) {
+    return { event, kind: 'direction-mismatch' };
+  }
+  if (event.secondsUntil > 0) return { event, kind: 'upcoming' };
+  if (event.secondsUntil > -aftermathSeconds) {
+    return { event, kind: 'recent-past' };
+  }
+  return { event, kind: 'aged-out' };
 }
 
 export interface CivilTimeDecision {

@@ -20,9 +20,13 @@ export default function ChangeReminderNotificationContext({
           ],
           heading: copy.changeReminders.notificationContext.opened.heading,
         }
-      : context.kind === 'stale'
-        ? copy.changeReminders.notificationContext.stale
-        : copy.changeReminders.notificationContext.zoneMismatch;
+      : context.kind === 'aged-out'
+        ? copy.changeReminders.notificationContext.agedOut
+        : context.kind === 'event-mismatch'
+          ? copy.changeReminders.notificationContext.eventMismatch
+          : context.kind === 'event-unavailable'
+            ? copy.changeReminders.notificationContext.eventUnavailable
+            : copy.changeReminders.notificationContext.zoneMismatch;
   return (
     <View
       accessibilityLabel={`${content.heading}. ${content.body}`}

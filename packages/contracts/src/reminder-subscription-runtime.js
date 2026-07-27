@@ -14,32 +14,24 @@ export class ChangeReminderNotificationValidationError extends Error {
   }
 }
 
-function object(value) {
+function object(value, ErrorType = ReminderSubscriptionValidationError) {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
-    throw new ReminderSubscriptionValidationError('Expected an object');
+    throw new ErrorType('Expected an object');
   return value;
 }
 
-function exactKeys(input, expected) {
+function exactKeys(
+  input,
+  expected,
+  ErrorType = ReminderSubscriptionValidationError,
+  message = 'Unexpected registration fields',
+) {
   const actual = Object.keys(input).sort();
   if (
     actual.length !== expected.length ||
     actual.some((key, index) => key !== expected[index])
   )
-    throw new ReminderSubscriptionValidationError(
-      'Unexpected registration fields',
-    );
-}
-
-function notificationExactKeys(input, expected) {
-  const actual = Object.keys(input).sort();
-  if (
-    actual.length !== expected.length ||
-    actual.some((key, index) => key !== expected[index])
-  )
-    throw new ChangeReminderNotificationValidationError(
-      'Unexpected Change Reminder fields',
-    );
+    throw new ErrorType(message);
 }
 
 export function parseReminderSubscriptionRegistration(value) {
@@ -107,14 +99,19 @@ export function parseReminderSubscriptionRegistrationResponse(value) {
 }
 
 export function parseChangeReminderNotification(value) {
-  const input = object(value);
-  notificationExactKeys(input, [
-    'changeDirection',
-    'changeEventAt',
-    'homeTimeZone',
-    'reminderKind',
-    'reminderTiming',
-  ]);
+  const input = object(value, ChangeReminderNotificationValidationError);
+  exactKeys(
+    input,
+    [
+      'changeDirection',
+      'changeEventAt',
+      'homeTimeZone',
+      'reminderKind',
+      'reminderTiming',
+    ],
+    ChangeReminderNotificationValidationError,
+    'Unexpected Change Reminder fields',
+  );
   if (input.reminderKind !== 'change-reminder')
     throw new ChangeReminderNotificationValidationError(
       'Invalid reminder kind',

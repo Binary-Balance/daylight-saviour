@@ -35,7 +35,15 @@ export const changeReminders = Object.freeze({
       upcoming:
         'This Civil Time Report shows the upcoming Change Event from your reminder.',
     }),
-    stale: Object.freeze({
+    agedOut: Object.freeze({
+      body: "This reminder's Change Event passed more than 48 hours ago. Current Civil Time Report details are shown instead.",
+      heading: 'REMINDER EVENT PASSED',
+    }),
+    eventMismatch: Object.freeze({
+      body: 'This reminder does not match the verified Change Event. Current Civil Time Report details are shown instead.',
+      heading: 'REMINDER EVENT MISMATCH',
+    }),
+    eventUnavailable: Object.freeze({
       body: 'This reminder refers to a Change Event no longer available in verified time-zone data. Current Civil Time Report details are shown instead.',
       heading: 'REMINDER EVENT UNAVAILABLE',
     }),

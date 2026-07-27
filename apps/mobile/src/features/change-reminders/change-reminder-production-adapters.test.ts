@@ -450,6 +450,43 @@ describe('production Change Reminder adapters', () => {
     });
   });
 
+  it('migrates an exact legacy v2 pending retry after explicit enablement', async () => {
+    const storage = {
+      value: JSON.stringify({
+        attemptGeneration: 3,
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'pending',
+        version: 2,
+      }),
+    };
+    const test = harness({ storage });
+
+    await expect(test.adapters.restore()).resolves.toEqual({
+      homeTimeZone: 'Australia/Sydney',
+      kind: 'pending',
+    });
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'enabled',
+    });
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({
+      attemptGeneration: 4,
+      deviceToken: 'fcm-token:with_valid.characters-123',
+      registrationRequestId: 'a'.repeat(64),
+    });
+    expect(JSON.parse(storage.value)).toMatchObject({
+      attemptGeneration: 4,
+      deviceToken: 'fcm-token:with_valid.characters-123',
+      registrationRequestId: 'a'.repeat(64),
+      state: 'registered',
+      version: 3,
+    });
+  });
+
   it('refreshes a registered token once with the same request ID and next generation', async () => {
     let listener: ((token: { readonly data: unknown }) => void) | undefined;
     const remove = jest.fn();
@@ -550,6 +587,46 @@ describe('production Change Reminder adapters', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 3,
+      deviceToken: replacement,
+      state: 'registered',
+    });
+  });
+
+  it('retries the same token after the refresh registration SecureStore write fails', async () => {
+    let writes = 0;
+    const storage = { value: null };
+    const test = harness({
+      setItemImplementation: async () => {
+        writes += 1;
+        if (writes === 4) throw new Error('SecureStore write failed');
+      },
+      storage,
+    });
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove: jest.fn() };
+      });
+    await test.adapters.enable('Australia/Sydney');
+    test.adapters.startTokenRefresh('Australia/Sydney');
+    const replacement = 'fcm-token:replacement_valid.characters-456';
+
+    listener?.({ data: replacement });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 2,
+      deviceToken: replacement,
+      state: 'pending',
+    });
+
+    listener?.({ data: replacement });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
       attemptGeneration: 3,
       deviceToken: replacement,
       state: 'registered',
@@ -670,6 +747,25 @@ describe('production Change Reminder adapters', () => {
         'Invalid stored reminder state',
       );
     }
+
+    const malformedLegacyPending = harness({
+      storage: {
+        value: JSON.stringify({
+          attemptGeneration: 1,
+          credential: 'c'.repeat(43),
+          homeTimeZone: 'Australia/Sydney',
+          installationId: 'i'.repeat(43),
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'pending',
+          version: 2,
+        }),
+      },
+    });
+    await expect(malformedLegacyPending.adapters.restore()).rejects.toThrow(
+      'Invalid stored reminder state',
+    );
 
     const invalidGenerated = harness({
       createRegistrationRequestId: async () => 'not-random',

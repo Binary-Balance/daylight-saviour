@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import {
   activateAustralianTimeZoneDataPack,
   createCivilTimeReport,
+  resolveCivilTimeReportEvent,
 } from '../src/index.ts';
 
 const packJson = JSON.parse(
@@ -22,6 +23,38 @@ const atSecondsBefore = (seconds) => new Date(eventMs - seconds * 1_000);
 const atSecondsAfter = (seconds) => new Date(eventMs + seconds * 1_000);
 
 describe('createCivilTimeReport', () => {
+  it('owns exact reminder event direction and aftermath classification', () => {
+    const resolve = (now, direction = 'Forward Change') =>
+      resolveCivilTimeReportEvent(
+        pack,
+        'Australia/Sydney',
+        '2026-10-03T16:00:00.000Z',
+        direction,
+        now,
+      );
+    assert.equal(resolve(atSecondsBefore(1)).kind, 'upcoming');
+    assert.equal(resolve(atSecondsAfter(0)).kind, 'recent-past');
+    assert.equal(
+      resolve(atSecondsAfter(48 * 3_600 - 0.001)).kind,
+      'recent-past',
+    );
+    assert.equal(resolve(atSecondsAfter(48 * 3_600)).kind, 'aged-out');
+    assert.equal(
+      resolve(atSecondsBefore(1), 'Backward Change').kind,
+      'direction-mismatch',
+    );
+    assert.equal(
+      resolveCivilTimeReportEvent(
+        pack,
+        'Australia/Sydney',
+        '2028-10-03T16:00:00.000Z',
+        'Forward Change',
+        atSecondsBefore(1),
+      ).kind,
+      'missing',
+    );
+  });
+
   for (const [description, secondsBefore, expected] of [
     ['ordinary beyond 28 days', 28 * 86_400 + 1, 'ordinary'],
     ['approaching at exactly 28 days', 28 * 86_400, 'approaching'],

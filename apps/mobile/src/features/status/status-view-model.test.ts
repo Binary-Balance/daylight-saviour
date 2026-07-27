@@ -120,7 +120,7 @@ describe('createStatusViewModel', () => {
     });
   });
 
-  it('keeps current report for changed zones and stale reminder events', () => {
+  it('keeps current report for changed zones and unavailable reminder events', () => {
     const pack = activateAustralianTimeZoneDataPack(bundledAustralianDataPack);
     const base = [
       pack,
@@ -146,6 +146,40 @@ describe('createStatusViewModel', () => {
         homeTimeZone: 'Australia/Sydney',
         reminderTiming: 'one-week',
       }),
-    ).toMatchObject({ notificationContext: { kind: 'stale' } });
+    ).toMatchObject({ notificationContext: { kind: 'event-unavailable' } });
+  });
+
+  it('classifies direction mismatch and exact aftermath boundary without local thresholds', () => {
+    const pack = activateAustralianTimeZoneDataPack(bundledAustralianDataPack);
+    const tap = {
+      changeDirection: 'forward' as const,
+      changeEventAt: '2026-10-03T16:00:00.000Z',
+      homeTimeZone: 'Australia/Sydney',
+      reminderTiming: 'one-week' as const,
+    };
+    expect(
+      createStatusViewModel(
+        pack,
+        'current',
+        'Australia/Sydney',
+        new Date('2026-10-05T16:00:00.000Z'),
+        false,
+        'test-installation',
+        null,
+        tap,
+      ),
+    ).toMatchObject({ notificationContext: { kind: 'aged-out' } });
+    expect(
+      createStatusViewModel(
+        pack,
+        'current',
+        'Australia/Sydney',
+        new Date('2026-09-26T16:00:00.000Z'),
+        false,
+        'test-installation',
+        null,
+        { ...tap, changeDirection: 'backward' },
+      ),
+    ).toMatchObject({ notificationContext: { kind: 'event-mismatch' } });
   });
 });

@@ -156,13 +156,26 @@ export function createChangeReminderTapVisit({
   readonly onChange: (tap: ChangeReminderTap | null) => void;
 }) {
   let active = true;
+  let pending: ChangeReminderTap | null = null;
   return {
     receive(tap: ChangeReminderTap) {
-      if (active) onChange(tap);
+      if (active) {
+        onChange(tap);
+      } else {
+        pending = tap;
+      }
     },
     setAppState(nextState: 'active' | 'background' | 'inactive') {
       active = nextState === 'active';
-      if (!active) onChange(null);
+      if (!active) {
+        onChange(null);
+        return;
+      }
+      if (pending !== null) {
+        const tap = pending;
+        pending = null;
+        onChange(tap);
+      }
     },
   };
 }

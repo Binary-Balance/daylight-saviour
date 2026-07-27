@@ -37,6 +37,16 @@ export interface StoredLegacyChangeReminderRegistration {
   readonly version: 2;
 }
 
+export interface StoredLegacyChangeReminderPending {
+  readonly attemptGeneration: number;
+  readonly homeTimeZone: string;
+  readonly oneDayEnabled: boolean;
+  readonly oneWeekEnabled: boolean;
+  readonly registrationRequestId: string;
+  readonly state: 'pending';
+  readonly version: 2;
+}
+
 export type ChangeReminderRestoreResult =
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'unregistered' }
@@ -55,6 +65,7 @@ export type ChangeReminderRestoreResult =
 export type StoredChangeReminderState =
   | StoredChangeReminderPending
   | StoredChangeReminderRegistration
+  | StoredLegacyChangeReminderPending
   | StoredLegacyChangeReminderRegistration;
 
 export interface ChangeReminderAdapters {

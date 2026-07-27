@@ -8,6 +8,7 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 import type {
   ChangeReminderAdapters,
   ChangeReminderEnableResult,
+  StoredLegacyChangeReminderPending,
   StoredLegacyChangeReminderRegistration,
   StoredChangeReminderPending,
   StoredChangeReminderState,
@@ -106,17 +107,27 @@ function parseStoredState(value: string): StoredChangeReminderState {
           'version',
         ]
       : isLegacy
-        ? [
-            'attemptGeneration',
-            'credential',
-            'homeTimeZone',
-            'installationId',
-            'oneDayEnabled',
-            'oneWeekEnabled',
-            'registrationRequestId',
-            'state',
-            'version',
-          ]
+        ? candidate.state === 'pending'
+          ? [
+              'attemptGeneration',
+              'homeTimeZone',
+              'oneDayEnabled',
+              'oneWeekEnabled',
+              'registrationRequestId',
+              'state',
+              'version',
+            ]
+          : [
+              'attemptGeneration',
+              'credential',
+              'homeTimeZone',
+              'installationId',
+              'oneDayEnabled',
+              'oneWeekEnabled',
+              'registrationRequestId',
+              'state',
+              'version',
+            ]
         : [
             'attemptGeneration',
             'credential',
@@ -146,6 +157,17 @@ function parseStoredState(value: string): StoredChangeReminderState {
     version: 3 as const,
   };
   if (isLegacy) {
+    if (candidate.state === 'pending') {
+      return {
+        attemptGeneration: Number(candidate.attemptGeneration),
+        homeTimeZone: String(candidate.homeTimeZone),
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: String(candidate.registrationRequestId),
+        state: 'pending',
+        version: 2,
+      } satisfies StoredLegacyChangeReminderPending;
+    }
     if (candidate.state !== 'registered') {
       throw new Error('Invalid stored reminder state');
     }

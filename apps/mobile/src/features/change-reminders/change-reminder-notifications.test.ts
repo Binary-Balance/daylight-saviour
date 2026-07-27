@@ -160,7 +160,7 @@ describe('Change Reminder notification runtime', () => {
     ]);
   });
 
-  it('clears a tap after one foreground visit and ignores responses while backgrounded', () => {
+  it('clears a tap while backgrounded and delivers a buffered response on activation', () => {
     const values: unknown[] = [];
     const visit = createChangeReminderTapVisit({
       onChange: (value) => values.push(value),
@@ -172,8 +172,22 @@ describe('Change Reminder notification runtime', () => {
     visit.setAppState('background');
     visit.receive(tap);
     visit.setAppState('active');
-    visit.receive(tap);
 
     expect(values).toEqual([tap, null, tap]);
+  });
+
+  it('delivers a response immediately when activation arrives first', () => {
+    const values: unknown[] = [];
+    const visit = createChangeReminderTapVisit({
+      onChange: (value) => values.push(value),
+    });
+    const tap = parseChangeReminderTap(payload);
+    if (tap === null) throw new Error('Expected valid tap');
+
+    visit.setAppState('inactive');
+    visit.setAppState('active');
+    visit.receive(tap);
+
+    expect(values).toEqual([null, tap]);
   });
 });

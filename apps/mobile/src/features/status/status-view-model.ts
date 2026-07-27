@@ -16,7 +16,9 @@ import type { ChangeReminderTap } from '../change-reminders/change-reminder-noti
 
 export type ChangeReminderTapContext =
   | { readonly kind: 'matched'; readonly relation: 'past' | 'upcoming' }
-  | { readonly kind: 'stale' }
+  | { readonly kind: 'aged-out' }
+  | { readonly kind: 'event-mismatch' }
+  | { readonly kind: 'event-unavailable' }
   | { readonly kind: 'zone-mismatch' };
 
 export type StatusViewModel =
@@ -81,30 +83,32 @@ export function createStatusViewModel(
       if (notificationTap.homeTimeZone !== zoneId) {
         notificationContext = { kind: 'zone-mismatch' };
       } else {
-        const event = resolveCivilTimeReportEvent(
-          activePack,
-          zoneId,
-          notificationTap.changeEventAt,
-          now,
-        );
         const expectedDirection =
           notificationTap.changeDirection === 'forward'
             ? 'Forward Change'
             : 'Backward Change';
-        const secondsSinceReminderEvent =
-          (now.getTime() - Date.parse(notificationTap.changeEventAt)) / 1_000;
+        const resolution = resolveCivilTimeReportEvent(
+          activePack,
+          zoneId,
+          notificationTap.changeEventAt,
+          expectedDirection,
+          now,
+        );
         if (
-          event === null ||
-          event.direction !== expectedDirection ||
-          secondsSinceReminderEvent >= 48 * 60 * 60
+          resolution.kind === 'upcoming' ||
+          resolution.kind === 'recent-past'
         ) {
-          notificationContext = { kind: 'stale' };
-        } else {
           requestedEventAt = notificationTap.changeEventAt;
           notificationContext = {
             kind: 'matched',
-            relation: secondsSinceReminderEvent >= 0 ? 'past' : 'upcoming',
+            relation: resolution.kind === 'recent-past' ? 'past' : 'upcoming',
           };
+        } else if (resolution.kind === 'aged-out') {
+          notificationContext = { kind: 'aged-out' };
+        } else if (resolution.kind === 'direction-mismatch') {
+          notificationContext = { kind: 'event-mismatch' };
+        } else {
+          notificationContext = { kind: 'event-unavailable' };
         }
       }
     }
@@ -208,7 +212,8 @@ export function createStatusViewModel(
       freshness,
       message: copy.civilTimeReport.decisionUnavailable.message(error.reason),
       ...packDetails,
-      notificationContext: notificationTap === null ? null : { kind: 'stale' },
+      notificationContext:
+        notificationTap === null ? null : { kind: 'event-unavailable' },
       unavailabilityReason: error.reason,
       zoneId,
     };

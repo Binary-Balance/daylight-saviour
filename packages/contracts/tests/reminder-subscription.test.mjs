@@ -35,6 +35,10 @@ describe('reminder subscription registration contract', () => {
       () => parseChangeReminderNotification({ ...notification, extra: true }),
       ChangeReminderNotificationValidationError,
     );
+    assert.throws(
+      () => parseChangeReminderNotification(null),
+      ChangeReminderNotificationValidationError,
+    );
   });
   it('accepts native platform token shapes', () => {
     assert.deepEqual(
