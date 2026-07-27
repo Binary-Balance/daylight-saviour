@@ -124,6 +124,12 @@ export function createChangeReminderSession({
       return;
     }
     if (event.type === 'token-refresh') {
+      if (
+        event.result.kind === 'succeeded' &&
+        snapshot.kind === 'permission-revoked'
+      ) {
+        return;
+      }
       publish(
         event.result.kind === 'succeeded'
           ? { kind: 'enabled' }

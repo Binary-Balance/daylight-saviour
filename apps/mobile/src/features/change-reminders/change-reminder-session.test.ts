@@ -238,6 +238,28 @@ describe('Change Reminder session', () => {
     stop();
   });
 
+  it('does not let token success override revoked notification permission', async () => {
+    const session = createChangeReminderSession({
+      adapters: adapters({
+        restore: jest.fn(async () => ({
+          kind: 'registered' as const,
+          notificationPermissionGranted: false,
+          registration,
+        })),
+      }),
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'permission-revoked',
+    );
+
+    session.dispatch({ result: { kind: 'succeeded' }, type: 'token-refresh' });
+    expect(session.getSnapshot()).toEqual({ kind: 'permission-revoked' });
+    stop();
+  });
+
   it('reconciles once on foreground after notification settings changes', async () => {
     let resolveForeground!: (value: {
       readonly kind: 'registered';

@@ -196,19 +196,19 @@ it('renders truthful zone-mismatch and revoked-permission restore states', async
   mismatch.unmount();
 
   const openSettings = jest.fn(async () => undefined);
-  renderSection(
-    adapters({
-      openSettings,
-      restore: jest.fn(async () => ({
-        kind: 'registered' as const,
-        notificationPermissionGranted: false,
-        registration: { ...stored, homeTimeZone: 'Australia/Sydney' },
-      })),
-    }),
-  );
+  const revoked = adapters({
+    openSettings,
+    restore: jest.fn(async () => ({
+      kind: 'registered' as const,
+      notificationPermissionGranted: false,
+      registration: { ...stored, homeTimeZone: 'Australia/Sydney' },
+    })),
+  });
+  renderSection(revoked);
   expect(
     await screen.findByText(/registered, but notifications are blocked/i),
   ).toBeTruthy();
+  expect(revoked.startTokenRefresh).not.toHaveBeenCalled();
   fireEvent.press(
     screen.getByRole('button', { name: 'Open notification settings' }),
   );

@@ -33,9 +33,7 @@ export default function ChangeReminderSection({
     return () => subscription.remove();
   }, [session]);
   useEffect(() => {
-    if (snapshot.kind !== 'enabled' && snapshot.kind !== 'permission-revoked') {
-      return;
-    }
+    if (snapshot.kind !== 'enabled') return;
     return adapters.startTokenRefresh(homeTimeZone, (result) => {
       session.dispatch({ result, type: 'token-refresh' });
     });

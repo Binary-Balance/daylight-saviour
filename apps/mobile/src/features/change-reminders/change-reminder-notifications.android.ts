@@ -8,7 +8,7 @@ import {
   type ChangeReminderTap,
 } from './change-reminder-notification-runtime';
 
-/** Native Expo binding kept separate from portable notification activation. */
+/** Android Expo binding kept separate from portable notification activation. */
 export function useProductionChangeReminderTap() {
   const [tap, setTap] = useState<ChangeReminderTap | null>(null);
   const visit = useMemo(
