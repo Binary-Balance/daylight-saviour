@@ -34,17 +34,7 @@ function exactKeys(
     throw new ErrorType(message);
 }
 
-export function parseReminderSubscriptionRegistration(value) {
-  const input = object(value);
-  exactKeys(input, [
-    'attemptGeneration',
-    'deviceToken',
-    'homeTimeZone',
-    'oneDayEnabled',
-    'oneWeekEnabled',
-    'platform',
-    'registrationRequestId',
-  ]);
+function validateSubscriptionFields(input) {
   if (!reminderSubscriptionPlatforms.includes(input.platform))
     throw new ReminderSubscriptionValidationError('Unsupported platform');
   const validToken =
@@ -54,13 +44,6 @@ export function parseReminderSubscriptionRegistration(value) {
       : /^[A-Za-z0-9_:.-]{20,4096}$/.test(input.deviceToken));
   if (!validToken)
     throw new ReminderSubscriptionValidationError('Invalid device token');
-  if (
-    typeof input.registrationRequestId !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(input.registrationRequestId)
-  )
-    throw new ReminderSubscriptionValidationError(
-      'Invalid registration request ID',
-    );
   if (
     !Number.isSafeInteger(input.attemptGeneration) ||
     input.attemptGeneration < 1 ||
@@ -80,6 +63,41 @@ export function parseReminderSubscriptionRegistration(value) {
     throw new ReminderSubscriptionValidationError(
       'Invalid reminder preferences',
     );
+}
+
+export function parseReminderSubscriptionRegistration(value) {
+  const input = object(value);
+  exactKeys(input, [
+    'attemptGeneration',
+    'deviceToken',
+    'homeTimeZone',
+    'oneDayEnabled',
+    'oneWeekEnabled',
+    'platform',
+    'registrationRequestId',
+  ]);
+  validateSubscriptionFields(input);
+  if (
+    typeof input.registrationRequestId !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(input.registrationRequestId)
+  )
+    throw new ReminderSubscriptionValidationError(
+      'Invalid registration request ID',
+    );
+  return input;
+}
+
+export function parseReminderSubscriptionUpdate(value) {
+  const input = object(value);
+  exactKeys(input, [
+    'attemptGeneration',
+    'deviceToken',
+    'homeTimeZone',
+    'oneDayEnabled',
+    'oneWeekEnabled',
+    'platform',
+  ]);
+  validateSubscriptionFields(input);
   return input;
 }
 

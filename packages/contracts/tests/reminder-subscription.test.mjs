@@ -5,6 +5,7 @@ import {
   ChangeReminderNotificationValidationError,
   parseChangeReminderNotification,
   parseReminderSubscriptionRegistration,
+  parseReminderSubscriptionUpdate,
   ReminderSubscriptionValidationError,
 } from '../src/reminder-subscription-runtime.js';
 
@@ -19,6 +20,23 @@ const androidRegistration = {
 };
 
 describe('reminder subscription registration contract', () => {
+  it('activates only exact fixed update fields without a client target', () => {
+    const { registrationRequestId: _requestId, ...update } =
+      androidRegistration;
+    assert.deepEqual(parseReminderSubscriptionUpdate(update), update);
+    assert.throws(
+      () =>
+        parseReminderSubscriptionUpdate({
+          ...update,
+          installationId: 'client-selectable-target',
+        }),
+      ReminderSubscriptionValidationError,
+    );
+    assert.throws(
+      () => parseReminderSubscriptionUpdate({ ...update, credential: 'no' }),
+      ReminderSubscriptionValidationError,
+    );
+  });
   it('activates only exact fixed Change Reminder fields', () => {
     const notification = {
       changeDirection: 'forward',

@@ -16,7 +16,7 @@ interface StoredChangeReminderBase {
   readonly oneDayEnabled: boolean;
   readonly oneWeekEnabled: boolean;
   readonly registrationRequestId: string;
-  readonly version: 3;
+  readonly version: 4;
 }
 
 export interface StoredChangeReminderPending extends StoredChangeReminderBase {
@@ -27,6 +27,12 @@ export interface StoredChangeReminderRegistration extends StoredChangeReminderBa
   readonly credential: string;
   readonly installationId: string;
   readonly state: 'registered';
+}
+
+export interface StoredChangeReminderPendingUpdate extends StoredChangeReminderBase {
+  readonly credential: string;
+  readonly installationId: string;
+  readonly state: 'pending-update';
 }
 
 export interface StoredLegacyChangeReminderRegistration {
@@ -51,6 +57,20 @@ export interface StoredLegacyChangeReminderPending {
   readonly version: 2;
 }
 
+export interface StoredV3ChangeReminderRegistration extends Omit<
+  StoredChangeReminderRegistration,
+  'version'
+> {
+  readonly version: 3;
+}
+
+export interface StoredV3ChangeReminderPending extends Omit<
+  StoredChangeReminderPending,
+  'version'
+> {
+  readonly version: 3;
+}
+
 export type ChangeReminderRestoreResult =
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'unregistered' }
@@ -63,14 +83,18 @@ export type ChangeReminderRestoreResult =
       readonly notificationPermissionGranted: boolean;
       readonly registration:
         | StoredChangeReminderRegistration
+        | StoredV3ChangeReminderRegistration
         | StoredLegacyChangeReminderRegistration;
     };
 
 export type StoredChangeReminderState =
   | StoredChangeReminderPending
   | StoredChangeReminderRegistration
+  | StoredChangeReminderPendingUpdate
   | StoredLegacyChangeReminderPending
-  | StoredLegacyChangeReminderRegistration;
+  | StoredLegacyChangeReminderRegistration
+  | StoredV3ChangeReminderPending
+  | StoredV3ChangeReminderRegistration;
 
 export interface ChangeReminderAdapters {
   readonly enable: (

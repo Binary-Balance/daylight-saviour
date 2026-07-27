@@ -9,6 +9,7 @@ export interface ChangeReminderNotification {
   readonly reminderTiming: 'one-week' | 'one-day';
 }
 export function parseReminderSubscriptionRegistration(value: unknown): unknown;
+export function parseReminderSubscriptionUpdate(value: unknown): unknown;
 export function parseReminderSubscriptionRegistrationResponse(
   value: unknown,
 ): unknown;

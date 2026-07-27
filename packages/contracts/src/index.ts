@@ -15,6 +15,7 @@ export {
 export {
   parseReminderSubscriptionRegistration,
   parseReminderSubscriptionRegistrationResponse,
+  parseReminderSubscriptionUpdate,
   parseChangeReminderNotification,
   ChangeReminderNotificationValidationError,
   reminderSubscriptionPlatforms,
@@ -22,6 +23,7 @@ export {
   type ReminderSubscriptionPlatform,
   type ReminderSubscriptionRegistration,
   type ReminderSubscriptionRegistrationResponse,
+  type ReminderSubscriptionUpdate,
   type ChangeReminderNotification,
 } from './reminder-subscription.ts';
 

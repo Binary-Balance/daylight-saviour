@@ -9,6 +9,7 @@ import {
   hashOpaqueValue,
   normalizeClientAddress,
   registerReminderSubscription,
+  updateReminderSubscription,
   type ReminderSubscriptionStore,
 } from './reminder-subscriptions.js';
 
@@ -25,12 +26,14 @@ const validRegistration = {
 function request(
   body: unknown,
   {
+    authorization,
     contentLength,
     contentType = 'application/json',
     source = '198.51.100.7:43125',
   }: {
     readonly contentLength?: string;
     readonly contentType?: string;
+    readonly authorization?: string | undefined;
     readonly source?: string | null;
   } = {},
 ) {
@@ -41,6 +44,9 @@ function request(
           typeof body === 'string' ? body : JSON.stringify(body),
         );
   const headers = new Headers({ 'content-type': contentType });
+  if (authorization !== undefined) {
+    headers.set('authorization', authorization);
+  }
   if (contentLength !== undefined) headers.set('content-length', contentLength);
   if (source !== null) headers.set('client-ip', source);
   return {
@@ -58,9 +64,10 @@ function store(
   overrides: Partial<ReminderSubscriptionStore> = {},
 ): ReminderSubscriptionStore {
   return {
+    createSubscription: async () => 'accepted',
     purgeExpiredThrottleRecords: async () => undefined,
     removeIfDeviceTokenMatches: async () => 'not-found',
-    saveSubscription: async () => 'accepted',
+    updateSubscription: async () => 'accepted',
     takeSourceAllowance: async () => true,
     ...overrides,
   };
@@ -145,7 +152,7 @@ describe('reminder subscription registration', () => {
     const result = await registerReminderSubscription(
       request(validRegistration),
       store({
-        saveSubscription: async (record) => {
+        createSubscription: async (record) => {
           saved = { ...record };
           return 'accepted';
         },
@@ -210,7 +217,7 @@ describe('reminder subscription registration', () => {
       const result = await registerReminderSubscription(
         request(input, options),
         store({
-          saveSubscription: async () => {
+          createSubscription: async () => {
             saves += 1;
             return 'accepted';
           },
@@ -263,7 +270,7 @@ describe('reminder subscription registration', () => {
     const storageFailure = await registerReminderSubscription(
       request(validRegistration),
       store({
-        saveSubscription: async () => {
+        createSubscription: async () => {
           throw azureError(500);
         },
       }),
@@ -277,7 +284,7 @@ describe('reminder subscription registration', () => {
   it('returns no secret when an attempt is superseded', async () => {
     const result = await registerReminderSubscription(
       request(validRegistration),
-      store({ saveSubscription: async () => 'stale' }),
+      store({ createSubscription: async () => 'stale' }),
     );
     assert.equal(result.status, 409);
     assert.deepEqual(result.jsonBody, {
@@ -295,7 +302,7 @@ describe('reminder subscription registration', () => {
   it('derives one stable row while issuing fresh accepted credentials', async () => {
     const saved: Record<string, unknown>[] = [];
     const registrationStore = store({
-      saveSubscription: async (record) => {
+      createSubscription: async (record) => {
         saved.push({ ...record });
         return 'accepted';
       },
@@ -357,6 +364,79 @@ describe('reminder subscription registration', () => {
     assert.deepEqual(result.jsonBody, { error: 'Try again later' });
     assert.equal(new Headers(result.headers).get('Retry-After'), '600');
     assert.doesNotMatch(JSON.stringify(result), /fcm-token/);
+  });
+});
+
+describe('reminder subscription updates', () => {
+  const update = {
+    attemptGeneration: 2,
+    deviceToken: validRegistration.deviceToken,
+    homeTimeZone: validRegistration.homeTimeZone,
+    oneDayEnabled: true,
+    oneWeekEnabled: true,
+    platform: 'android' as const,
+  };
+  const installationId = 'i'.repeat(43);
+  const credential = 'c'.repeat(43);
+
+  it('accepts exact bearer-authenticated updates without returning secrets', async () => {
+    let received:
+      | { readonly credentialHash: string; readonly installationId: string }
+      | undefined;
+    const result = await updateReminderSubscription(
+      request(update, { authorization: `Bearer ${credential}` }),
+      store({
+        updateSubscription: async (record, credentialHash) => {
+          received = { credentialHash, installationId: record.installationId };
+          return 'accepted';
+        },
+      }),
+      installationId,
+    );
+    assert.equal(result.status, 204);
+    assert.equal(new Headers(result.headers).get('Cache-Control'), 'no-store');
+    assert.deepEqual(received, {
+      credentialHash: hashOpaqueValue(credential),
+      installationId,
+    });
+    assert.doesNotMatch(JSON.stringify(result), /credential|token/i);
+  });
+
+  for (const authorization of [
+    undefined,
+    'Bearer short',
+    `Basic ${credential}`,
+  ]) {
+    it(`rejects ${String(authorization)} without calling persistence`, async () => {
+      let updates = 0;
+      const result = await updateReminderSubscription(
+        request(update, { authorization }),
+        store({ updateSubscription: async () => ((updates += 1), 'accepted') }),
+        installationId,
+      );
+      assert.equal(result.status, 401);
+      assert.deepEqual(result.jsonBody, { error: 'Unauthorized' });
+      assert.equal(updates, 0);
+    });
+  }
+
+  it('keeps stale and bad-credential responses secret-free', async () => {
+    const stale = await updateReminderSubscription(
+      request(update, { authorization: `Bearer ${credential}` }),
+      store({ updateSubscription: async () => 'stale' }),
+      installationId,
+    );
+    const unauthorized = await updateReminderSubscription(
+      request(update, { authorization: `Bearer ${credential}` }),
+      store({ updateSubscription: async () => 'unauthorized' }),
+      installationId,
+    );
+    assert.equal(stale.status, 409);
+    assert.equal(unauthorized.status, 401);
+    assert.doesNotMatch(
+      JSON.stringify([stale, unauthorized]),
+      /c{43}|fcm-token/,
+    );
   });
 });
 
@@ -472,7 +552,7 @@ describe('Azure Table mapping', () => {
         replace: async () => undefined,
       },
     );
-    await tableStore.saveSubscription({
+    await tableStore.createSubscription({
       ...validRegistration,
       credentialHash: 'credential-hash',
       installationId: 'installation-id',
@@ -619,9 +699,14 @@ describe('generation-ordered subscription persistence', () => {
         if (row === undefined) throw azureError(404);
         return {
           attemptGeneration: Number(row.attemptGeneration),
+          credentialHash: String(row.credentialHash),
           deviceToken: String(row.deviceToken),
           etag: String(row.etag),
+          homeTimeZone: String(row.homeTimeZone),
+          oneDayEnabled: Boolean(row.oneDayEnabled),
+          oneWeekEnabled: Boolean(row.oneWeekEnabled),
           partitionKey,
+          platform: row.platform as 'android' | 'ios',
           rowKey,
         };
       },
@@ -650,6 +735,44 @@ describe('generation-ordered subscription persistence', () => {
     return row;
   }
 
+  function updateSubscription(
+    registrationStore: ReturnType<typeof createTableReminderSubscriptionStore>,
+    next: ReturnType<typeof record>,
+    credentialHash: string,
+  ) {
+    const { credentialHash: _ignored, ...update } = next;
+    return registrationStore.updateSubscription(update, credentialHash);
+  }
+
+  it('replays only an unchanged initial registration while rotating its credential hash', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    await registrationStore.createSubscription(record(1, 'credential-old'));
+    assert.equal(
+      await registrationStore.createSubscription({
+        ...record(1, 'credential-new'),
+        attemptGeneration: 2,
+      }),
+      'accepted',
+    );
+    assert.equal(onlyRow(subscriptions.rows).attemptGeneration, 2);
+    assert.equal(onlyRow(subscriptions.rows).credentialHash, 'credential-new');
+    assert.equal(
+      await registrationStore.createSubscription({
+        ...record(3, 'credential-attacker'),
+        deviceToken: 'different-token',
+      }),
+      'conflict',
+    );
+    assert.equal(
+      onlyRow(subscriptions.rows).deviceToken,
+      record(1).deviceToken,
+    );
+  });
+
   it('does not let a delayed older attempt overwrite a newer generation', async () => {
     const subscriptions = concurrentSubscriptionTable();
     const registrationStore = createTableReminderSubscriptionStore(
@@ -658,10 +781,13 @@ describe('generation-ordered subscription persistence', () => {
     );
 
     assert.equal(
-      await registrationStore.saveSubscription(record(2)),
+      await registrationStore.createSubscription(record(2)),
       'accepted',
     );
-    assert.equal(await registrationStore.saveSubscription(record(1)), 'stale');
+    assert.equal(
+      await updateSubscription(registrationStore, record(1), 'credential-2'),
+      'stale',
+    );
     const stored = onlyRow(subscriptions.rows);
     assert.equal(stored.attemptGeneration, 2);
     assert.equal(stored.credentialHash, 'credential-2');
@@ -676,14 +802,18 @@ describe('generation-ordered subscription persistence', () => {
     );
 
     assert.equal(
-      await registrationStore.saveSubscription(record(1)),
+      await registrationStore.createSubscription(record(1)),
       'accepted',
     );
     assert.equal(
-      await registrationStore.saveSubscription({
-        ...record(2),
-        homeTimeZone: 'Australia/Brisbane',
-      }),
+      await updateSubscription(
+        registrationStore,
+        {
+          ...record(2),
+          homeTimeZone: 'Australia/Brisbane' as never,
+        },
+        'credential-1',
+      ),
       'accepted',
     );
 
@@ -699,13 +829,14 @@ describe('generation-ordered subscription persistence', () => {
       subscriptions,
       unusedThrottleTable(),
     );
+    await registrationStore.createSubscription(record(1, 'credential-left'));
     const results = await Promise.all([
-      registrationStore.saveSubscription(record(1, 'credential-left')),
-      registrationStore.saveSubscription(record(1, 'credential-right')),
+      updateSubscription(registrationStore, record(2), 'credential-left'),
+      updateSubscription(registrationStore, record(2), 'credential-left'),
     ]);
 
     assert.deepEqual(results.sort(), ['accepted', 'stale']);
-    assert.equal(onlyRow(subscriptions.rows).attemptGeneration, 1);
+    assert.equal(onlyRow(subscriptions.rows).attemptGeneration, 2);
   });
 
   it('converges concurrent different generations on the higher attempt', async () => {
@@ -714,13 +845,14 @@ describe('generation-ordered subscription persistence', () => {
       subscriptions,
       unusedThrottleTable(),
     );
+    await registrationStore.createSubscription(record(1));
     await Promise.all([
-      registrationStore.saveSubscription(record(1)),
-      registrationStore.saveSubscription(record(2)),
+      updateSubscription(registrationStore, record(2), 'credential-1'),
+      updateSubscription(registrationStore, record(3), 'credential-1'),
     ]);
 
-    assert.equal(onlyRow(subscriptions.rows).attemptGeneration, 2);
-    assert.equal(onlyRow(subscriptions.rows).credentialHash, 'credential-2');
+    assert.equal(onlyRow(subscriptions.rows).attemptGeneration, 3);
+    assert.equal(onlyRow(subscriptions.rows).credentialHash, 'credential-1');
   });
 
   it('removes only an exact matching subscription token', async () => {
@@ -730,7 +862,7 @@ describe('generation-ordered subscription persistence', () => {
       unusedThrottleTable(),
     );
     const current = record(1);
-    await registrationStore.saveSubscription(current);
+    await registrationStore.createSubscription(current);
 
     assert.equal(
       await registrationStore.removeIfDeviceTokenMatches({
@@ -758,8 +890,8 @@ describe('generation-ordered subscription persistence', () => {
       }),
       'not-found',
     );
-    await registrationStore.saveSubscription(older);
-    await registrationStore.saveSubscription(replacement);
+    await registrationStore.createSubscription(older);
+    await updateSubscription(registrationStore, replacement, 'credential-1');
     assert.equal(
       await registrationStore.removeIfDeviceTokenMatches({
         deviceToken: older.deviceToken,
@@ -781,10 +913,10 @@ describe('generation-ordered subscription persistence', () => {
     );
     const older = record(1);
     const replacement = record(2);
-    await registrationStore.saveSubscription(older);
+    await registrationStore.createSubscription(older);
     subscriptions.setBeforeDelete(async () => {
       subscriptions.setBeforeDelete(undefined);
-      await registrationStore.saveSubscription(replacement);
+      await updateSubscription(registrationStore, replacement, 'credential-1');
     });
 
     assert.equal(
@@ -807,7 +939,7 @@ describe('generation-ordered subscription persistence', () => {
       unusedThrottleTable(),
     );
     const current = record(1);
-    await registrationStore.saveSubscription(current);
+    await registrationStore.createSubscription(current);
     let deleteAttempts = 0;
     subscriptions.setBeforeDelete(async () => {
       deleteAttempts += 1;

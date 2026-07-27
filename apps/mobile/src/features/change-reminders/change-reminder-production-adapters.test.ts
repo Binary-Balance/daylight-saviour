@@ -297,7 +297,7 @@ describe('production Change Reminder adapters', () => {
       oneWeekEnabled: true,
       registrationRequestId: 'a'.repeat(64),
       state: 'registered',
-      version: 3,
+      version: 4,
     });
     await expect(test.adapters.restore()).resolves.toEqual({
       kind: 'registered',
@@ -311,7 +311,7 @@ describe('production Change Reminder adapters', () => {
         oneWeekEnabled: true,
         registrationRequestId: 'a'.repeat(64),
         state: 'registered',
-        version: 3,
+        version: 4,
       },
     });
   });
@@ -326,7 +326,7 @@ describe('production Change Reminder adapters', () => {
         oneWeekEnabled: true,
         registrationRequestId: 'b'.repeat(64),
         state: 'pending',
-        version: 3,
+        version: 4,
       }),
     };
     const relaunched = harness({ storage });
@@ -398,7 +398,7 @@ describe('production Change Reminder adapters', () => {
         oneWeekEnabled: true,
         registrationRequestId: 'a'.repeat(64),
         state: 'registered',
-        version: 3,
+        version: 4,
       }),
     };
     const test = harness({
@@ -413,7 +413,7 @@ describe('production Change Reminder adapters', () => {
         attemptGeneration: 8,
         deviceToken: 'fcm-token:replacement_valid.characters-456',
         registrationRequestId: 'a'.repeat(64),
-        version: 3,
+        version: 4,
       },
     });
     expect(
@@ -421,7 +421,12 @@ describe('production Change Reminder adapters', () => {
     ).toMatchObject({
       attemptGeneration: 8,
       deviceToken: 'fcm-token:replacement_valid.characters-456',
-      registrationRequestId: 'a'.repeat(64),
+    });
+    expect(test.dependencies.fetch.mock.calls[0]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        authorization: `Bearer ${responseBody.credential}`,
+      }),
+      method: 'PUT',
     });
   });
 
@@ -445,7 +450,7 @@ describe('production Change Reminder adapters', () => {
       registration: {
         attemptGeneration: 4,
         deviceToken: 'fcm-token:with_valid.characters-123',
-        version: 3,
+        version: 4,
       },
     });
   });
@@ -483,7 +488,7 @@ describe('production Change Reminder adapters', () => {
       deviceToken: 'fcm-token:with_valid.characters-123',
       registrationRequestId: 'a'.repeat(64),
       state: 'registered',
-      version: 3,
+      version: 4,
     });
   });
 
@@ -519,7 +524,7 @@ describe('production Change Reminder adapters', () => {
       expect.objectContaining({
         attemptGeneration: 2,
         deviceToken: 'fcm-token:replacement_valid.characters-456',
-        registrationRequestId: 'a'.repeat(64),
+        homeTimeZone: 'Australia/Sydney',
       }),
     ]);
     expect(JSON.parse(test.stored() ?? '')).toMatchObject({
@@ -592,7 +597,7 @@ describe('production Change Reminder adapters', () => {
     expect(JSON.parse(test.stored() ?? '')).toMatchObject({
       attemptGeneration: 2,
       deviceToken: replacement,
-      state: 'pending',
+      state: 'pending-update',
     });
     expect(outcomes).toEqual([{ kind: 'failed', retryable: true }]);
     listener?.({ data: replacement });
@@ -636,7 +641,7 @@ describe('production Change Reminder adapters', () => {
     expect(JSON.parse(storage.value ?? '')).toMatchObject({
       attemptGeneration: 2,
       deviceToken: replacement,
-      state: 'pending',
+      state: 'pending-update',
     });
 
     listener?.({ data: replacement });

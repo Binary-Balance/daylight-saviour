@@ -14,6 +14,10 @@ export interface ReminderSubscriptionRegistrationResponse {
   readonly credential: string;
   readonly installationId: string;
 }
+export type ReminderSubscriptionUpdate = Omit<
+  ReminderSubscriptionRegistration,
+  'registrationRequestId'
+>;
 export interface ChangeReminderNotification {
   readonly changeDirection: 'forward' | 'backward';
   readonly changeEventAt: string;
@@ -33,6 +37,10 @@ export const parseReminderSubscriptionRegistrationResponse =
   runtime.parseReminderSubscriptionRegistrationResponse as (
     value: unknown,
   ) => ReminderSubscriptionRegistrationResponse;
+export const parseReminderSubscriptionUpdate =
+  runtime.parseReminderSubscriptionUpdate as (
+    value: unknown,
+  ) => ReminderSubscriptionUpdate;
 export const ChangeReminderNotificationValidationError =
   runtime.ChangeReminderNotificationValidationError;
 export const parseChangeReminderNotification =
