@@ -47,4 +47,6 @@ export interface ChangeReminderAdapters {
   ) => Promise<ChangeReminderEnableResult>;
   readonly openSettings: () => Promise<void>;
   readonly restore: () => Promise<ChangeReminderRestoreResult>;
+  /** Starts one native token listener; callers must remove it on unmount. */
+  readonly startTokenRefresh: (homeTimeZone: string) => () => void;
 }

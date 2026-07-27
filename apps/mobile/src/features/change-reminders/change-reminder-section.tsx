@@ -26,6 +26,12 @@ export default function ChangeReminderSection({
   );
 
   useEffect(() => session.start(), [session]);
+  useEffect(() => {
+    if (snapshot.kind !== 'enabled' && snapshot.kind !== 'permission-revoked') {
+      return;
+    }
+    return adapters.startTokenRefresh(homeTimeZone);
+  }, [adapters, homeTimeZone, snapshot.kind]);
 
   const content =
     snapshot.kind === 'untouched'

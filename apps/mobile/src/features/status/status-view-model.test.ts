@@ -80,4 +80,72 @@ describe('createStatusViewModel', () => {
     expect(viewModel.availability).toBe('unavailable');
     expect(viewModel.packVersion).toBe('2026c-solar-gold-test');
   });
+
+  it('reopens exact upcoming and recent past reminder events', () => {
+    const pack = activateAustralianTimeZoneDataPack(bundledAustralianDataPack);
+    const tap = {
+      changeDirection: 'forward' as const,
+      changeEventAt: '2026-10-03T16:00:00.000Z',
+      homeTimeZone: 'Australia/Sydney',
+      reminderTiming: 'one-week' as const,
+    };
+    const upcoming = createStatusViewModel(
+      pack,
+      'current',
+      'Australia/Sydney',
+      new Date('2026-09-26T16:00:00.000Z'),
+      false,
+      'test-installation',
+      null,
+      tap,
+    );
+    const past = createStatusViewModel(
+      pack,
+      'current',
+      'Australia/Sydney',
+      new Date('2026-10-03T16:00:00.000Z'),
+      false,
+      'test-installation',
+      '2026-10-03T16:00:00.000Z',
+      tap,
+    );
+
+    expect(upcoming).toMatchObject({
+      notificationContext: { kind: 'matched', relation: 'upcoming' },
+      phase: 'reminder-week',
+    });
+    expect(past).toMatchObject({
+      notificationContext: { kind: 'matched', relation: 'past' },
+      phase: 'aftermath',
+    });
+  });
+
+  it('keeps current report for changed zones and stale reminder events', () => {
+    const pack = activateAustralianTimeZoneDataPack(bundledAustralianDataPack);
+    const base = [
+      pack,
+      'current' as const,
+      'Australia/Sydney',
+      new Date('2026-09-26T16:00:00.000Z'),
+      false,
+      'test-installation',
+      null,
+    ] as const;
+    expect(
+      createStatusViewModel(...base, {
+        changeDirection: 'forward',
+        changeEventAt: '2026-10-03T16:00:00.000Z',
+        homeTimeZone: 'Australia/Brisbane',
+        reminderTiming: 'one-week',
+      }),
+    ).toMatchObject({ notificationContext: { kind: 'zone-mismatch' } });
+    expect(
+      createStatusViewModel(...base, {
+        changeDirection: 'forward',
+        changeEventAt: '2028-10-03T16:00:00.000Z',
+        homeTimeZone: 'Australia/Sydney',
+        reminderTiming: 'one-week',
+      }),
+    ).toMatchObject({ notificationContext: { kind: 'stale' } });
+  });
 });

@@ -38,6 +38,7 @@ function adapters(
     enable: jest.fn(async () => ({ kind: 'enabled' as const })),
     openSettings: jest.fn(async () => undefined),
     restore: jest.fn(async () => ({ kind: 'unregistered' as const })),
+    startTokenRefresh: jest.fn(() => () => undefined),
     ...overrides,
   };
 }

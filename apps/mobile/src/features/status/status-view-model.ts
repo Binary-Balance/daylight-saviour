@@ -11,6 +11,12 @@ import type { ActivatedTimeZoneDataPack } from '@daylight-saviour/contracts';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import type { TimeZoneDataPackFreshness } from '../time-zone-data/time-zone-data-manager';
+import type { ChangeReminderTap } from '../change-reminders/change-reminder-notifications';
+
+export type ChangeReminderTapContext =
+  | { readonly kind: 'matched'; readonly relation: 'past' | 'upcoming' }
+  | { readonly kind: 'stale' }
+  | { readonly kind: 'zone-mismatch' };
 
 export type StatusViewModel =
   | {
@@ -35,6 +41,7 @@ export type StatusViewModel =
       readonly packVersion: string;
       readonly phase: CivilTimeReportPhase;
       readonly phaseLabel: string;
+      readonly notificationContext: ChangeReminderTapContext | null;
       readonly secondaryLine: string;
       readonly status: DaylightSavingStatus;
       readonly validUntil: string;
@@ -46,6 +53,7 @@ export type StatusViewModel =
       readonly freshness: 'decision-unavailable' | 'expired';
       readonly message: string;
       readonly packVersion: string;
+      readonly notificationContext: ChangeReminderTapContext | null;
       readonly unavailabilityReason: CivilTimeDecisionUnavailableReason;
       readonly validUntil: string;
       readonly zoneId: string;
@@ -59,14 +67,50 @@ export function createStatusViewModel(
   uses24hourClock: boolean,
   installationSeed: string,
   acknowledgedEventAt: string | null = null,
+  notificationTap: ChangeReminderTap | null = null,
 ): StatusViewModel {
   const packDetails = {
     packVersion: activePack.packVersion,
     validUntil: activePack.coverage.validUntil,
   } as const;
   try {
+    let notificationContext: ChangeReminderTapContext | null = null;
+    let requestedEventAt: string | null = null;
+    if (notificationTap !== null) {
+      if (notificationTap.homeTimeZone !== zoneId) {
+        notificationContext = { kind: 'zone-mismatch' };
+      } else {
+        const transition = activePack.zones
+          .find((zone) => zone.id === zoneId)
+          ?.transitions.find(
+            (candidate) => candidate.at === notificationTap.changeEventAt,
+          );
+        const direction =
+          transition === undefined
+            ? null
+            : transition.utcOffsetSeconds > transition.offsetBeforeSeconds
+              ? 'forward'
+              : 'backward';
+        const secondsSinceReminderEvent =
+          (now.getTime() - Date.parse(notificationTap.changeEventAt)) / 1_000;
+        if (
+          transition === undefined ||
+          direction !== notificationTap.changeDirection ||
+          secondsSinceReminderEvent >= 48 * 60 * 60
+        ) {
+          notificationContext = { kind: 'stale' };
+        } else {
+          requestedEventAt = notificationTap.changeEventAt;
+          notificationContext = {
+            kind: 'matched',
+            relation: secondsSinceReminderEvent >= 0 ? 'past' : 'upcoming',
+          };
+        }
+      }
+    }
     const report = createCivilTimeReport(activePack, zoneId, now, {
       acknowledgedEventAt,
+      requestedEventAt,
     });
     const decision = report.civilTime;
     const event = report.featuredEvent;
@@ -123,6 +167,7 @@ export function createStatusViewModel(
       friendlyZoneLabel: decision.friendlyZoneLabel,
       freshness: dataFreshness,
       ...packDetails,
+      notificationContext,
       phase: report.phase,
       phaseLabel: copy.civilTimeReport.phaseLabel(report.phase),
       secondaryLine: copy.civilTimeReport.secondary.select({
@@ -163,6 +208,7 @@ export function createStatusViewModel(
       freshness,
       message: copy.civilTimeReport.decisionUnavailable.message(error.reason),
       ...packDetails,
+      notificationContext: notificationTap === null ? null : { kind: 'stale' },
       unavailabilityReason: error.reason,
       zoneId,
     };

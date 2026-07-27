@@ -27,6 +27,11 @@ interface ProductionAdapterDependencies {
   readonly endpoint: string | undefined;
   readonly fetch: typeof fetch;
   readonly notifications: {
+    readonly addPushTokenListener: (
+      listener: (token: { readonly data: unknown }) => void,
+    ) => {
+      readonly remove: () => void;
+    };
     readonly getDevicePushTokenAsync: () => Promise<{ readonly data: string }>;
     readonly getPermissionsAsync: () => Promise<PermissionResult>;
     readonly requestPermissionsAsync: () => Promise<PermissionResult>;
@@ -148,6 +153,15 @@ function validHttpsEndpoint(value: string | undefined) {
   }
 }
 
+function validDeviceToken(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= 20 &&
+    value.length <= 4_096 &&
+    /^[A-Za-z0-9_:.-]+$/.test(value)
+  );
+}
+
 async function fetchWithTimeout(
   request: typeof fetch,
   url: string,
@@ -190,41 +204,23 @@ export function createProductionChangeReminderAdapters({
     await secureStore.setItemAsync(registrationKey, JSON.stringify(state));
   }
 
-  async function performEnable(
+  async function register(
     homeTimeZone: string,
+    deviceToken: string,
+    forceTokenReplacement: boolean,
   ): Promise<ChangeReminderEnableResult> {
-    if (platform === 'web') return { kind: 'unavailable' };
+    const registrationEndpoint = validHttpsEndpoint(endpoint);
+    if (registrationEndpoint === null || !validDeviceToken(deviceToken)) {
+      return { kind: 'failed' };
+    }
+    const saved = await loadStoredState();
+    if (saved?.state === 'registered' && !forceTokenReplacement) {
+      return {
+        kind: saved.homeTimeZone === homeTimeZone ? 'enabled' : 'failed',
+      };
+    }
+    const nextGeneration = (saved?.attemptGeneration ?? 0) + 1;
     try {
-      if (platform === 'android') {
-        await notifications.setNotificationChannelAsync(notificationChannelId, {
-          importance: Notifications.AndroidImportance.DEFAULT,
-          name: 'Change Reminders',
-        });
-      }
-      const existing = await notifications.getPermissionsAsync();
-      if (!existing.granted && !existing.canAskAgain) {
-        return { kind: 'os-blocked' };
-      }
-      const permission = existing.granted
-        ? existing
-        : await notifications.requestPermissionsAsync();
-      if (!permission.granted) {
-        return {
-          kind: permission.canAskAgain ? 'permission-denied' : 'os-blocked',
-        };
-      }
-
-      const registrationEndpoint = validHttpsEndpoint(endpoint);
-      if (registrationEndpoint === null) return { kind: 'failed' };
-      const token = await notifications.getDevicePushTokenAsync();
-      const saved = await loadStoredState();
-      if (saved?.state === 'registered') {
-        return {
-          kind: saved.homeTimeZone === homeTimeZone ? 'enabled' : 'failed',
-        };
-      }
-
-      const nextGeneration = (saved?.attemptGeneration ?? 0) + 1;
       if (nextGeneration > maximumAttemptGeneration) {
         return { kind: 'failed' };
       }
@@ -249,7 +245,7 @@ export function createProductionChangeReminderAdapters({
         {
           body: JSON.stringify({
             attemptGeneration: pending.attemptGeneration,
-            deviceToken: token.data,
+            deviceToken,
             homeTimeZone: pending.homeTimeZone,
             oneDayEnabled: true,
             oneWeekEnabled: true,
@@ -276,10 +272,96 @@ export function createProductionChangeReminderAdapters({
     }
   }
 
+  async function performEnable(
+    homeTimeZone: string,
+  ): Promise<ChangeReminderEnableResult> {
+    if (platform === 'web') return { kind: 'unavailable' };
+    try {
+      if (platform === 'android') {
+        await notifications.setNotificationChannelAsync(notificationChannelId, {
+          importance: Notifications.AndroidImportance.DEFAULT,
+          name: 'Change Reminders',
+        });
+      }
+      const existing = await notifications.getPermissionsAsync();
+      if (!existing.granted && !existing.canAskAgain) {
+        return { kind: 'os-blocked' };
+      }
+      const permission = existing.granted
+        ? existing
+        : await notifications.requestPermissionsAsync();
+      if (!permission.granted) {
+        return {
+          kind: permission.canAskAgain ? 'permission-denied' : 'os-blocked',
+        };
+      }
+      if (validHttpsEndpoint(endpoint) === null) return { kind: 'failed' };
+      const token = await notifications.getDevicePushTokenAsync();
+      return register(homeTimeZone, token.data, false);
+    } catch {
+      return { kind: 'failed' };
+    }
+  }
+
+  async function performTokenRefresh(homeTimeZone: string, token: unknown) {
+    if (platform === 'web' || !validDeviceToken(token)) return;
+    try {
+      const saved = await loadStoredState();
+      if (
+        saved?.state !== 'registered' ||
+        saved.homeTimeZone !== homeTimeZone
+      ) {
+        return;
+      }
+      await register(homeTimeZone, token, true);
+    } catch {
+      // A later token update or explicit retry uses the durable pending state.
+    }
+  }
+
   let enableInFlight: {
     readonly homeTimeZone: string;
     readonly promise: Promise<ChangeReminderEnableResult>;
   } | null = null;
+  let registrationQueue = Promise.resolve();
+  let queuedRefreshToken: unknown = null;
+  let refreshInFlight: Promise<void> | null = null;
+  let refreshingToken: unknown = null;
+  let lastRefreshedToken: unknown = null;
+
+  function enqueue<T>(operation: () => Promise<T>) {
+    const next = registrationQueue.then(operation, operation);
+    registrationQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  function queueTokenRefresh(homeTimeZone: string, token: unknown) {
+    if (
+      token === queuedRefreshToken ||
+      token === refreshingToken ||
+      token === lastRefreshedToken
+    ) {
+      return;
+    }
+    queuedRefreshToken = token;
+    if (refreshInFlight !== null) return;
+    refreshInFlight = (async () => {
+      while (queuedRefreshToken !== null) {
+        const currentToken = queuedRefreshToken;
+        queuedRefreshToken = null;
+        refreshingToken = currentToken;
+        await enqueue(() => performTokenRefresh(homeTimeZone, currentToken));
+        lastRefreshedToken = currentToken;
+        refreshingToken = null;
+      }
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+
   return {
     async restore() {
       if (platform === 'web') return { kind: 'unavailable' };
@@ -304,13 +386,20 @@ export function createProductionChangeReminderAdapters({
           ? enableInFlight.promise
           : Promise.resolve({ kind: 'failed' });
       }
-      const promise = performEnable(homeTimeZone).finally(() => {
+      const promise = enqueue(() => performEnable(homeTimeZone)).finally(() => {
         if (enableInFlight?.promise === promise) enableInFlight = null;
       });
       enableInFlight = { homeTimeZone, promise };
       return promise;
     },
     openSettings,
+    startTokenRefresh(homeTimeZone) {
+      if (platform === 'web') return () => undefined;
+      const subscription = notifications.addPushTokenListener((token) => {
+        queueTokenRefresh(homeTimeZone, token.data);
+      });
+      return () => subscription.remove();
+    },
   };
 }
 

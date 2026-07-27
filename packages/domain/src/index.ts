@@ -59,6 +59,11 @@ export interface CivilTimeReport {
 
 export interface CivilTimeReportContext {
   readonly acknowledgedEventAt?: string | null;
+  /**
+   * A validated reminder tap may reopen its exact transition. This never
+   * revives an event once its factual aftermath window has ended.
+   */
+  readonly requestedEventAt?: string | null;
 }
 
 export interface CivilTimeDecision {
@@ -246,6 +251,41 @@ export function createCivilTimeReport(
   const previousTransition = [...zone.transitions]
     .reverse()
     .find((transition) => Date.parse(transition.at) <= instantMilliseconds);
+
+  const requestedTransition =
+    context.requestedEventAt === undefined || context.requestedEventAt === null
+      ? undefined
+      : zone.transitions.find(
+          (transition) => transition.at === context.requestedEventAt,
+        );
+
+  if (requestedTransition !== undefined) {
+    const requestedEvent = changeEventFromTransition(
+      requestedTransition,
+      instantMilliseconds,
+    );
+    if (
+      requestedEvent.secondsUntil >= -aftermathSeconds &&
+      requestedEvent.secondsUntil <= 0
+    ) {
+      return {
+        civilTime,
+        featuredEvent: requestedEvent,
+        phase: 'aftermath',
+      };
+    }
+    if (requestedEvent.secondsUntil > 0) {
+      const phase: CivilTimeReportPhase =
+        requestedEvent.secondsUntil <= daySeconds
+          ? 'reminder-day'
+          : requestedEvent.secondsUntil <= reminderWeekSeconds
+            ? 'reminder-week'
+            : requestedEvent.secondsUntil <= approachingSeconds
+              ? 'approaching'
+              : 'ordinary';
+      return { civilTime, featuredEvent: requestedEvent, phase };
+    }
+  }
 
   if (previousTransition !== undefined) {
     const elapsedSeconds =

@@ -29,10 +29,12 @@ import {
 } from '../../theme';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
 import { createHomeTimeZoneSession } from './home-time-zone-session';
+import type { ChangeReminderTap } from '../change-reminders/change-reminder-notifications';
 
 interface HomeTimeZoneScreenProps {
   readonly adapters: HomeTimeZoneAdapters;
   readonly now?: Date;
+  readonly notificationTap?: ChangeReminderTap | null;
 }
 
 interface ChooserProps {
@@ -176,6 +178,7 @@ function ZoneChooser({
 export default function HomeTimeZoneScreen({
   adapters,
   now,
+  notificationTap = null,
 }: HomeTimeZoneScreenProps) {
   const appearance = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = daylightSaviourPalettes[appearance];
@@ -213,6 +216,7 @@ export default function HomeTimeZoneScreen({
         dataPackSnapshot={snapshot.dataPackSnapshot}
         key={snapshot.zoneId}
         now={now}
+        notificationTap={notificationTap}
         onAcknowledgeAftermath={(eventAt) =>
           session.dispatch({ eventAt, type: 'acknowledge-aftermath' })
         }

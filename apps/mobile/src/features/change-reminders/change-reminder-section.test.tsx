@@ -17,6 +17,7 @@ function adapters(
     enable: jest.fn(async () => ({ kind: 'enabled' as const })),
     openSettings: jest.fn(async () => undefined),
     restore: jest.fn(async () => ({ kind: 'unregistered' as const })),
+    startTokenRefresh: jest.fn(() => () => undefined),
     ...overrides,
   };
 }
@@ -39,6 +40,7 @@ it('does not request a reminder before explicit confirmation', async () => {
   });
   fireEvent.press(initialAction);
   expect(boundary.enable).not.toHaveBeenCalled();
+  expect(boundary.startTokenRefresh).not.toHaveBeenCalled();
   fireEvent.press(screen.getByRole('button', { name: 'Enable reminders' }));
   expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
   expect(
@@ -46,6 +48,7 @@ it('does not request a reminder before explicit confirmation', async () => {
       /one-week and one-day Change Reminders are enabled/i,
     ),
   ).toBeTruthy();
+  expect(boundary.startTokenRefresh).toHaveBeenCalledWith('Australia/Sydney');
 });
 
 it('renders restored registration truthfully without another enable action', async () => {

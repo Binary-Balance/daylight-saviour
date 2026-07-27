@@ -52,6 +52,11 @@ function harness({
     endpoint,
     fetch: request,
     notifications: {
+      addPushTokenListener: jest.fn(
+        (_listener: (token: { readonly data: unknown }) => void) => ({
+          remove: jest.fn(),
+        }),
+      ),
       getDevicePushTokenAsync: jest.fn(async () => {
         calls.push('token');
         return { data: 'fcm-token:with_valid.characters-123' };
@@ -375,6 +380,75 @@ describe('production Change Reminder adapters', () => {
       attemptGeneration: 2,
       state: 'registered',
     });
+  });
+
+  it('refreshes a registered token once with the same request ID and next generation', async () => {
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    const remove = jest.fn();
+    const test = harness();
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove };
+      });
+    await test.adapters.enable('Australia/Sydney');
+    const stop = test.adapters.startTokenRefresh('Australia/Sydney');
+    listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
+    listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const requests = test.dependencies.fetch.mock.calls.map((call) =>
+      JSON.parse(String(call[1]?.body)),
+    );
+    expect(requests).toEqual([
+      expect.objectContaining({
+        attemptGeneration: 1,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        registrationRequestId: 'a'.repeat(64),
+      }),
+      expect.objectContaining({
+        attemptGeneration: 2,
+        deviceToken: 'fcm-token:replacement_valid.characters-456',
+        registrationRequestId: 'a'.repeat(64),
+      }),
+    ]);
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 2,
+      state: 'registered',
+    });
+    stop();
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refresh a replaced-zone registration or a malformed token', async () => {
+    const test = harness({
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 4,
+          homeTimeZone: 'Australia/Brisbane',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 2,
+        }),
+      },
+    });
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove: jest.fn() };
+      });
+    test.adapters.startTokenRefresh('Australia/Sydney');
+    listener?.({ data: 'short' });
+    listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(test.dependencies.fetch).not.toHaveBeenCalled();
   });
 
   it('reports web unavailable without touching native or secure APIs', async () => {
