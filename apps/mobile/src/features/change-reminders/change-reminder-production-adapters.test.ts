@@ -490,6 +490,7 @@ describe('production Change Reminder adapters', () => {
   it('refreshes a registered token once with the same request ID and next generation', async () => {
     let listener: ((token: { readonly data: unknown }) => void) | undefined;
     const remove = jest.fn();
+    const outcomes: unknown[] = [];
     const test = harness();
     jest
       .mocked(test.dependencies.notifications.addPushTokenListener)
@@ -498,7 +499,9 @@ describe('production Change Reminder adapters', () => {
         return { remove };
       });
     await test.adapters.enable('Australia/Sydney');
-    const stop = test.adapters.startTokenRefresh('Australia/Sydney');
+    const stop = test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
     listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
     listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -523,6 +526,7 @@ describe('production Change Reminder adapters', () => {
       attemptGeneration: 2,
       state: 'registered',
     });
+    expect(outcomes).toEqual([{ kind: 'succeeded' }]);
     stop();
     expect(remove).toHaveBeenCalledTimes(1);
   });
@@ -549,11 +553,15 @@ describe('production Change Reminder adapters', () => {
         listener = nextListener;
         return { remove: jest.fn() };
       });
-    test.adapters.startTokenRefresh('Australia/Sydney');
+    const outcomes: unknown[] = [];
+    test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
     listener?.({ data: 'short' });
     listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(test.dependencies.fetch).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([]);
   });
 
   it('keeps failed token refresh pending and retries the same token', async () => {
@@ -565,6 +573,7 @@ describe('production Change Reminder adapters', () => {
         Response.json(responseBody),
       ) as jest.MockedFunction<typeof fetch>;
     const test = harness({ fetchImplementation });
+    const outcomes: unknown[] = [];
     let listener: ((token: { readonly data: unknown }) => void) | undefined;
     jest
       .mocked(test.dependencies.notifications.addPushTokenListener)
@@ -573,7 +582,9 @@ describe('production Change Reminder adapters', () => {
         return { remove: jest.fn() };
       });
     await test.adapters.enable('Australia/Sydney');
-    test.adapters.startTokenRefresh('Australia/Sydney');
+    test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
     const replacement = 'fcm-token:replacement_valid.characters-456';
     listener?.({ data: replacement });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -583,6 +594,7 @@ describe('production Change Reminder adapters', () => {
       deviceToken: replacement,
       state: 'pending',
     });
+    expect(outcomes).toEqual([{ kind: 'failed', retryable: true }]);
     listener?.({ data: replacement });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -591,6 +603,10 @@ describe('production Change Reminder adapters', () => {
       deviceToken: replacement,
       state: 'registered',
     });
+    expect(outcomes).toEqual([
+      { kind: 'failed', retryable: true },
+      { kind: 'succeeded' },
+    ]);
   });
 
   it('retries the same token after the refresh registration SecureStore write fails', async () => {

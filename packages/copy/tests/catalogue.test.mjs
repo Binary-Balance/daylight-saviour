@@ -94,7 +94,7 @@ describe('Australian-English copy catalogue', () => {
           'This Civil Time Report shows the upcoming Change Event from your reminder.',
       },
       agedOut: {
-        body: "This reminder's Change Event passed more than 48 hours ago. Current Civil Time Report details are shown instead.",
+        body: "This reminder's Change Event passed 48 hours ago or more. Current Civil Time Report details are shown instead.",
         heading: 'REMINDER EVENT PASSED',
       },
       eventMismatch: {
@@ -104,6 +104,10 @@ describe('Australian-English copy catalogue', () => {
       eventUnavailable: {
         body: 'This reminder refers to a Change Event no longer available in verified time-zone data. Current Civil Time Report details are shown instead.',
         heading: 'REMINDER EVENT UNAVAILABLE',
+      },
+      reportUnavailable: {
+        body: 'Verified Civil Time Report details are unavailable. Refresh time-zone data and try again.',
+        heading: 'REMINDER REPORT UNAVAILABLE',
       },
       zoneMismatch: {
         body: 'This reminder was sent for a different Home Time Zone. Current Civil Time Report details are shown instead.',

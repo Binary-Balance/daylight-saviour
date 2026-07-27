@@ -5,6 +5,10 @@ export type ChangeReminderEnableResult =
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'failed' };
 
+export type ChangeReminderTokenRefreshResult =
+  | { readonly kind: 'succeeded' }
+  | { readonly kind: 'failed'; readonly retryable: boolean };
+
 interface StoredChangeReminderBase {
   readonly attemptGeneration: number;
   readonly deviceToken: string;
@@ -75,5 +79,8 @@ export interface ChangeReminderAdapters {
   readonly openSettings: () => Promise<void>;
   readonly restore: () => Promise<ChangeReminderRestoreResult>;
   /** Starts one native token listener; callers must remove it on unmount. */
-  readonly startTokenRefresh: (homeTimeZone: string) => () => void;
+  readonly startTokenRefresh: (
+    homeTimeZone: string,
+    onResult?: (result: ChangeReminderTokenRefreshResult) => void,
+  ) => () => void;
 }

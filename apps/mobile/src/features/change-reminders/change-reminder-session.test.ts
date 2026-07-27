@@ -213,4 +213,75 @@ describe('Change Reminder session', () => {
     ).toEqual({ kind: 'permission-revoked' });
     stop();
   });
+
+  it('makes a failed attempted token refresh retryable and a successful one enabled', async () => {
+    const session = createChangeReminderSession({
+      adapters: adapters({
+        restore: jest.fn(async () => ({
+          kind: 'registered' as const,
+          notificationPermissionGranted: true,
+          registration,
+        })),
+      }),
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+
+    session.dispatch({
+      result: { kind: 'failed', retryable: true },
+      type: 'token-refresh',
+    });
+    expect(session.getSnapshot()).toEqual({ kind: 'retry-pending' });
+    session.dispatch({ result: { kind: 'succeeded' }, type: 'token-refresh' });
+    expect(session.getSnapshot()).toEqual({ kind: 'enabled' });
+    stop();
+  });
+
+  it('reconciles once on foreground after notification settings changes', async () => {
+    let resolveForeground!: (value: {
+      readonly kind: 'registered';
+      readonly notificationPermissionGranted: boolean;
+      readonly registration: typeof registration;
+    }) => void;
+    const boundary = adapters({
+      restore: jest
+        .fn()
+        .mockResolvedValueOnce({
+          kind: 'registered' as const,
+          notificationPermissionGranted: true,
+          registration,
+        })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveForeground = resolve;
+            }),
+        )
+        .mockResolvedValueOnce({ kind: 'unregistered' as const }),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+
+    session.dispatch({ type: 'foreground' });
+    session.dispatch({ type: 'foreground' });
+    expect(boundary.restore).toHaveBeenCalledTimes(2);
+    resolveForeground({
+      kind: 'registered',
+      notificationPermissionGranted: false,
+      registration,
+    });
+    await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'permission-revoked',
+    );
+
+    session.dispatch({ type: 'foreground' });
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+    stop();
+  });
 });

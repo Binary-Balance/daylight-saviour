@@ -170,6 +170,30 @@ describe('StatusScreen facade', () => {
     expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
   });
 
+  it('uses a report-unavailable alert when a tap opens unavailable civil-time data', () => {
+    render(
+      <StatusScreen
+        now={new Date('2031-01-01T00:00:00.000Z')}
+        notificationTap={{
+          changeDirection: 'forward',
+          changeEventAt: '2026-10-03T16:00:00.000Z',
+          homeTimeZone: 'Australia/Sydney',
+          reminderTiming: 'one-week',
+        }}
+        reducedMotion
+      />,
+    );
+
+    expect(
+      screen.getByRole('alert', {
+        name: /reminder report unavailable\. verified civil time report details are unavailable/i,
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(/current civil time report details are shown/i),
+    ).toBeNull();
+  });
+
   it.each([
     [
       'matched upcoming',
@@ -202,7 +226,7 @@ describe('StatusScreen facade', () => {
         homeTimeZone: 'Australia/Sydney',
         reminderTiming: 'one-week' as const,
       },
-      /reminder event passed\. this reminder's change event passed more than 48 hours ago/i,
+      /reminder event passed\. this reminder's change event passed 48 hours ago or more/i,
     ],
     [
       'unavailable',

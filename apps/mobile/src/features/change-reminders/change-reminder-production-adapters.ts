@@ -8,6 +8,7 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 import type {
   ChangeReminderAdapters,
   ChangeReminderEnableResult,
+  ChangeReminderTokenRefreshResult,
   StoredLegacyChangeReminderPending,
   StoredLegacyChangeReminderRegistration,
   StoredChangeReminderPending,
@@ -384,24 +385,38 @@ export function createProductionChangeReminderAdapters({
     }
   }
 
-  async function performTokenRefresh(homeTimeZone: string, token: unknown) {
-    if (platform === 'web' || !validDeviceToken(token)) return false;
+  async function performTokenRefresh(
+    homeTimeZone: string,
+    token: unknown,
+  ): Promise<ChangeReminderTokenRefreshResult | null> {
+    if (platform === 'web' || !validDeviceToken(token)) return null;
     try {
       const saved = await loadStoredState();
       if (saved === null || saved.homeTimeZone !== homeTimeZone) {
-        return false;
+        return null;
       }
       if (
         saved.state === 'registered' &&
         saved.version === 3 &&
         saved.deviceToken === token
       ) {
-        return true;
+        return null;
       }
-      return (await register(homeTimeZone, token, true)).kind === 'enabled';
+      if ((await register(homeTimeZone, token, true)).kind === 'enabled') {
+        return { kind: 'succeeded' };
+      }
     } catch {
       // A later token update or explicit retry uses the durable pending state.
-      return false;
+    }
+    try {
+      const saved = await loadStoredState();
+      return {
+        kind: 'failed',
+        retryable:
+          saved?.state === 'pending' && saved.homeTimeZone === homeTimeZone,
+      };
+    } catch {
+      return { kind: 'failed', retryable: false };
     }
   }
 
@@ -424,7 +439,12 @@ export function createProductionChangeReminderAdapters({
     return next;
   }
 
-  function queueTokenRefresh(homeTimeZone: string, token: unknown) {
+  function queueTokenRefresh(
+    homeTimeZone: string,
+    token: unknown,
+    onResult: (result: ChangeReminderTokenRefreshResult) => void,
+  ) {
+    if (!validDeviceToken(token)) return;
     if (
       token === queuedRefreshToken ||
       token === refreshingToken ||
@@ -440,10 +460,15 @@ export function createProductionChangeReminderAdapters({
         queuedRefreshToken = null;
         refreshingToken = currentToken;
         try {
-          const refreshed = await enqueue(() =>
+          const result = await enqueue(() =>
             performTokenRefresh(homeTimeZone, currentToken),
           );
-          if (refreshed) lastRefreshedToken = currentToken;
+          if (result?.kind === 'succeeded') {
+            lastRefreshedToken = currentToken;
+            onResult(result);
+          } else if (result?.kind === 'failed') {
+            onResult(result);
+          }
         } finally {
           refreshingToken = null;
         }
@@ -517,12 +542,18 @@ export function createProductionChangeReminderAdapters({
       return promise;
     },
     openSettings,
-    startTokenRefresh(homeTimeZone) {
+    startTokenRefresh(homeTimeZone, onResult = () => undefined) {
       if (platform === 'web') return () => undefined;
+      let listening = true;
       const subscription = notifications.addPushTokenListener((token) => {
-        queueTokenRefresh(homeTimeZone, token.data);
+        queueTokenRefresh(homeTimeZone, token.data, (result) => {
+          if (listening) onResult(result);
+        });
       });
-      return () => subscription.remove();
+      return () => {
+        listening = false;
+        subscription.remove();
+      };
     },
   };
 }

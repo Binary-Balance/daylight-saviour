@@ -19,6 +19,7 @@ export type ChangeReminderTapContext =
   | { readonly kind: 'aged-out' }
   | { readonly kind: 'event-mismatch' }
   | { readonly kind: 'event-unavailable' }
+  | { readonly kind: 'report-unavailable' }
   | { readonly kind: 'zone-mismatch' };
 
 export type StatusViewModel =
@@ -213,7 +214,7 @@ export function createStatusViewModel(
       message: copy.civilTimeReport.decisionUnavailable.message(error.reason),
       ...packDetails,
       notificationContext:
-        notificationTap === null ? null : { kind: 'event-unavailable' },
+        notificationTap === null ? null : { kind: 'report-unavailable' },
       unavailabilityReason: error.reason,
       zoneId,
     };

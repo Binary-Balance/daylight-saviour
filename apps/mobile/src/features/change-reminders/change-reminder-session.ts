@@ -1,6 +1,7 @@
 import type {
   ChangeReminderAdapters,
   ChangeReminderEnableResult,
+  ChangeReminderTokenRefreshResult,
 } from './change-reminder-adapters';
 
 export type ChangeReminderSessionSnapshot =
@@ -17,7 +18,12 @@ export type ChangeReminderSessionSnapshot =
 export type ChangeReminderSessionEvent =
   | { readonly type: 'show-explainer' }
   | { readonly type: 'enable' }
-  | { readonly type: 'retry-load' };
+  | { readonly type: 'retry-load' }
+  | { readonly type: 'foreground' }
+  | {
+      readonly result: ChangeReminderTokenRefreshResult;
+      readonly type: 'token-refresh';
+    };
 
 export interface ChangeReminderSession {
   readonly dispatch: (event: ChangeReminderSessionEvent) => void;
@@ -35,6 +41,7 @@ export function createChangeReminderSession({
 }): ChangeReminderSession {
   let active = false;
   let generation = 0;
+  let restoreInFlightGeneration: number | null = null;
   let snapshot: ChangeReminderSessionSnapshot = { kind: 'loading' };
   const listeners = new Set<() => void>();
 
@@ -69,6 +76,16 @@ export function createChangeReminderSession({
     }
   }
 
+  function requestRestore(expectedGeneration: number) {
+    if (restoreInFlightGeneration === expectedGeneration) return;
+    restoreInFlightGeneration = expectedGeneration;
+    void restore(expectedGeneration).finally(() => {
+      if (restoreInFlightGeneration === expectedGeneration) {
+        restoreInFlightGeneration = null;
+      }
+    });
+  }
+
   function enable() {
     if (
       snapshot.kind !== 'explainer' &&
@@ -99,7 +116,21 @@ export function createChangeReminderSession({
     if (event.type === 'retry-load') {
       if (snapshot.kind !== 'load-failed') return;
       publish({ kind: 'loading' });
-      void restore(generation);
+      requestRestore(generation);
+      return;
+    }
+    if (event.type === 'foreground') {
+      requestRestore(generation);
+      return;
+    }
+    if (event.type === 'token-refresh') {
+      publish(
+        event.result.kind === 'succeeded'
+          ? { kind: 'enabled' }
+          : event.result.retryable
+            ? { kind: 'retry-pending' }
+            : { kind: 'failed' },
+      );
       return;
     }
     enable();
@@ -119,7 +150,7 @@ export function createChangeReminderSession({
       active = true;
       generation += 1;
       publish({ kind: 'loading' });
-      void restore(generation);
+      requestRestore(generation);
       return stop;
     },
     subscribe(listener) {
