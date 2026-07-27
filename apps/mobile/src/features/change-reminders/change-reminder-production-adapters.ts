@@ -338,10 +338,16 @@ export function createProductionChangeReminderAdapters({
       if (nextGeneration > maximumAttemptGeneration) {
         return { kind: 'failed' };
       }
+      const replayingInitialRegistration =
+        saved?.state === 'pending' && saved.version !== 2;
       const base = {
         attemptGeneration: nextGeneration,
-        deviceToken,
-        homeTimeZone,
+        deviceToken: replayingInitialRegistration
+          ? saved.deviceToken
+          : deviceToken,
+        homeTimeZone: replayingInitialRegistration
+          ? saved.homeTimeZone
+          : homeTimeZone,
         oneDayEnabled: true,
         oneWeekEnabled: true,
         registrationRequestId:
@@ -363,6 +369,10 @@ export function createProductionChangeReminderAdapters({
       if (!/^[a-f0-9]{64}$/.test(pending.registrationRequestId)) {
         return { kind: 'failed' };
       }
+      const replayNeedsAuthenticatedUpdate =
+        replayingInitialRegistration &&
+        (pending.deviceToken !== deviceToken ||
+          pending.homeTimeZone !== homeTimeZone);
       await saveStoredState(pending);
 
       const response = await fetchWithTimeout(
@@ -373,7 +383,7 @@ export function createProductionChangeReminderAdapters({
         {
           body: JSON.stringify({
             attemptGeneration: pending.attemptGeneration,
-            deviceToken,
+            deviceToken: pending.deviceToken,
             homeTimeZone: pending.homeTimeZone,
             oneDayEnabled: true,
             oneWeekEnabled: true,
@@ -393,7 +403,26 @@ export function createProductionChangeReminderAdapters({
         },
         timeoutMs,
       );
-      if (!response.ok) return { kind: 'failed' };
+      if (!response.ok) {
+        if (pending.state === 'pending-update' && response.status === 404) {
+          const replacement = {
+            attemptGeneration: 1,
+            deviceToken,
+            homeTimeZone,
+            oneDayEnabled: true,
+            oneWeekEnabled: true,
+            registrationRequestId: await createRegistrationRequestId(),
+            state: 'pending' as const,
+            version: 4 as const,
+          } satisfies StoredChangeReminderPending;
+          if (!/^[a-f0-9]{64}$/.test(replacement.registrationRequestId)) {
+            return { kind: 'failed' };
+          }
+          await saveStoredState(replacement);
+          return synchronize(homeTimeZone, deviceToken, true);
+        }
+        return { kind: 'failed' };
+      }
       const registration =
         pending.state === 'pending'
           ? parseReminderSubscriptionRegistrationResponse(await response.json())
@@ -407,6 +436,9 @@ export function createProductionChangeReminderAdapters({
         state: 'registered' as const,
         version: 4,
       });
+      if (replayNeedsAuthenticatedUpdate) {
+        return synchronize(homeTimeZone, deviceToken, true);
+      }
       return { kind: 'enabled' };
     } catch {
       return { kind: 'failed' };

@@ -67,6 +67,7 @@ function store(
     createSubscription: async () => 'accepted',
     purgeExpiredThrottleRecords: async () => undefined,
     removeIfDeviceTokenMatches: async () => 'not-found',
+    takeInstallationAllowance: async () => true,
     updateSubscription: async () => 'accepted',
     takeSourceAllowance: async () => true,
     ...overrides,
@@ -437,6 +438,39 @@ describe('reminder subscription updates', () => {
       JSON.stringify([stale, unauthorized]),
       /c{43}|fcm-token/,
     );
+  });
+
+  it('throttles update source and installation attempts before credential lookup', async () => {
+    let updates = 0;
+    const sourceLimited = await updateReminderSubscription(
+      request(update, { authorization: `Bearer ${credential}` }),
+      store({
+        takeSourceAllowance: async () => false,
+        updateSubscription: async () => ((updates += 1), 'accepted'),
+      }),
+      installationId,
+    );
+    const installationLimited = await updateReminderSubscription(
+      request(update, { authorization: `Bearer ${credential}` }),
+      store({
+        takeInstallationAllowance: async () => false,
+        updateSubscription: async () => ((updates += 1), 'accepted'),
+      }),
+      installationId,
+    );
+    assert.equal(sourceLimited.status, 429);
+    assert.equal(installationLimited.status, 429);
+    assert.equal(updates, 0);
+  });
+
+  it('fails closed when an update has no trusted source address', async () => {
+    const result = await updateReminderSubscription(
+      request(update, { authorization: `Bearer ${credential}`, source: null }),
+      store(),
+      installationId,
+    );
+    assert.equal(result.status, 503);
+    assert.deepEqual(result.jsonBody, { error: 'Registration unavailable' });
   });
 });
 

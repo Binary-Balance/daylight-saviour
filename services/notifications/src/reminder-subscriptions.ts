@@ -117,7 +117,11 @@ export interface ReminderSubscriptionStore extends FcmSubscriptionRemover {
   readonly updateSubscription: (
     record: Omit<ReminderSubscriptionRecord, 'credentialHash'>,
     credentialHash: string,
-  ) => Promise<'accepted' | 'stale' | 'unauthorized'>;
+  ) => Promise<'accepted' | 'not-found' | 'stale' | 'unauthorized'>;
+  readonly takeInstallationAllowance: (
+    installationId: string,
+    now: Date,
+  ) => Promise<boolean>;
   readonly takeSourceAllowance: (
     sourceHash: string,
     now: Date,
@@ -374,6 +378,21 @@ export async function updateReminderSubscription(
     const target = readInstallationId(installationId);
     if (credential === null || target === null)
       return response(401, 'Unauthorized');
+    const sourceHash = sourceAddressHash(request);
+    if (!(await store.takeSourceAllowance(sourceHash, now))) {
+      return response(
+        429,
+        'Try again later',
+        Math.ceil(throttleWindowMs / 1000),
+      );
+    }
+    if (!(await store.takeInstallationAllowance(target, now))) {
+      return response(
+        429,
+        'Try again later',
+        Math.ceil(throttleWindowMs / 1000),
+      );
+    }
     const update = await readUpdate(request);
     const result = await store.updateSubscription(
       {
@@ -383,6 +402,8 @@ export async function updateReminderSubscription(
       },
       hashOpaqueValue(credential),
     );
+    if (result === 'not-found')
+      return response(404, 'Registration unavailable');
     if (result === 'unauthorized') return response(401, 'Unauthorized');
     if (result === 'stale') return response(409, 'Update superseded');
     return { status: 204, headers: { 'Cache-Control': 'no-store' } };
@@ -506,7 +527,7 @@ export function createTableReminderSubscriptionStore(
             record.installationId,
           );
         } catch (error) {
-          if (statusCode(error) === 404) return 'unauthorized';
+          if (statusCode(error) === 404) return 'not-found';
           throw error;
         }
         if (
@@ -536,50 +557,20 @@ export function createTableReminderSubscriptionStore(
       throw new Error('Subscription update contention exceeded retry limit');
     },
     async takeSourceAllowance(sourceHash, now) {
-      const window = Math.floor(now.getTime() / throttleWindowMs);
-      const rowKey = String(window);
-      const expiresAt = new Date(
-        window * throttleWindowMs + throttleRetentionMs,
+      return takeThrottleAllowance(
+        throttles,
+        hashOpaqueValue(`daylight-saviour:reminder-source:v1:${sourceHash}`),
+        now,
       );
-
-      for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-        let entity: ThrottleEntity;
-        try {
-          entity = await throttles.get(sourceHash, rowKey);
-        } catch (error) {
-          if (statusCode(error) !== 404) throw error;
-          try {
-            await throttles.create({
-              partitionKey: sourceHash,
-              rowKey,
-              count: 1,
-              expiresAt,
-            });
-            return true;
-          } catch (createError) {
-            if (statusCode(createError) !== 409) throw createError;
-            continue;
-          }
-        }
-
-        if (entity.count >= throttleLimit) return false;
-        try {
-          await throttles.replace(
-            {
-              partitionKey: sourceHash,
-              rowKey,
-              count: entity.count + 1,
-              expiresAt,
-            },
-            entity.etag,
-          );
-          return true;
-        } catch (updateError) {
-          const updateStatus = statusCode(updateError);
-          if (updateStatus !== 409 && updateStatus !== 412) throw updateError;
-        }
-      }
-      throw new Error('Throttle update contention exceeded retry limit');
+    },
+    async takeInstallationAllowance(installationId, now) {
+      return takeThrottleAllowance(
+        throttles,
+        hashOpaqueValue(
+          `daylight-saviour:reminder-installation:v1:${installationId}`,
+        ),
+        now,
+      );
     },
     async purgeExpiredThrottleRecords(now) {
       for await (const entity of throttles.listExpired(now)) {
@@ -591,6 +582,55 @@ export function createTableReminderSubscriptionStore(
       }
     },
   };
+}
+
+async function takeThrottleAllowance(
+  throttles: ThrottleTable,
+  subjectHash: string,
+  now: Date,
+) {
+  const window = Math.floor(now.getTime() / throttleWindowMs);
+  const rowKey = String(window);
+  const expiresAt = new Date(window * throttleWindowMs + throttleRetentionMs);
+
+  for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
+    let entity: ThrottleEntity;
+    try {
+      entity = await throttles.get(subjectHash, rowKey);
+    } catch (error) {
+      if (statusCode(error) !== 404) throw error;
+      try {
+        await throttles.create({
+          partitionKey: subjectHash,
+          rowKey,
+          count: 1,
+          expiresAt,
+        });
+        return true;
+      } catch (createError) {
+        if (statusCode(createError) !== 409) throw createError;
+        continue;
+      }
+    }
+
+    if (entity.count >= throttleLimit) return false;
+    try {
+      await throttles.replace(
+        {
+          partitionKey: subjectHash,
+          rowKey,
+          count: entity.count + 1,
+          expiresAt,
+        },
+        entity.etag,
+      );
+      return true;
+    } catch (updateError) {
+      const updateStatus = statusCode(updateError);
+      if (updateStatus !== 409 && updateStatus !== 412) throw updateError;
+    }
+  }
+  throw new Error('Throttle update contention exceeded retry limit');
 }
 
 const azureReminderSubscriptionStoreDependencies: AzureReminderSubscriptionStoreDependencies =
@@ -736,12 +776,16 @@ export function createReminderSubscriptionUpdateHandler(
 
 export const reminderSubscriptionOptions: HttpFunctionOptions = {
   authLevel: 'anonymous' as const,
-  handler: async (request) =>
-    request.method === 'POST'
-      ? createReminderSubscriptionHandler()(request)
-      : createReminderSubscriptionUpdateHandler()(request),
-  methods: ['POST', 'PUT'],
-  route: 'reminder-subscriptions/{installationId?}',
+  handler: createReminderSubscriptionHandler(),
+  methods: ['POST'],
+  route: 'reminder-subscriptions',
+};
+
+export const reminderSubscriptionUpdateOptions: HttpFunctionOptions = {
+  authLevel: 'anonymous' as const,
+  handler: createReminderSubscriptionUpdateHandler(),
+  methods: ['PUT'],
+  route: 'reminder-subscriptions/{installationId}',
 };
 
 export const reminderThrottleCleanupOptions: TimerFunctionOptions = {
