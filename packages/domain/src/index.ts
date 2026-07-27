@@ -59,6 +59,46 @@ export interface CivilTimeReport {
 
 export interface CivilTimeReportContext {
   readonly acknowledgedEventAt?: string | null;
+  /**
+   * A validated reminder tap may reopen its exact transition. This never
+   * revives an event once its factual aftermath window has ended.
+   */
+  readonly requestedEventAt?: string | null;
+}
+
+export type CivilTimeReportEventResolution =
+  | { readonly kind: 'missing' }
+  | { readonly event: ChangeEvent; readonly kind: 'direction-mismatch' }
+  | { readonly event: ChangeEvent; readonly kind: 'upcoming' }
+  | { readonly event: ChangeEvent; readonly kind: 'recent-past' }
+  | { readonly event: ChangeEvent; readonly kind: 'aged-out' };
+
+/**
+ * Resolves an exact verified transition for a reminder tap. The result owns
+ * direction and aftermath boundaries, so callers cannot recreate them.
+ */
+export function resolveCivilTimeReportEvent(
+  pack: ActivatedTimeZoneDataPack,
+  zoneId: string,
+  eventAt: string,
+  expectedDirection: ChangeDirection,
+  now: Date,
+): CivilTimeReportEventResolution {
+  assertActivatedTimeZoneDataPack(pack);
+  const zone = pack.zones.find((candidate) => candidate.id === zoneId);
+  const transition = zone?.transitions.find(
+    (candidate) => candidate.at === eventAt,
+  );
+  if (transition === undefined) return { kind: 'missing' };
+  const event = changeEventFromTransition(transition, now.getTime());
+  if (event.direction !== expectedDirection) {
+    return { event, kind: 'direction-mismatch' };
+  }
+  if (event.secondsUntil > 0) return { event, kind: 'upcoming' };
+  if (event.secondsUntil > -aftermathSeconds) {
+    return { event, kind: 'recent-past' };
+  }
+  return { event, kind: 'aged-out' };
 }
 
 export interface CivilTimeDecision {
@@ -246,6 +286,41 @@ export function createCivilTimeReport(
   const previousTransition = [...zone.transitions]
     .reverse()
     .find((transition) => Date.parse(transition.at) <= instantMilliseconds);
+
+  const requestedTransition =
+    context.requestedEventAt === undefined || context.requestedEventAt === null
+      ? undefined
+      : zone.transitions.find(
+          (transition) => transition.at === context.requestedEventAt,
+        );
+
+  if (requestedTransition !== undefined) {
+    const requestedEvent = changeEventFromTransition(
+      requestedTransition,
+      instantMilliseconds,
+    );
+    if (
+      requestedEvent.secondsUntil > -aftermathSeconds &&
+      requestedEvent.secondsUntil <= 0
+    ) {
+      return {
+        civilTime,
+        featuredEvent: requestedEvent,
+        phase: 'aftermath',
+      };
+    }
+    if (requestedEvent.secondsUntil > 0) {
+      const phase: CivilTimeReportPhase =
+        requestedEvent.secondsUntil <= daySeconds
+          ? 'reminder-day'
+          : requestedEvent.secondsUntil <= reminderWeekSeconds
+            ? 'reminder-week'
+            : requestedEvent.secondsUntil <= approachingSeconds
+              ? 'approaching'
+              : 'ordinary';
+      return { civilTime, featuredEvent: requestedEvent, phase };
+    }
+  }
 
   if (previousTransition !== undefined) {
     const elapsedSeconds =

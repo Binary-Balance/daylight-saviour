@@ -12,6 +12,7 @@ jest.mock('../change-reminders/change-reminder-production-adapters', () => ({
     enable: jest.fn(),
     openSettings: jest.fn(),
     restore: jest.fn(() => new Promise(() => undefined)),
+    startTokenRefresh: jest.fn(() => () => undefined),
   },
 }));
 
@@ -168,6 +169,111 @@ describe('StatusScreen facade', () => {
     expect(screen.getByLabelText(/validity expired/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
   });
+
+  it('uses a report-unavailable alert when a tap opens unavailable civil-time data', () => {
+    render(
+      <StatusScreen
+        now={new Date('2031-01-01T00:00:00.000Z')}
+        notificationTap={{
+          changeDirection: 'forward',
+          changeEventAt: '2026-10-03T16:00:00.000Z',
+          homeTimeZone: 'Australia/Sydney',
+          reminderTiming: 'one-week',
+        }}
+        reducedMotion
+      />,
+    );
+
+    expect(
+      screen.getByRole('alert', {
+        name: /reminder report unavailable\. verified civil time report details are unavailable/i,
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(/current civil time report details are shown/i),
+    ).toBeNull();
+  });
+
+  it.each([
+    [
+      'matched upcoming',
+      '2026-09-26T16:00:00.000Z',
+      {
+        changeDirection: 'forward' as const,
+        changeEventAt: '2026-10-03T16:00:00.000Z',
+        homeTimeZone: 'Australia/Sydney',
+        reminderTiming: 'one-week' as const,
+      },
+      /change reminder opened\. this civil time report shows the upcoming/i,
+    ],
+    [
+      'matched past',
+      '2026-10-03T16:00:00.000Z',
+      {
+        changeDirection: 'forward' as const,
+        changeEventAt: '2026-10-03T16:00:00.000Z',
+        homeTimeZone: 'Australia/Sydney',
+        reminderTiming: 'one-week' as const,
+      },
+      /change reminder opened\. this civil time report shows the change event from/i,
+    ],
+    [
+      'aged-out',
+      '2026-10-05T16:00:00.000Z',
+      {
+        changeDirection: 'forward' as const,
+        changeEventAt: '2026-10-03T16:00:00.000Z',
+        homeTimeZone: 'Australia/Sydney',
+        reminderTiming: 'one-week' as const,
+      },
+      /reminder event passed\. this reminder's change event passed 48 hours ago or more/i,
+    ],
+    [
+      'unavailable',
+      '2026-09-26T16:00:00.000Z',
+      {
+        changeDirection: 'forward' as const,
+        changeEventAt: '2028-10-03T16:00:00.000Z',
+        homeTimeZone: 'Australia/Sydney',
+        reminderTiming: 'one-week' as const,
+      },
+      /reminder event unavailable\. this reminder refers to a change event no longer available/i,
+    ],
+    [
+      'mismatch',
+      '2026-09-26T16:00:00.000Z',
+      {
+        changeDirection: 'backward' as const,
+        changeEventAt: '2026-10-03T16:00:00.000Z',
+        homeTimeZone: 'Australia/Sydney',
+        reminderTiming: 'one-week' as const,
+      },
+      /reminder event mismatch\. this reminder does not match/i,
+    ],
+    [
+      'zone changed',
+      '2026-09-26T16:00:00.000Z',
+      {
+        changeDirection: 'forward' as const,
+        changeEventAt: '2026-10-03T16:00:00.000Z',
+        homeTimeZone: 'Australia/Brisbane',
+        reminderTiming: 'one-week' as const,
+      },
+      /reminder home time zone changed\. this reminder was sent for a different/i,
+    ],
+  ] as const)(
+    'renders alert context for %s reminder taps',
+    (_case, now, notificationTap, label) => {
+      render(
+        <StatusScreen
+          now={new Date(now)}
+          notificationTap={notificationTap}
+          reducedMotion
+        />,
+      );
+      expect(screen.getByRole('alert', { name: label })).toBeTruthy();
+    },
+  );
 
   it.each([
     [

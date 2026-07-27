@@ -2,6 +2,7 @@ import {
   CivilTimeDecisionUnavailableError,
   createCivilTimeReport,
   getAustralianZone,
+  resolveCivilTimeReportEvent,
   type ChangeDirection,
   type CivilTimeDecisionUnavailableReason,
   type DaylightSavingStatus,
@@ -11,6 +12,15 @@ import type { ActivatedTimeZoneDataPack } from '@daylight-saviour/contracts';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import type { TimeZoneDataPackFreshness } from '../time-zone-data/time-zone-data-manager';
+import type { ChangeReminderTap } from '../change-reminders/change-reminder-notification-runtime';
+
+export type ChangeReminderTapContext =
+  | { readonly kind: 'matched'; readonly relation: 'past' | 'upcoming' }
+  | { readonly kind: 'aged-out' }
+  | { readonly kind: 'event-mismatch' }
+  | { readonly kind: 'event-unavailable' }
+  | { readonly kind: 'report-unavailable' }
+  | { readonly kind: 'zone-mismatch' };
 
 export type StatusViewModel =
   | {
@@ -35,6 +45,7 @@ export type StatusViewModel =
       readonly packVersion: string;
       readonly phase: CivilTimeReportPhase;
       readonly phaseLabel: string;
+      readonly notificationContext: ChangeReminderTapContext | null;
       readonly secondaryLine: string;
       readonly status: DaylightSavingStatus;
       readonly validUntil: string;
@@ -46,6 +57,7 @@ export type StatusViewModel =
       readonly freshness: 'decision-unavailable' | 'expired';
       readonly message: string;
       readonly packVersion: string;
+      readonly notificationContext: ChangeReminderTapContext | null;
       readonly unavailabilityReason: CivilTimeDecisionUnavailableReason;
       readonly validUntil: string;
       readonly zoneId: string;
@@ -59,14 +71,51 @@ export function createStatusViewModel(
   uses24hourClock: boolean,
   installationSeed: string,
   acknowledgedEventAt: string | null = null,
+  notificationTap: ChangeReminderTap | null = null,
 ): StatusViewModel {
   const packDetails = {
     packVersion: activePack.packVersion,
     validUntil: activePack.coverage.validUntil,
   } as const;
   try {
+    let notificationContext: ChangeReminderTapContext | null = null;
+    let requestedEventAt: string | null = null;
+    if (notificationTap !== null) {
+      if (notificationTap.homeTimeZone !== zoneId) {
+        notificationContext = { kind: 'zone-mismatch' };
+      } else {
+        const expectedDirection =
+          notificationTap.changeDirection === 'forward'
+            ? 'Forward Change'
+            : 'Backward Change';
+        const resolution = resolveCivilTimeReportEvent(
+          activePack,
+          zoneId,
+          notificationTap.changeEventAt,
+          expectedDirection,
+          now,
+        );
+        if (
+          resolution.kind === 'upcoming' ||
+          resolution.kind === 'recent-past'
+        ) {
+          requestedEventAt = notificationTap.changeEventAt;
+          notificationContext = {
+            kind: 'matched',
+            relation: resolution.kind === 'recent-past' ? 'past' : 'upcoming',
+          };
+        } else if (resolution.kind === 'aged-out') {
+          notificationContext = { kind: 'aged-out' };
+        } else if (resolution.kind === 'direction-mismatch') {
+          notificationContext = { kind: 'event-mismatch' };
+        } else {
+          notificationContext = { kind: 'event-unavailable' };
+        }
+      }
+    }
     const report = createCivilTimeReport(activePack, zoneId, now, {
       acknowledgedEventAt,
+      requestedEventAt,
     });
     const decision = report.civilTime;
     const event = report.featuredEvent;
@@ -123,6 +172,7 @@ export function createStatusViewModel(
       friendlyZoneLabel: decision.friendlyZoneLabel,
       freshness: dataFreshness,
       ...packDetails,
+      notificationContext,
       phase: report.phase,
       phaseLabel: copy.civilTimeReport.phaseLabel(report.phase),
       secondaryLine: copy.civilTimeReport.secondary.select({
@@ -163,6 +213,8 @@ export function createStatusViewModel(
       freshness,
       message: copy.civilTimeReport.decisionUnavailable.message(error.reason),
       ...packDetails,
+      notificationContext:
+        notificationTap === null ? null : { kind: 'report-unavailable' },
       unavailabilityReason: error.reason,
       zoneId,
     };

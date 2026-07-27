@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { daylightSaviourPalettes } from '../../theme';
 import ChangeEventSection from './change-event-section';
+import ChangeReminderNotificationContext from '../../../components/change-reminder-notification-context';
 import CivilTimeReportHeader from './civil-time-report-header';
 import DataFreshnessSection from './data-freshness-section';
 import DaylightSavingStatusHero from './daylight-saving-status-hero';
@@ -17,11 +18,13 @@ import ChangeReminderSection from '../change-reminders/change-reminder-section';
 import { productionChangeReminderAdapters } from '../change-reminders/change-reminder-production-adapters';
 import { createStatusViewModel } from './status-view-model';
 import type { TimeZoneDataPackSnapshot } from '../time-zone-data/time-zone-data-manager';
+import type { ChangeReminderTap } from '../change-reminders/change-reminder-notification-runtime';
 
 interface StatusScreenProps {
   readonly acknowledgedEventAt?: string | null;
   readonly dataPackSnapshot: TimeZoneDataPackSnapshot;
   readonly now?: Date;
+  readonly notificationTap?: ChangeReminderTap | null;
   readonly onAcknowledgeAftermath?: (eventAt: string) => void;
   readonly onChooseZone?: () => void;
   readonly onRetryDataPack?: () => void | Promise<void>;
@@ -78,6 +81,7 @@ export default function StatusScreen({
   acknowledgedEventAt = null,
   dataPackSnapshot,
   now,
+  notificationTap = null,
   onAcknowledgeAftermath,
   onChooseZone,
   onRetryDataPack,
@@ -100,6 +104,7 @@ export default function StatusScreen({
     uses24hourClock,
     secondaryCopySeed,
     openingAcknowledgedEventAt,
+    notificationTap,
   );
   const aftermathEventAt =
     viewModel.availability === 'ready' && viewModel.phase === 'aftermath'
@@ -144,6 +149,11 @@ export default function StatusScreen({
             uses24hourClock={uses24hourClock}
           />
         ) : null}
+
+        <ChangeReminderNotificationContext
+          context={viewModel.notificationContext}
+          palette={palette}
+        />
 
         <ChangeEventSection
           palette={palette}

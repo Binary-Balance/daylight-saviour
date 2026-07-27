@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import type { DaylightSaviourPalette } from '../../theme';
@@ -26,6 +26,18 @@ export default function ChangeReminderSection({
   );
 
   useEffect(() => session.start(), [session]);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') session.dispatch({ type: 'foreground' });
+    });
+    return () => subscription.remove();
+  }, [session]);
+  useEffect(() => {
+    if (snapshot.kind !== 'enabled') return;
+    return adapters.startTokenRefresh(homeTimeZone, (result) => {
+      session.dispatch({ result, type: 'token-refresh' });
+    });
+  }, [adapters, homeTimeZone, session, snapshot.kind]);
 
   const content =
     snapshot.kind === 'untouched'

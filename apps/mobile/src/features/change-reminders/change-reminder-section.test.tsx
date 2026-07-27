@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react-native';
+import { AppState } from 'react-native';
 
 import { daylightSaviourPalettes } from '../../theme';
 import type { ChangeReminderAdapters } from './change-reminder-adapters';
@@ -17,6 +18,7 @@ function adapters(
     enable: jest.fn(async () => ({ kind: 'enabled' as const })),
     openSettings: jest.fn(async () => undefined),
     restore: jest.fn(async () => ({ kind: 'unregistered' as const })),
+    startTokenRefresh: jest.fn(() => () => undefined),
     ...overrides,
   };
 }
@@ -39,6 +41,7 @@ it('does not request a reminder before explicit confirmation', async () => {
   });
   fireEvent.press(initialAction);
   expect(boundary.enable).not.toHaveBeenCalled();
+  expect(boundary.startTokenRefresh).not.toHaveBeenCalled();
   fireEvent.press(screen.getByRole('button', { name: 'Enable reminders' }));
   expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
   expect(
@@ -46,6 +49,10 @@ it('does not request a reminder before explicit confirmation', async () => {
       /one-week and one-day Change Reminders are enabled/i,
     ),
   ).toBeTruthy();
+  expect(boundary.startTokenRefresh).toHaveBeenCalledWith(
+    'Australia/Sydney',
+    expect.any(Function),
+  );
 });
 
 it('renders restored registration truthfully without another enable action', async () => {
@@ -189,21 +196,112 @@ it('renders truthful zone-mismatch and revoked-permission restore states', async
   mismatch.unmount();
 
   const openSettings = jest.fn(async () => undefined);
-  renderSection(
-    adapters({
-      openSettings,
-      restore: jest.fn(async () => ({
-        kind: 'registered' as const,
-        notificationPermissionGranted: false,
-        registration: { ...stored, homeTimeZone: 'Australia/Sydney' },
-      })),
-    }),
-  );
+  const revoked = adapters({
+    openSettings,
+    restore: jest.fn(async () => ({
+      kind: 'registered' as const,
+      notificationPermissionGranted: false,
+      registration: { ...stored, homeTimeZone: 'Australia/Sydney' },
+    })),
+  });
+  renderSection(revoked);
   expect(
     await screen.findByText(/registered, but notifications are blocked/i),
   ).toBeTruthy();
+  expect(revoked.startTokenRefresh).not.toHaveBeenCalled();
   fireEvent.press(
     screen.getByRole('button', { name: 'Open notification settings' }),
   );
   expect(openSettings).toHaveBeenCalledTimes(1);
+});
+
+it('stops token listening and shows retry when a valid refresh fails', async () => {
+  let onResult:
+    | ((result: {
+        readonly kind: 'failed';
+        readonly retryable: boolean;
+      }) => void)
+    | undefined;
+  const remove = jest.fn();
+  const boundary = adapters({
+    restore: jest.fn(async () => ({
+      kind: 'registered' as const,
+      notificationPermissionGranted: true,
+      registration: {
+        attemptGeneration: 1,
+        credential: 'c'.repeat(43),
+        homeTimeZone: 'Australia/Sydney',
+        installationId: 'i'.repeat(43),
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered' as const,
+        version: 2 as const,
+      },
+    })),
+    startTokenRefresh: jest.fn((_zone, listener) => {
+      onResult = listener as typeof onResult;
+      return remove;
+    }),
+  });
+  renderSection(boundary);
+  await screen.findByText(/one-week and one-day Change Reminders are enabled/i);
+
+  await act(async () => onResult?.({ kind: 'failed', retryable: true }));
+  expect(await screen.findByText(/registration did not finish/i)).toBeTruthy();
+  expect(
+    screen.getByRole('button', { name: 'Retry registration' }),
+  ).toBeTruthy();
+  expect(remove).toHaveBeenCalledTimes(1);
+});
+
+it('restores permission truth when Android returns to foreground', async () => {
+  let onAppStateChange: ((state: string) => void) | undefined;
+  const appStateSpy = jest
+    .spyOn(AppState, 'addEventListener')
+    .mockImplementation((_event, listener) => {
+      onAppStateChange = listener as (state: string) => void;
+      return { remove: jest.fn() };
+    });
+  const registered = {
+    attemptGeneration: 1,
+    credential: 'c'.repeat(43),
+    homeTimeZone: 'Australia/Sydney',
+    installationId: 'i'.repeat(43),
+    oneDayEnabled: true,
+    oneWeekEnabled: true,
+    registrationRequestId: 'a'.repeat(64),
+    state: 'registered' as const,
+    version: 2 as const,
+  };
+  const boundary = adapters({
+    restore: jest
+      .fn()
+      .mockResolvedValueOnce({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration: registered,
+      })
+      .mockResolvedValueOnce({
+        kind: 'registered' as const,
+        notificationPermissionGranted: false,
+        registration: registered,
+      })
+      .mockResolvedValueOnce({ kind: 'unregistered' as const }),
+  });
+  const rendered = renderSection(boundary);
+  await screen.findByText(/one-week and one-day Change Reminders are enabled/i);
+
+  await act(async () => onAppStateChange?.('active'));
+  expect(
+    await screen.findByText(/registered, but notifications are blocked/i),
+  ).toBeTruthy();
+  await act(async () => onAppStateChange?.('active'));
+  expect(
+    await screen.findByRole('button', {
+      name: 'Warn me before time misbehaves',
+    }),
+  ).toBeTruthy();
+  rendered.unmount();
+  appStateSpy.mockRestore();
 });

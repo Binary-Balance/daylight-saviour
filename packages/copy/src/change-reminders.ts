@@ -28,6 +28,34 @@ export const changeReminders = Object.freeze({
     retry: 'Check reminder status again',
   }),
   notification: changeReminderNotification,
+  notificationContext: Object.freeze({
+    opened: Object.freeze({
+      heading: 'CHANGE REMINDER OPENED',
+      past: 'This Civil Time Report shows the Change Event from your reminder.',
+      upcoming:
+        'This Civil Time Report shows the upcoming Change Event from your reminder.',
+    }),
+    agedOut: Object.freeze({
+      body: "This reminder's Change Event passed 48 hours ago or more. Current Civil Time Report details are shown instead.",
+      heading: 'REMINDER EVENT PASSED',
+    }),
+    eventMismatch: Object.freeze({
+      body: 'This reminder does not match the verified Change Event. Current Civil Time Report details are shown instead.',
+      heading: 'REMINDER EVENT MISMATCH',
+    }),
+    eventUnavailable: Object.freeze({
+      body: 'This reminder refers to a Change Event no longer available in verified time-zone data. Current Civil Time Report details are shown instead.',
+      heading: 'REMINDER EVENT UNAVAILABLE',
+    }),
+    reportUnavailable: Object.freeze({
+      body: 'Verified Civil Time Report details are unavailable. Refresh time-zone data and try again.',
+      heading: 'REMINDER REPORT UNAVAILABLE',
+    }),
+    zoneMismatch: Object.freeze({
+      body: 'This reminder was sent for a different Home Time Zone. Current Civil Time Report details are shown instead.',
+      heading: 'REMINDER HOME TIME ZONE CHANGED',
+    }),
+  }),
   osBlocked: Object.freeze({
     body: 'Notifications are blocked by your device settings. Reminders are not enabled.',
     heading: 'NOTIFICATIONS BLOCKED',

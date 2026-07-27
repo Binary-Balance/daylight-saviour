@@ -9,6 +9,7 @@ const responseBody = {
 
 function harness({
   createRegistrationRequestId = async () => 'a'.repeat(64),
+  currentToken = 'fcm-token:with_valid.characters-123',
   endpoint = 'https://reminders.example.test/reminder-subscriptions',
   existingPermission = { canAskAgain: true, granted: true },
   fetchImplementation = async () => Response.json(responseBody),
@@ -19,6 +20,7 @@ function harness({
   timeoutMs = 100,
 }: {
   readonly createRegistrationRequestId?: () => Promise<string>;
+  readonly currentToken?: string;
   readonly endpoint?: string;
   readonly existingPermission?: {
     readonly canAskAgain: boolean;
@@ -52,9 +54,14 @@ function harness({
     endpoint,
     fetch: request,
     notifications: {
+      addPushTokenListener: jest.fn(
+        (_listener: (token: { readonly data: unknown }) => void) => ({
+          remove: jest.fn(),
+        }),
+      ),
       getDevicePushTokenAsync: jest.fn(async () => {
         calls.push('token');
-        return { data: 'fcm-token:with_valid.characters-123' };
+        return { data: currentToken };
       }),
       getPermissionsAsync: jest.fn(async () => {
         calls.push('permission:get');
@@ -284,12 +291,13 @@ describe('production Change Reminder adapters', () => {
     expect(JSON.parse(test.stored() ?? '')).toEqual({
       ...responseBody,
       attemptGeneration: 1,
+      deviceToken: 'fcm-token:with_valid.characters-123',
       homeTimeZone: 'Australia/Sydney',
       oneDayEnabled: true,
       oneWeekEnabled: true,
       registrationRequestId: 'a'.repeat(64),
       state: 'registered',
-      version: 2,
+      version: 4,
     });
     await expect(test.adapters.restore()).resolves.toEqual({
       kind: 'registered',
@@ -297,12 +305,13 @@ describe('production Change Reminder adapters', () => {
       registration: {
         ...responseBody,
         attemptGeneration: 1,
+        deviceToken: 'fcm-token:with_valid.characters-123',
         homeTimeZone: 'Australia/Sydney',
         oneDayEnabled: true,
         oneWeekEnabled: true,
         registrationRequestId: 'a'.repeat(64),
         state: 'registered',
-        version: 2,
+        version: 4,
       },
     });
   });
@@ -311,12 +320,13 @@ describe('production Change Reminder adapters', () => {
     const storage = {
       value: JSON.stringify({
         attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
         homeTimeZone: 'Australia/Sydney',
         oneDayEnabled: true,
         oneWeekEnabled: true,
         registrationRequestId: 'b'.repeat(64),
         state: 'pending',
-        version: 2,
+        version: 4,
       }),
     };
     const relaunched = harness({ storage });
@@ -333,8 +343,19 @@ describe('production Change Reminder adapters', () => {
       ),
     ).toMatchObject({
       attemptGeneration: 5,
-      homeTimeZone: 'Australia/Brisbane',
+      homeTimeZone: 'Australia/Sydney',
       registrationRequestId: 'b'.repeat(64),
+    });
+    expect(
+      JSON.parse(
+        String(relaunched.dependencies.fetch.mock.calls[1]?.[1]?.body),
+      ),
+    ).toMatchObject({
+      attemptGeneration: 6,
+      homeTimeZone: 'Australia/Brisbane',
+    });
+    expect(relaunched.dependencies.fetch.mock.calls[1]?.[1]).toMatchObject({
+      method: 'PUT',
     });
     expect(JSON.parse(storage.value)).toMatchObject({
       homeTimeZone: 'Australia/Brisbane',
@@ -373,6 +394,354 @@ describe('production Change Reminder adapters', () => {
     });
     expect(JSON.parse(storage.value ?? '')).toMatchObject({
       attemptGeneration: 2,
+      state: 'registered',
+    });
+  });
+
+  it('replays lost initial registration before authenticated desired-state update', async () => {
+    const storage = {
+      value: JSON.stringify({
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:old_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'b'.repeat(64),
+        state: 'pending',
+        version: 4,
+      }),
+    };
+    const test = harness({
+      currentToken: 'fcm-token:replacement_valid.characters-456',
+      storage,
+    });
+    await expect(test.adapters.enable('Australia/Brisbane')).resolves.toEqual({
+      kind: 'enabled',
+    });
+    const [post, put] = test.dependencies.fetch.mock.calls;
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      attemptGeneration: 5,
+      deviceToken: 'fcm-token:old_valid.characters-123',
+      homeTimeZone: 'Australia/Sydney',
+      registrationRequestId: 'b'.repeat(64),
+    });
+    expect(post?.[1]).toMatchObject({ method: 'POST' });
+    expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({
+      attemptGeneration: 6,
+      deviceToken: 'fcm-token:replacement_valid.characters-456',
+      homeTimeZone: 'Australia/Brisbane',
+    });
+    expect(put?.[1]).toMatchObject({ method: 'PUT' });
+  });
+
+  it('replaces a deleted authenticated installation but not a bad credential', async () => {
+    const deleted = harness({
+      fetchImplementation: jest
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 404 }))
+        .mockResolvedValueOnce(
+          Response.json(responseBody),
+        ) as jest.MockedFunction<typeof fetch>,
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:old_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 4,
+        }),
+      },
+    });
+    await expect(deleted.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'enabled',
+    });
+    expect(
+      deleted.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
+    ).toEqual(['PUT', 'POST']);
+
+    const unauthorized = harness({
+      currentToken: 'fcm-token:another_valid.characters-789',
+      fetchImplementation: jest.fn(
+        async (_input: URL | RequestInfo) =>
+          new Response(null, { status: 401 }),
+      ) as jest.MockedFunction<typeof fetch>,
+      storage: { value: deleted.stored() },
+    });
+    await expect(
+      unauthorized.adapters.enable('Australia/Sydney'),
+    ).resolves.toEqual({
+      kind: 'failed',
+    });
+    expect(unauthorized.dependencies.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles an offline token rotation during restore before reporting enabled', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 7,
+        deviceToken: 'fcm-token:old_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    const test = harness({
+      currentToken: 'fcm-token:replacement_valid.characters-456',
+      storage,
+    });
+
+    await expect(test.adapters.restore()).resolves.toMatchObject({
+      kind: 'registered',
+      notificationPermissionGranted: true,
+      registration: {
+        attemptGeneration: 8,
+        deviceToken: 'fcm-token:replacement_valid.characters-456',
+        registrationRequestId: 'a'.repeat(64),
+        version: 4,
+      },
+    });
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({
+      attemptGeneration: 8,
+      deviceToken: 'fcm-token:replacement_valid.characters-456',
+    });
+    expect(test.dependencies.fetch.mock.calls[0]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        authorization: `Bearer ${responseBody.credential}`,
+      }),
+      method: 'PUT',
+    });
+  });
+
+  it('migrates legacy v2 registration through one token reconciliation', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 3,
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 2,
+      }),
+    };
+    const test = harness({ storage });
+
+    await expect(test.adapters.restore()).resolves.toMatchObject({
+      kind: 'registered',
+      registration: {
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        version: 4,
+      },
+    });
+  });
+
+  it('migrates an exact legacy v2 pending retry after explicit enablement', async () => {
+    const storage = {
+      value: JSON.stringify({
+        attemptGeneration: 3,
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'pending',
+        version: 2,
+      }),
+    };
+    const test = harness({ storage });
+
+    await expect(test.adapters.restore()).resolves.toEqual({
+      homeTimeZone: 'Australia/Sydney',
+      kind: 'pending',
+    });
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'enabled',
+    });
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({
+      attemptGeneration: 4,
+      deviceToken: 'fcm-token:with_valid.characters-123',
+      registrationRequestId: 'a'.repeat(64),
+    });
+    expect(JSON.parse(storage.value)).toMatchObject({
+      attemptGeneration: 4,
+      deviceToken: 'fcm-token:with_valid.characters-123',
+      registrationRequestId: 'a'.repeat(64),
+      state: 'registered',
+      version: 4,
+    });
+  });
+
+  it('refreshes a registered token once with the same request ID and next generation', async () => {
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    const remove = jest.fn();
+    const outcomes: unknown[] = [];
+    const test = harness();
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove };
+      });
+    await test.adapters.enable('Australia/Sydney');
+    const stop = test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
+    listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
+    listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const requests = test.dependencies.fetch.mock.calls.map((call) =>
+      JSON.parse(String(call[1]?.body)),
+    );
+    expect(requests).toEqual([
+      expect.objectContaining({
+        attemptGeneration: 1,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        registrationRequestId: 'a'.repeat(64),
+      }),
+      expect.objectContaining({
+        attemptGeneration: 2,
+        deviceToken: 'fcm-token:replacement_valid.characters-456',
+        homeTimeZone: 'Australia/Sydney',
+      }),
+    ]);
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 2,
+      state: 'registered',
+    });
+    expect(outcomes).toEqual([{ kind: 'succeeded' }]);
+    stop();
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refresh a replaced-zone registration or a malformed token', async () => {
+    const test = harness({
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 4,
+          homeTimeZone: 'Australia/Brisbane',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 2,
+        }),
+      },
+    });
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove: jest.fn() };
+      });
+    const outcomes: unknown[] = [];
+    test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
+    listener?.({ data: 'short' });
+    listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(test.dependencies.fetch).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([]);
+  });
+
+  it('keeps failed token refresh pending and retries the same token', async () => {
+    const fetchImplementation = jest
+      .fn()
+      .mockResolvedValueOnce(Response.json(responseBody))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(
+        Response.json(responseBody),
+      ) as jest.MockedFunction<typeof fetch>;
+    const test = harness({ fetchImplementation });
+    const outcomes: unknown[] = [];
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove: jest.fn() };
+      });
+    await test.adapters.enable('Australia/Sydney');
+    test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
+    const replacement = 'fcm-token:replacement_valid.characters-456';
+    listener?.({ data: replacement });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 2,
+      deviceToken: replacement,
+      state: 'pending-update',
+    });
+    expect(outcomes).toEqual([{ kind: 'failed', retryable: true }]);
+    listener?.({ data: replacement });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 3,
+      deviceToken: replacement,
+      state: 'registered',
+    });
+    expect(outcomes).toEqual([
+      { kind: 'failed', retryable: true },
+      { kind: 'succeeded' },
+    ]);
+  });
+
+  it('retries the same token after the refresh registration SecureStore write fails', async () => {
+    let writes = 0;
+    const storage = { value: null };
+    const test = harness({
+      setItemImplementation: async () => {
+        writes += 1;
+        if (writes === 4) throw new Error('SecureStore write failed');
+      },
+      storage,
+    });
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove: jest.fn() };
+      });
+    await test.adapters.enable('Australia/Sydney');
+    test.adapters.startTokenRefresh('Australia/Sydney');
+    const replacement = 'fcm-token:replacement_valid.characters-456';
+
+    listener?.({ data: replacement });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 2,
+      deviceToken: replacement,
+      state: 'pending-update',
+    });
+
+    listener?.({ data: replacement });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 3,
+      deviceToken: replacement,
       state: 'registered',
     });
   });
@@ -491,6 +860,25 @@ describe('production Change Reminder adapters', () => {
         'Invalid stored reminder state',
       );
     }
+
+    const malformedLegacyPending = harness({
+      storage: {
+        value: JSON.stringify({
+          attemptGeneration: 1,
+          credential: 'c'.repeat(43),
+          homeTimeZone: 'Australia/Sydney',
+          installationId: 'i'.repeat(43),
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'pending',
+          version: 2,
+        }),
+      },
+    });
+    await expect(malformedLegacyPending.adapters.restore()).rejects.toThrow(
+      'Invalid stored reminder state',
+    );
 
     const invalidGenerated = harness({
       createRegistrationRequestId: async () => 'not-random',

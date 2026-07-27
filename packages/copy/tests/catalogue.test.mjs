@@ -85,6 +85,37 @@ describe('Australian-English copy catalogue', () => {
     });
   });
 
+  it('owns exact safe Change Reminder report-context wording', () => {
+    assert.deepEqual(australianEnglish.changeReminders.notificationContext, {
+      opened: {
+        heading: 'CHANGE REMINDER OPENED',
+        past: 'This Civil Time Report shows the Change Event from your reminder.',
+        upcoming:
+          'This Civil Time Report shows the upcoming Change Event from your reminder.',
+      },
+      agedOut: {
+        body: "This reminder's Change Event passed 48 hours ago or more. Current Civil Time Report details are shown instead.",
+        heading: 'REMINDER EVENT PASSED',
+      },
+      eventMismatch: {
+        body: 'This reminder does not match the verified Change Event. Current Civil Time Report details are shown instead.',
+        heading: 'REMINDER EVENT MISMATCH',
+      },
+      eventUnavailable: {
+        body: 'This reminder refers to a Change Event no longer available in verified time-zone data. Current Civil Time Report details are shown instead.',
+        heading: 'REMINDER EVENT UNAVAILABLE',
+      },
+      reportUnavailable: {
+        body: 'Verified Civil Time Report details are unavailable. Refresh time-zone data and try again.',
+        heading: 'REMINDER REPORT UNAVAILABLE',
+      },
+      zoneMismatch: {
+        body: 'This reminder was sent for a different Home Time Zone. Current Civil Time Report details are shown instead.',
+        heading: 'REMINDER HOME TIME ZONE CHANGED',
+      },
+    });
+  });
+
   it('formats Home Time Zone dates and times without ambient locale or zone', () => {
     const { changeEvent, clock } = australianEnglish.civilTimeReport;
     const midnight = { day: 5, hour: 0, minute: 4, month: 4, year: 2026 };

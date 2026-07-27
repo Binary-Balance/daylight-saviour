@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { ManagedIdentityCredential } from '@azure/identity';
 import { odata, TableClient } from '@azure/data-tables';
@@ -8,7 +8,10 @@ import type {
   HttpResponseInit,
   TimerFunctionOptions,
 } from '@azure/functions';
-import { parseReminderSubscriptionRegistration } from '@daylight-saviour/contracts/reminder-subscription-runtime';
+import {
+  parseReminderSubscriptionRegistration,
+  parseReminderSubscriptionUpdate,
+} from '@daylight-saviour/contracts/reminder-subscription-runtime';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
 import type { FcmSubscriptionRemover } from './fcm-change-reminder-sender.js';
@@ -30,6 +33,11 @@ interface ReminderSubscriptionRegistration {
   readonly registrationRequestId: string;
 }
 
+type ReminderSubscriptionUpdate = Omit<
+  ReminderSubscriptionRegistration,
+  'registrationRequestId'
+>;
+
 interface ReminderSubscriptionRecord extends Omit<
   ReminderSubscriptionRegistration,
   'registrationRequestId'
@@ -41,8 +49,13 @@ interface ReminderSubscriptionRecord extends Omit<
 
 interface SubscriptionEntity {
   readonly attemptGeneration: number;
+  readonly credentialHash?: string | undefined;
   readonly deviceToken: string;
   readonly etag: string;
+  readonly homeTimeZone?: string | undefined;
+  readonly oneDayEnabled?: boolean | undefined;
+  readonly oneWeekEnabled?: boolean | undefined;
+  readonly platform?: 'android' | 'ios' | undefined;
   readonly partitionKey: string;
   readonly rowKey: string;
 }
@@ -98,21 +111,38 @@ interface AzureReminderSubscriptionStoreDependencies {
 
 export interface ReminderSubscriptionStore extends FcmSubscriptionRemover {
   readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
-  readonly saveSubscription: (
+  readonly createSubscription: (
     record: ReminderSubscriptionRecord,
-  ) => Promise<'accepted' | 'stale'>;
+  ) => Promise<'accepted' | 'stale' | 'conflict'>;
+  readonly updateSubscription: (
+    record: Omit<ReminderSubscriptionRecord, 'credentialHash'>,
+    credentialHash: string,
+  ) => Promise<'accepted' | 'not-found' | 'stale' | 'unauthorized'>;
+  readonly takeInstallationAllowance: (
+    installationId: string,
+    now: Date,
+  ) => Promise<boolean>;
   readonly takeSourceAllowance: (
     sourceHash: string,
     now: Date,
   ) => Promise<boolean>;
 }
 
+export function hashOpaqueValue(value: string) {
+  return createHash('sha256').update(value).digest('base64url');
+}
+
 export function opaqueRandomValue() {
   return randomBytes(32).toString('base64url');
 }
 
-export function hashOpaqueValue(value: string) {
-  return createHash('sha256').update(value).digest('base64url');
+function equalOpaqueValues(left: string, right: string) {
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  return (
+    leftBytes.byteLength === rightBytes.byteLength &&
+    timingSafeEqual(leftBytes, rightBytes)
+  );
 }
 
 export function deriveInstallationId(registrationRequestId: string) {
@@ -251,6 +281,43 @@ async function readRegistration(request: HttpRequest) {
   }
 }
 
+async function readUpdate(request: HttpRequest) {
+  const contentType = request.headers.get('content-type')?.trim().toLowerCase();
+  if (contentType !== 'application/json') {
+    throw new ReminderSubscriptionRequestError(
+      415,
+      'Expected application/json',
+    );
+  }
+  try {
+    const input = parseReminderSubscriptionUpdate(
+      JSON.parse(await readBoundedBody(request)),
+    ) as ReminderSubscriptionUpdate;
+    if (canonicalAustralianZoneId(input.homeTimeZone) === null)
+      throw new Error();
+    return input;
+  } catch (error) {
+    if (error instanceof ReminderSubscriptionRequestError) throw error;
+    throw new ReminderSubscriptionRequestError(
+      400,
+      'Invalid registration update',
+    );
+  }
+}
+
+function readBearerCredential(request: HttpRequest) {
+  const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(
+    request.headers.get('authorization') ?? '',
+  );
+  return match?.[1] ?? null;
+}
+
+function readInstallationId(value: string | undefined) {
+  return value !== undefined && /^[A-Za-z0-9_-]{43}$/.test(value)
+    ? value
+    : null;
+}
+
 export async function registerReminderSubscription(
   request: HttpRequest,
   store: ReminderSubscriptionStore,
@@ -270,7 +337,7 @@ export async function registerReminderSubscription(
       registration.registrationRequestId,
     );
     const credential = opaqueRandomValue();
-    const saveResult = await store.saveSubscription({
+    const saveResult = await store.createSubscription({
       attemptGeneration: registration.attemptGeneration,
       credentialHash: hashOpaqueValue(credential),
       deviceToken: registration.deviceToken,
@@ -284,11 +351,62 @@ export async function registerReminderSubscription(
     if (saveResult === 'stale') {
       return response(409, 'Registration attempt superseded');
     }
+    if (saveResult === 'conflict') {
+      return response(409, 'Registration unavailable');
+    }
     return {
       status: 201,
       headers: { 'Cache-Control': 'no-store' },
       jsonBody: { credential, installationId },
     };
+  } catch (error) {
+    if (error instanceof ReminderSubscriptionRequestError) {
+      return response(error.status, error.message);
+    }
+    return response(503, 'Registration unavailable');
+  }
+}
+
+export async function updateReminderSubscription(
+  request: HttpRequest,
+  store: ReminderSubscriptionStore,
+  installationId: string | undefined,
+  now = new Date(),
+): Promise<HttpResponseInit> {
+  try {
+    const credential = readBearerCredential(request);
+    const target = readInstallationId(installationId);
+    if (credential === null || target === null)
+      return response(401, 'Unauthorized');
+    const sourceHash = sourceAddressHash(request);
+    if (!(await store.takeSourceAllowance(sourceHash, now))) {
+      return response(
+        429,
+        'Try again later',
+        Math.ceil(throttleWindowMs / 1000),
+      );
+    }
+    if (!(await store.takeInstallationAllowance(target, now))) {
+      return response(
+        429,
+        'Try again later',
+        Math.ceil(throttleWindowMs / 1000),
+      );
+    }
+    const update = await readUpdate(request);
+    const result = await store.updateSubscription(
+      {
+        ...update,
+        installationId: target,
+        registeredAt: now,
+      },
+      hashOpaqueValue(credential),
+    );
+    if (result === 'not-found')
+      return response(404, 'Registration unavailable');
+    if (result === 'unauthorized') return response(401, 'Unauthorized');
+    if (result === 'stale') return response(409, 'Update superseded');
+    return { status: 204, headers: { 'Cache-Control': 'no-store' } };
   } catch (error) {
     if (error instanceof ReminderSubscriptionRequestError) {
       return response(error.status, error.message);
@@ -349,7 +467,7 @@ export function createTableReminderSubscriptionStore(
       }
       throw new Error('Subscription removal contention exceeded retry limit');
     },
-    async saveSubscription(record) {
+    async createSubscription(record) {
       const entity = {
         partitionKey: subscriptionPartitionKey,
         rowKey: record.installationId,
@@ -380,6 +498,13 @@ export function createTableReminderSubscriptionStore(
             continue;
           }
         }
+        const sameInitialFields =
+          existing.deviceToken === record.deviceToken &&
+          existing.homeTimeZone === record.homeTimeZone &&
+          existing.oneDayEnabled === record.oneDayEnabled &&
+          existing.oneWeekEnabled === record.oneWeekEnabled &&
+          existing.platform === record.platform;
+        if (!sameInitialFields) return 'conflict';
         if (existing.attemptGeneration >= record.attemptGeneration) {
           return 'stale';
         }
@@ -391,53 +516,61 @@ export function createTableReminderSubscriptionStore(
           if (updateStatus !== 409 && updateStatus !== 412) throw updateError;
         }
       }
+      throw new Error('Subscription creation contention exceeded retry limit');
+    },
+    async updateSubscription(record, credentialHash) {
+      for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
+        let existing: SubscriptionEntity;
+        try {
+          existing = await subscriptions.get(
+            subscriptionPartitionKey,
+            record.installationId,
+          );
+        } catch (error) {
+          if (statusCode(error) === 404) return 'not-found';
+          throw error;
+        }
+        if (
+          existing.credentialHash === undefined ||
+          !equalOpaqueValues(existing.credentialHash, credentialHash)
+        ) {
+          return 'unauthorized';
+        }
+        if (existing.attemptGeneration >= record.attemptGeneration)
+          return 'stale';
+        try {
+          await subscriptions.replace(
+            {
+              partitionKey: subscriptionPartitionKey,
+              rowKey: record.installationId,
+              ...record,
+              credentialHash: existing.credentialHash,
+            },
+            existing.etag,
+          );
+          return 'accepted';
+        } catch (error) {
+          const updateStatus = statusCode(error);
+          if (updateStatus !== 409 && updateStatus !== 412) throw error;
+        }
+      }
       throw new Error('Subscription update contention exceeded retry limit');
     },
     async takeSourceAllowance(sourceHash, now) {
-      const window = Math.floor(now.getTime() / throttleWindowMs);
-      const rowKey = String(window);
-      const expiresAt = new Date(
-        window * throttleWindowMs + throttleRetentionMs,
+      return takeThrottleAllowance(
+        throttles,
+        hashOpaqueValue(`daylight-saviour:reminder-source:v1:${sourceHash}`),
+        now,
       );
-
-      for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-        let entity: ThrottleEntity;
-        try {
-          entity = await throttles.get(sourceHash, rowKey);
-        } catch (error) {
-          if (statusCode(error) !== 404) throw error;
-          try {
-            await throttles.create({
-              partitionKey: sourceHash,
-              rowKey,
-              count: 1,
-              expiresAt,
-            });
-            return true;
-          } catch (createError) {
-            if (statusCode(createError) !== 409) throw createError;
-            continue;
-          }
-        }
-
-        if (entity.count >= throttleLimit) return false;
-        try {
-          await throttles.replace(
-            {
-              partitionKey: sourceHash,
-              rowKey,
-              count: entity.count + 1,
-              expiresAt,
-            },
-            entity.etag,
-          );
-          return true;
-        } catch (updateError) {
-          const updateStatus = statusCode(updateError);
-          if (updateStatus !== 409 && updateStatus !== 412) throw updateError;
-        }
-      }
-      throw new Error('Throttle update contention exceeded retry limit');
+    },
+    async takeInstallationAllowance(installationId, now) {
+      return takeThrottleAllowance(
+        throttles,
+        hashOpaqueValue(
+          `daylight-saviour:reminder-installation:v1:${installationId}`,
+        ),
+        now,
+      );
     },
     async purgeExpiredThrottleRecords(now) {
       for await (const entity of throttles.listExpired(now)) {
@@ -449,6 +582,55 @@ export function createTableReminderSubscriptionStore(
       }
     },
   };
+}
+
+async function takeThrottleAllowance(
+  throttles: ThrottleTable,
+  subjectHash: string,
+  now: Date,
+) {
+  const window = Math.floor(now.getTime() / throttleWindowMs);
+  const rowKey = String(window);
+  const expiresAt = new Date(window * throttleWindowMs + throttleRetentionMs);
+
+  for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
+    let entity: ThrottleEntity;
+    try {
+      entity = await throttles.get(subjectHash, rowKey);
+    } catch (error) {
+      if (statusCode(error) !== 404) throw error;
+      try {
+        await throttles.create({
+          partitionKey: subjectHash,
+          rowKey,
+          count: 1,
+          expiresAt,
+        });
+        return true;
+      } catch (createError) {
+        if (statusCode(createError) !== 409) throw createError;
+        continue;
+      }
+    }
+
+    if (entity.count >= throttleLimit) return false;
+    try {
+      await throttles.replace(
+        {
+          partitionKey: subjectHash,
+          rowKey,
+          count: entity.count + 1,
+          expiresAt,
+        },
+        entity.etag,
+      );
+      return true;
+    } catch (updateError) {
+      const updateStatus = statusCode(updateError);
+      if (updateStatus !== 409 && updateStatus !== 412) throw updateError;
+    }
+  }
+  throw new Error('Throttle update contention exceeded retry limit');
 }
 
 const azureReminderSubscriptionStoreDependencies: AzureReminderSubscriptionStoreDependencies =
@@ -494,16 +676,41 @@ export function createAzureReminderSubscriptionStore(
       get: async (partitionKey, rowKey) => {
         const entity = await subscriptions.getEntity<{
           attemptGeneration: number;
+          credentialHash: string;
           deviceToken: string;
+          homeTimeZone: string;
+          oneDayEnabled: boolean;
+          oneWeekEnabled: boolean;
+          platform: 'android' | 'ios';
         }>(partitionKey, rowKey);
         if (typeof entity.deviceToken !== 'string') {
-          throw new Error('Stored subscription device token is invalid');
+          throw new Error('Stored subscription record is invalid');
         }
         return {
           attemptGeneration: entity.attemptGeneration,
+          credentialHash:
+            typeof entity.credentialHash === 'string'
+              ? entity.credentialHash
+              : undefined,
           deviceToken: entity.deviceToken,
           etag: entity.etag,
+          homeTimeZone:
+            typeof entity.homeTimeZone === 'string'
+              ? entity.homeTimeZone
+              : undefined,
+          oneDayEnabled:
+            typeof entity.oneDayEnabled === 'boolean'
+              ? entity.oneDayEnabled
+              : undefined,
+          oneWeekEnabled:
+            typeof entity.oneWeekEnabled === 'boolean'
+              ? entity.oneWeekEnabled
+              : undefined,
           partitionKey,
+          platform:
+            entity.platform === 'android' || entity.platform === 'ios'
+              ? entity.platform
+              : undefined,
           rowKey,
         };
       },
@@ -556,11 +763,29 @@ export function createReminderSubscriptionHandler(
   };
 }
 
+export function createReminderSubscriptionUpdateHandler(
+  createStore: () => ReminderSubscriptionStore = createAzureReminderSubscriptionStore,
+) {
+  return async (request: HttpRequest): Promise<HttpResponseInit> =>
+    updateReminderSubscription(
+      request,
+      createStore(),
+      request.params.installationId,
+    );
+}
+
 export const reminderSubscriptionOptions: HttpFunctionOptions = {
   authLevel: 'anonymous' as const,
   handler: createReminderSubscriptionHandler(),
   methods: ['POST'],
   route: 'reminder-subscriptions',
+};
+
+export const reminderSubscriptionUpdateOptions: HttpFunctionOptions = {
+  authLevel: 'anonymous' as const,
+  handler: createReminderSubscriptionUpdateHandler(),
+  methods: ['PUT'],
+  route: 'reminder-subscriptions/{installationId}',
 };
 
 export const reminderThrottleCleanupOptions: TimerFunctionOptions = {
