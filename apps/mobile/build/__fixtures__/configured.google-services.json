@@ -1,0 +1,23 @@
+{
+  "project_info": {
+    "project_number": "100000000001",
+    "project_id": "synthetic-fcm-proof-project",
+    "storage_bucket": "synthetic-fcm-proof-project.example.invalid"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:100000000001:android:0000000000000001",
+        "android_client_info": {
+          "package_name": "au.com.binarybalance.daylightsaviour"
+        }
+      },
+      "api_key": [
+        {
+          "current_key": "SYNTHETIC_NON_SECRET_FIXTURE_KEY"
+        }
+      ]
+    }
+  ],
+  "configuration_version": "1"
+}
