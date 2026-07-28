@@ -98,6 +98,7 @@ export interface FcmSubscriptionRemover {
 
 export type FcmChangeReminderLogEvent =
   | 'fcm-change-reminder-accepted'
+  | 'fcm-change-reminder-invalid-token-cleanup-failed'
   | 'fcm-change-reminder-malformed-response'
   | 'fcm-change-reminder-permanent-invalid-token'
   | 'fcm-change-reminder-permanent-rejection'
@@ -153,6 +154,7 @@ export type FcmFetch = (
     readonly body: string;
     readonly headers: Readonly<Record<string, string>>;
     readonly method: 'POST';
+    readonly signal?: AbortSignal;
   },
 ) => Promise<FcmFetchResponse>;
 
@@ -344,24 +346,62 @@ function report(
   return result;
 }
 
+function reportCleanupFailure(logger: FcmChangeReminderLogger): void {
+  try {
+    logger.write('fcm-change-reminder-invalid-token-cleanup-failed');
+  } catch {
+    // Logging must not alter a provider delivery result.
+  }
+}
+
 export function fcmSendEndpoint(projectId: string) {
   if (!fcmProjectIdPattern.test(projectId))
     throw new Error('Invalid injected FCM project ID');
   return new URL(`/v1/projects/${projectId}/messages:send`, fcmOrigin);
 }
 
-export function createFetchFcmHttpTransport(fetch: FcmFetch): FcmHttpTransport {
+export function createFetchFcmHttpTransport(
+  fetch: FcmFetch,
+  options: { readonly timeoutMs?: number } = {},
+): FcmHttpTransport {
+  if (
+    options.timeoutMs !== undefined &&
+    (!Number.isSafeInteger(options.timeoutMs) ||
+      options.timeoutMs <= 0 ||
+      options.timeoutMs > 60_000)
+  ) {
+    throw new Error('Invalid FCM transport timeout');
+  }
   return {
     async post(request) {
-      const response = await fetch(request.endpoint.toString(), {
-        body: JSON.stringify(request.payload),
-        headers: {
-          Authorization: `Bearer ${request.accessToken}`,
-          'Content-Type': 'application/json; charset=utf-8',
-        },
-        method: 'POST',
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const operation = async () => {
+        const response = await fetch(request.endpoint.toString(), {
+          body: JSON.stringify(request.payload),
+          headers: {
+            Authorization: `Bearer ${request.accessToken}`,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          method: 'POST',
+          ...(options.timeoutMs === undefined
+            ? {}
+            : { signal: controller.signal }),
+        });
+        return { body: await response.text(), status: response.status };
+      };
+      if (options.timeoutMs === undefined) return operation();
+      const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('FCM transport timeout'));
+        }, options.timeoutMs);
       });
-      return { body: await response.text(), status: response.status };
+      try {
+        return await Promise.race([operation(), timeout]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
     },
   };
 }
@@ -421,10 +461,14 @@ export function createFcmChangeReminderSender(
         } catch {
           // The FCM response stays permanent even when storage cleanup needs a retry.
         }
-        return report(dependencies.logger, {
+        const result = report(dependencies.logger, {
           kind: 'permanent-invalid-token',
           cleanupStatus: cleanup,
         });
+        if (cleanup === 'failed') {
+          reportCleanupFailure(dependencies.logger);
+        }
+        return result;
       }
       if (error.classification === 'transient') {
         return report(dependencies.logger, { kind: 'transient-rejection' });

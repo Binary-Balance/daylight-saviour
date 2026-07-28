@@ -62,6 +62,19 @@ type SecuritySettings = {
   logRetentionDays: int
 }
 
+@sealed()
+type FcmSettings = {
+  enabled: bool
+
+  entraAssertionAudience: string
+
+  projectId: string
+
+  serviceAccountEmail: string
+
+  workloadIdentityProvider: string
+}
+
 @description('Azure region for every resource in this portable platform module.')
 @minLength(1)
 param location string = resourceGroup().location
@@ -88,6 +101,15 @@ param scale ScaleSettings = {
 param security SecuritySettings = {
   keyVaultSoftDeleteRetentionDays: 90
   logRetentionDays: 30
+}
+
+@description('Optional caller-supplied Google workload-federation settings. No service-account key is accepted.')
+param fcm FcmSettings = {
+  enabled: false
+  entraAssertionAudience: ''
+  projectId: ''
+  serviceAccountEmail: ''
+  workloadIdentityProvider: ''
 }
 
 @description('Build identifier returned by the notification-service health endpoint.')
@@ -166,6 +188,11 @@ module compute './internal/compute.bicep' = {
     deploymentContainerUri: storage.outputs.deploymentContainerUri
     functionAppName: resourceNames.functionApp
     functionPlanName: resourceNames.functionPlan
+    fcmEnabled: fcm.enabled
+    fcmEntraAssertionAudience: fcm.entraAssertionAudience
+    fcmProjectId: fcm.projectId
+    fcmServiceAccountEmail: fcm.serviceAccountEmail
+    fcmWorkloadIdentityProvider: fcm.workloadIdentityProvider
     instanceMemoryMB: scale.instanceMemoryMB
     keyVaultUri: vault.outputs.uri
     location: location

@@ -5,6 +5,11 @@ param buildVersion string
 param deploymentContainerUri string
 param functionAppName string
 param functionPlanName string
+param fcmEnabled bool
+param fcmEntraAssertionAudience string
+param fcmProjectId string
+param fcmServiceAccountEmail string
+param fcmWorkloadIdentityProvider string
 param instanceMemoryMB int
 param keyVaultUri string
 param location string
@@ -86,7 +91,13 @@ resource appSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     AzureWebJobsStorage__clientId: runtimeIdentityClientId
     AzureWebJobsStorage__credential: 'managedidentity'
     BUILD_VERSION: buildVersion
+    FCM_ENTRA_ASSERTION_AUDIENCE: fcmEntraAssertionAudience
     FUNCTIONS_EXTENSION_VERSION: '~4'
+    FCM_PROJECT_ID: fcmProjectId
+    FCM_PROOF_ENABLED: 'false'
+    FCM_RUNTIME_ENABLED: string(fcmEnabled)
+    FCM_SERVICE_ACCOUNT_EMAIL: fcmServiceAccountEmail
+    FCM_WORKLOAD_IDENTITY_PROVIDER: fcmWorkloadIdentityProvider
     KEY_VAULT_URI: keyVaultUri
     REMINDER_MANAGED_IDENTITY_CLIENT_ID: runtimeIdentityClientId
     REMINDER_STORAGE_ACCOUNT_NAME: storageAccountName

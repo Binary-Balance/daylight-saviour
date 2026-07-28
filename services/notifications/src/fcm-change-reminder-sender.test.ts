@@ -383,6 +383,7 @@ describe('FCM Change Reminder sender', () => {
     assert.deepEqual(test.removalRequests, [subscription]);
     assert.deepEqual(test.logs, [
       'fcm-change-reminder-permanent-invalid-token',
+      'fcm-change-reminder-invalid-token-cleanup-failed',
     ]);
     const serialisedLogs = JSON.stringify(test.logs);
     assert.doesNotMatch(serialisedLogs, new RegExp(fullDeviceToken));
