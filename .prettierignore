@@ -4,6 +4,7 @@ android/
 ios/
 dist/
 coverage/
+apps/mobile/build/__fixtures__/malformed.google-services.json
 docs/adr/
 docs/product-brief.md
 docs/ui-design-brief.md

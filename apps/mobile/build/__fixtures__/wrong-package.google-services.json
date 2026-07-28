@@ -1,0 +1,17 @@
+{
+  "project_info": {
+    "project_number": "100000000002",
+    "project_id": "synthetic-wrong-package-project"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:100000000002:android:0000000000000002",
+        "android_client_info": {
+          "package_name": "example.invalid.other"
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

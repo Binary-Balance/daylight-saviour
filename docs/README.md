@@ -53,6 +53,7 @@ Every ADR is currently accepted. Status is recorded in each ADR's front matter.
 
 ## Component documentation
 
+- [Android FCM proof builds](android-fcm-proof-build.md)
 - [Portable infrastructure](../infra/README.md) and [generic Bicep module contract](../infra/modules/README.md)
 - [Domain logic](../packages/domain/README.md)
 - [Runtime-validated contracts](../packages/contracts/README.md)
