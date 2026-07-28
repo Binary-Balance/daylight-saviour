@@ -1,4 +1,5 @@
-const { readFileSync } = require('node:fs');
+const { readFileSync, realpathSync } = require('node:fs');
+const { isAbsolute, relative, resolve, sep } = require('node:path');
 
 const ANDROID_PACKAGE = 'au.com.binarybalance.daylightsaviour';
 const GOOGLE_SERVICES_FILE_ENV =
@@ -9,6 +10,7 @@ const FCM_PROOF_RUNTIME_INPUTS = [
   'EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL',
   'EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON',
 ];
+const PUBLIC_SOURCE_ROOT = resolve(__dirname, '../../..');
 
 function isFcmProofBuild(environment) {
   const value = environment[FCM_PROOF_BUILD_ENV];
@@ -24,11 +26,42 @@ function isFcmProofBuild(environment) {
   throw new Error(`${FCM_PROOF_BUILD_ENV} must be 1 when set`);
 }
 
+function isInsidePublicSource(filePath) {
+  const sourceRelativePath = relative(PUBLIC_SOURCE_ROOT, filePath);
+
+  return (
+    sourceRelativePath === '' ||
+    (!sourceRelativePath.startsWith(`..${sep}`) &&
+      sourceRelativePath !== '..' &&
+      !isAbsolute(sourceRelativePath))
+  );
+}
+
 function readFirebaseClientConfiguration(filePath) {
+  if (!isAbsolute(filePath)) {
+    throw new Error(
+      'Firebase client configuration must be an absolute path outside the public checkout',
+    );
+  }
+
+  let resolvedFilePath;
+
+  try {
+    resolvedFilePath = realpathSync(filePath);
+  } catch {
+    throw new Error(`Firebase client configuration cannot be read`);
+  }
+
+  if (isInsidePublicSource(resolvedFilePath)) {
+    throw new Error(
+      'Firebase client configuration must be an absolute path outside the public checkout',
+    );
+  }
+
   let source;
 
   try {
-    source = readFileSync(filePath, 'utf8');
+    source = readFileSync(resolvedFilePath, 'utf8');
   } catch {
     throw new Error(`Firebase client configuration cannot be read`);
   }
