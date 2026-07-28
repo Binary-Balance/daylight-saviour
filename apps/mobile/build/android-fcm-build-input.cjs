@@ -1,5 +1,5 @@
 const { readFileSync, realpathSync } = require('node:fs');
-const { isAbsolute, relative, resolve, sep } = require('node:path');
+const { dirname, isAbsolute, relative, sep } = require('node:path');
 
 const ANDROID_PACKAGE = 'au.com.binarybalance.daylightsaviour';
 const GOOGLE_SERVICES_FILE_ENV =
@@ -10,7 +10,7 @@ const FCM_PROOF_RUNTIME_INPUTS = [
   'EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL',
   'EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON',
 ];
-const PUBLIC_SOURCE_ROOT = resolve(__dirname, '../../..');
+const PUBLIC_SOURCE_ROOT = dirname(require.resolve('../../../package.json'));
 
 function isFcmProofBuild(environment) {
   const value = environment[FCM_PROOF_BUILD_ENV];
