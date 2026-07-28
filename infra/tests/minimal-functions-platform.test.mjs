@@ -42,6 +42,7 @@ describe('minimal Functions platform Bicep module', () => {
   it('keeps one small environment-independent interface', () => {
     assert.deepEqual(Object.keys(compiledTemplate.parameters).sort(), [
       'buildVersion',
+      'fcm',
       'location',
       'resourceNames',
       'runtime',
@@ -71,6 +72,31 @@ describe('minimal Functions platform Bicep module', () => {
       compiledTemplate.definitions.ScaleSettings.properties.maximumInstanceCount
         .minValue,
       1,
+    );
+  });
+
+  it('keeps FCM proof disabled while injecting only caller-supplied federation settings', () => {
+    const fcm = compiledTemplate.definitions.FcmSettings.properties;
+    const appSettings = oneResource('Microsoft.Web/sites/config').properties;
+
+    assert.deepEqual(Object.keys(fcm).sort(), [
+      'enabled',
+      'entraAssertionAudience',
+      'projectId',
+      'serviceAccountEmail',
+      'workloadIdentityProvider',
+    ]);
+    assert.equal(compiledTemplate.parameters.fcm.defaultValue.enabled, false);
+    assert.equal(appSettings.FCM_PROOF_ENABLED, 'false');
+    assert.equal(
+      appSettings.FCM_RUNTIME_ENABLED,
+      "[string(parameters('fcmEnabled'))]",
+    );
+    assert.equal(
+      JSON.stringify(compiledTemplate).includes(
+        '@portable-project.iam.gserviceaccount.com',
+      ),
+      false,
     );
   });
 

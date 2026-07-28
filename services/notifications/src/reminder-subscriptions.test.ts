@@ -65,6 +65,7 @@ function store(
 ): ReminderSubscriptionStore {
   return {
     createSubscription: async () => 'accepted',
+    getFcmProofSubscription: async () => null,
     purgeExpiredThrottleRecords: async () => undefined,
     removeIfDeviceTokenMatches: async () => 'not-found',
     takeInstallationAllowance: async () => true,
@@ -656,6 +657,88 @@ describe('Azure Table mapping', () => {
         rowKey: 'installation-id',
       },
     ]);
+  });
+
+  it('resolves only a complete stored Android registration for controlled proof', async () => {
+    const installationId = 'a'.repeat(43);
+    const subscriptions = {
+      getEntity: async (_partitionKey: string, rowKey: string) =>
+        ({
+          attemptGeneration: 1,
+          deviceToken: validRegistration.deviceToken,
+          etag: 'stored-etag',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          platform: 'android',
+          rowKey,
+        }) as never,
+    };
+    const tableStore = createAzureReminderSubscriptionStore(
+      {
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      },
+      {
+        createCredential: () => ({
+          getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+        }),
+        createTableClient: (_endpoint, tableName) =>
+          tableName === 'ReminderSubscriptions'
+            ? (subscriptions as never)
+            : ({} as never),
+      },
+    );
+
+    assert.deepEqual(await tableStore.getFcmProofSubscription(installationId), {
+      deviceToken: validRegistration.deviceToken,
+      installationId,
+    });
+  });
+
+  it('does not resolve missing, iOS, or malformed registrations for FCM proof', async () => {
+    const installationId = 'a'.repeat(43);
+    for (const entity of [
+      null,
+      {
+        attemptGeneration: 1,
+        deviceToken: validRegistration.deviceToken,
+        etag: 'stored-etag',
+        platform: 'ios',
+      },
+      {
+        attemptGeneration: 1,
+        deviceToken: 'short',
+        etag: 'stored-etag',
+        platform: 'android',
+      },
+    ]) {
+      const tableStore = createAzureReminderSubscriptionStore(
+        {
+          REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+          REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+        },
+        {
+          createCredential: () => ({
+            getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+          }),
+          createTableClient: (_endpoint, tableName) =>
+            tableName === 'ReminderSubscriptions'
+              ? ({
+                  getEntity: async () => {
+                    if (entity === null) throw azureError(404);
+                    return entity as never;
+                  },
+                } as never)
+              : ({} as never),
+        },
+      );
+
+      assert.equal(
+        await tableStore.getFcmProofSubscription(installationId),
+        null,
+      );
+    }
   });
 });
 

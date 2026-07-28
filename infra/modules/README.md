@@ -15,6 +15,9 @@ Inputs:
 - `scale` — Flex Consumption memory (`512`, `2048`, or `4096` MB) and maximum scale-out (`1` through `1000`). No always-ready instances are created.
 - `security` — Key Vault soft-delete and Log Analytics retention periods. Other security controls are fixed invariants.
 - `buildVersion` — non-secret build identifier exposed by `/health`.
+- `fcm` — optional caller-supplied keyless federation settings: Entra assertion
+  audience, Google workload identity provider resource, exact service-account
+  email, and FCM project ID. Disabled by default; no Google key is accepted.
 
 The module returns one `platform` object containing resource IDs, runtime identity identifiers, Function App host name, Key Vault URI, and deployment-container URI.
 
@@ -38,6 +41,11 @@ Global names remain caller responsibility. Module never generates names or embed
 - Runtime receives Storage Blob Data Owner, Storage Table Data Contributor, Key Vault Secrets User, and Monitoring Metrics Publisher. Queue access remains absent until a queue trigger or equivalent requirement exists.
 - Key Vault uses Azure RBAC, soft delete, and purge protection; module provisions no secret values.
 - Function App requires HTTPS/TLS 1.2, disables FTP and remote debugging, and denies FTP and SCM basic publishing credentials.
+- FCM workload federation values remain caller-supplied and
+  `FCM_RUNTIME_ENABLED` reflects `fcm.enabled`. Controlled FCM proof remains
+  hard-disabled in generic infrastructure;
+  private operations owns stronger ingress authorization, fixed proof values,
+  temporary enablement, and evidence.
 - Function App logs, Key Vault audit events, and supported platform metrics route to Log Analytics. Application Insights local authentication is disabled.
 
 Public endpoints remain enabled for this minimal stack. Private networking requires a separate module or deliberate extension because it changes Flex Consumption routing and deployment-storage requirements.

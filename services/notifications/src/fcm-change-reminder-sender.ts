@@ -153,6 +153,7 @@ export type FcmFetch = (
     readonly body: string;
     readonly headers: Readonly<Record<string, string>>;
     readonly method: 'POST';
+    readonly signal?: AbortSignal;
   },
 ) => Promise<FcmFetchResponse>;
 
@@ -350,18 +351,48 @@ export function fcmSendEndpoint(projectId: string) {
   return new URL(`/v1/projects/${projectId}/messages:send`, fcmOrigin);
 }
 
-export function createFetchFcmHttpTransport(fetch: FcmFetch): FcmHttpTransport {
+export function createFetchFcmHttpTransport(
+  fetch: FcmFetch,
+  options: { readonly timeoutMs?: number } = {},
+): FcmHttpTransport {
+  if (
+    options.timeoutMs !== undefined &&
+    (!Number.isSafeInteger(options.timeoutMs) ||
+      options.timeoutMs <= 0 ||
+      options.timeoutMs > 60_000)
+  ) {
+    throw new Error('Invalid FCM transport timeout');
+  }
   return {
     async post(request) {
-      const response = await fetch(request.endpoint.toString(), {
-        body: JSON.stringify(request.payload),
-        headers: {
-          Authorization: `Bearer ${request.accessToken}`,
-          'Content-Type': 'application/json; charset=utf-8',
-        },
-        method: 'POST',
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const operation = async () => {
+        const response = await fetch(request.endpoint.toString(), {
+          body: JSON.stringify(request.payload),
+          headers: {
+            Authorization: `Bearer ${request.accessToken}`,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          method: 'POST',
+          ...(options.timeoutMs === undefined
+            ? {}
+            : { signal: controller.signal }),
+        });
+        return { body: await response.text(), status: response.status };
+      };
+      if (options.timeoutMs === undefined) return operation();
+      const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('FCM transport timeout'));
+        }, options.timeoutMs);
       });
-      return { body: await response.text(), status: response.status };
+      try {
+        return await Promise.race([operation(), timeout]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
     },
   };
 }
