@@ -36,7 +36,7 @@ Start from a reviewed, clean commit. Export all inputs from the private build
 environment without copying them into the checkout, then run:
 
 ```sh
-agent-heavy-job npm run android:build:fcm-proof
+npm run android:build:fcm-proof
 ```
 
 The command performs a clean Expo Android generation, embeds JavaScript and
