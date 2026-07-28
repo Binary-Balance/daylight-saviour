@@ -122,9 +122,4 @@ function configureAndroidFcm(androidConfig, environment = process.env) {
   };
 }
 
-module.exports = {
-  ANDROID_PACKAGE,
-  FCM_PROOF_BUILD_ENV,
-  GOOGLE_SERVICES_FILE_ENV,
-  configureAndroidFcm,
-};
+module.exports = { configureAndroidFcm };
