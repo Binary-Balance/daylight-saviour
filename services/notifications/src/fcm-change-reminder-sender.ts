@@ -98,6 +98,7 @@ export interface FcmSubscriptionRemover {
 
 export type FcmChangeReminderLogEvent =
   | 'fcm-change-reminder-accepted'
+  | 'fcm-change-reminder-invalid-token-cleanup-failed'
   | 'fcm-change-reminder-malformed-response'
   | 'fcm-change-reminder-permanent-invalid-token'
   | 'fcm-change-reminder-permanent-rejection'
@@ -345,6 +346,14 @@ function report(
   return result;
 }
 
+function reportCleanupFailure(logger: FcmChangeReminderLogger): void {
+  try {
+    logger.write('fcm-change-reminder-invalid-token-cleanup-failed');
+  } catch {
+    // Logging must not alter a provider delivery result.
+  }
+}
+
 export function fcmSendEndpoint(projectId: string) {
   if (!fcmProjectIdPattern.test(projectId))
     throw new Error('Invalid injected FCM project ID');
@@ -452,10 +461,14 @@ export function createFcmChangeReminderSender(
         } catch {
           // The FCM response stays permanent even when storage cleanup needs a retry.
         }
-        return report(dependencies.logger, {
+        const result = report(dependencies.logger, {
           kind: 'permanent-invalid-token',
           cleanupStatus: cleanup,
         });
+        if (cleanup === 'failed') {
+          reportCleanupFailure(dependencies.logger);
+        }
+        return result;
       }
       if (error.classification === 'transient') {
         return report(dependencies.logger, { kind: 'transient-rejection' });

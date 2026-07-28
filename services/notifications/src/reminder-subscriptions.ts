@@ -114,7 +114,10 @@ interface AzureReminderSubscriptionStoreDependencies {
 export interface ReminderSubscriptionStore extends FcmSubscriptionRemover {
   readonly getFcmProofSubscription: (installationId: string) => Promise<{
     readonly deviceToken: string;
+    readonly homeTimeZone: string;
     readonly installationId: string;
+    readonly oneDayEnabled: boolean;
+    readonly oneWeekEnabled: boolean;
   } | null>;
   readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
   readonly createSubscription: (
@@ -452,11 +455,20 @@ export function createTableReminderSubscriptionStore(
       }
       if (
         existing.platform !== 'android' ||
-        !fcmDeviceTokenPattern.test(existing.deviceToken)
+        !fcmDeviceTokenPattern.test(existing.deviceToken) ||
+        typeof existing.homeTimeZone !== 'string' ||
+        typeof existing.oneDayEnabled !== 'boolean' ||
+        typeof existing.oneWeekEnabled !== 'boolean'
       ) {
         return null;
       }
-      return { deviceToken: existing.deviceToken, installationId };
+      return {
+        deviceToken: existing.deviceToken,
+        homeTimeZone: existing.homeTimeZone,
+        installationId,
+        oneDayEnabled: existing.oneDayEnabled,
+        oneWeekEnabled: existing.oneWeekEnabled,
+      };
     },
     async removeIfDeviceTokenMatches(subscription) {
       for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {

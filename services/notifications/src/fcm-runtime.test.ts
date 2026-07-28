@@ -36,7 +36,10 @@ function store(
     createSubscription: async () => 'accepted',
     getFcmProofSubscription: async () => ({
       deviceToken: storedDeviceToken,
+      homeTimeZone: environment.FCM_PROOF_HOME_TIME_ZONE,
       installationId: environment.FCM_PROOF_INSTALLATION_ID,
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
     }),
     purgeExpiredThrottleRecords: async () => undefined,
     removeIfDeviceTokenMatches: async () => 'not-found',
@@ -217,6 +220,99 @@ describe('FCM runtime composition', () => {
       status: 503,
     });
     assert.doesNotMatch(JSON.stringify(denied), new RegExp(sensitiveFailure));
+  });
+
+  it('denies proof when stored zone or reminder preference does not match fixed facts', async () => {
+    for (const registration of [
+      {
+        deviceToken: storedDeviceToken,
+        homeTimeZone: 'Australia/Perth',
+        installationId: environment.FCM_PROOF_INSTALLATION_ID,
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+      },
+      {
+        deviceToken: storedDeviceToken,
+        homeTimeZone: environment.FCM_PROOF_HOME_TIME_ZONE,
+        installationId: environment.FCM_PROOF_INSTALLATION_ID,
+        oneDayEnabled: true,
+        oneWeekEnabled: false,
+      },
+    ]) {
+      const requests: { body: string | undefined; input: string }[] = [];
+      const handler = createFcmProofHandler(
+        environment,
+        dependencies(
+          [],
+          requests,
+          store({ getFcmProofSubscription: async () => registration }),
+        ),
+      );
+
+      assert.deepEqual(await handler({} as never), {
+        headers: { 'Cache-Control': 'no-store' },
+        jsonBody: { error: 'Registration unavailable' },
+        status: 404,
+      });
+      assert.deepEqual(requests, []);
+    }
+  });
+
+  it('exposes token-cleanup failure classification without sensitive details', async () => {
+    const events: FcmRuntimeLogEvent[] = [];
+    const requests: { body: string | undefined; input: string }[] = [];
+    const base = dependencies(
+      events,
+      requests,
+      store({
+        removeIfDeviceTokenMatches: async () => {
+          throw new Error(`sensitive cleanup ${storedDeviceToken}`);
+        },
+      }),
+    );
+    const handler = createFcmProofHandler(environment, {
+      ...base,
+      fetch: async (input, init) => {
+        if (input.startsWith('https://fcm.googleapis.com/')) {
+          return {
+            status: 404,
+            text: async () =>
+              JSON.stringify({
+                error: {
+                  code: 404,
+                  details: [
+                    {
+                      '@type':
+                        'type.googleapis.com/google.firebase.fcm.v1.FcmError',
+                      errorCode: 'UNREGISTERED',
+                    },
+                  ],
+                  message: `sensitive provider ${storedDeviceToken}`,
+                  status: 'NOT_FOUND',
+                },
+              }),
+          };
+        }
+        return base.fetch!(input, init);
+      },
+    });
+
+    const result = await handler({} as never);
+
+    assert.deepEqual(result, {
+      headers: { 'Cache-Control': 'no-store' },
+      jsonBody: {
+        cleanupStatus: 'failed',
+        outcome: 'permanent-invalid-token',
+      },
+      status: 502,
+    });
+    assert.deepEqual(events, [
+      'fcm-credential-ready',
+      'fcm-change-reminder-permanent-invalid-token',
+      'fcm-change-reminder-invalid-token-cleanup-failed',
+    ]);
+    assert.doesNotMatch(JSON.stringify(events), new RegExp(storedDeviceToken));
   });
 
   it('bounds FCM delivery and classifies timeout as transient', async () => {

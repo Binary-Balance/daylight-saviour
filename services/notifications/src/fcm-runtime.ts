@@ -191,6 +191,13 @@ function createRuntime(
         configuration.installationId,
       );
       if (subscription === null) return null;
+      if (
+        subscription.homeTimeZone !== configuration.homeTimeZone ||
+        (configuration.timing === 'one-week' && !subscription.oneWeekEnabled) ||
+        (configuration.timing === 'one-day' && !subscription.oneDayEnabled)
+      ) {
+        return null;
+      }
       return sender.send(subscription, {
         changeDirection: configuration.changeDirection,
         changeEventAt: configuration.changeEventAt,
@@ -224,6 +231,12 @@ export function createFcmProofHandler(
       }
       if (result.kind === 'accepted') {
         return response(200, { outcome: 'accepted' });
+      }
+      if (result.kind === 'permanent-invalid-token') {
+        return response(502, {
+          cleanupStatus: result.cleanupStatus,
+          outcome: result.kind,
+        });
       }
       return response(502, { outcome: result.kind });
     } catch {

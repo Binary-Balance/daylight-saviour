@@ -692,7 +692,10 @@ describe('Azure Table mapping', () => {
 
     assert.deepEqual(await tableStore.getFcmProofSubscription(installationId), {
       deviceToken: validRegistration.deviceToken,
+      homeTimeZone: 'Australia/Sydney',
       installationId,
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
     });
   });
 
@@ -709,6 +712,12 @@ describe('Azure Table mapping', () => {
       {
         attemptGeneration: 1,
         deviceToken: 'short',
+        etag: 'stored-etag',
+        platform: 'android',
+      },
+      {
+        attemptGeneration: 1,
+        deviceToken: validRegistration.deviceToken,
         etag: 'stored-etag',
         platform: 'android',
       },

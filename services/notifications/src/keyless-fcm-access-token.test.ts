@@ -34,6 +34,7 @@ function harness(
   responses: readonly ReturnType<typeof response>[],
   options: {
     readonly assertionExpiresOnTimestamp?: number;
+    readonly transportFailureAt?: number;
   } = {},
 ) {
   const events: KeylessFcmLogEvent[] = [];
@@ -41,12 +42,18 @@ function harness(
   const audiences: string[] = [];
   let responseIndex = 0;
   const fetch: KeylessFcmFetch = async (input, init) => {
+    const currentRequest = responseIndex;
     requests.push({
       body: init.body,
       headers: init.headers,
       input,
       method: init.method,
     });
+    if (options.transportFailureAt === currentRequest) {
+      throw new Error(
+        `sensitive transport ${entraAssertion} ${federatedToken} ${fcmToken}`,
+      );
+    }
     const next = responses[responseIndex];
     responseIndex += 1;
     if (next === undefined) throw new Error('unexpected fetch');
@@ -155,6 +162,37 @@ describe('keyless FCM access-token provider', () => {
     assert.deepEqual(test.events, ['fcm-credential-sts-denied']);
     const logs = JSON.stringify(test.events);
     assert.doesNotMatch(logs, /sensitive-/);
+    assert.doesNotMatch(logs, new RegExp(entraAssertion));
+    assert.doesNotMatch(logs, new RegExp(federatedToken));
+    assert.doesNotMatch(logs, new RegExp(fcmToken));
+  });
+
+  it('distinguishes STS and impersonation transport failures from provider denial', async () => {
+    const stsTransport = harness(successfulResponses(), {
+      transportFailureAt: 0,
+    });
+    await assert.rejects(
+      stsTransport.provider.getAccessToken(),
+      /sts-transport/,
+    );
+    assert.deepEqual(stsTransport.events, ['fcm-credential-sts-transport']);
+
+    const impersonationTransport = harness(successfulResponses(), {
+      transportFailureAt: 1,
+    });
+    await assert.rejects(
+      impersonationTransport.provider.getAccessToken(),
+      /impersonation-transport/,
+    );
+    assert.deepEqual(impersonationTransport.events, [
+      'fcm-credential-impersonation-transport',
+    ]);
+
+    const logs = JSON.stringify([
+      ...stsTransport.events,
+      ...impersonationTransport.events,
+    ]);
+    assert.doesNotMatch(logs, /sensitive/);
     assert.doesNotMatch(logs, new RegExp(entraAssertion));
     assert.doesNotMatch(logs, new RegExp(federatedToken));
     assert.doesNotMatch(logs, new RegExp(fcmToken));

@@ -21,9 +21,9 @@ Portable composition reads these environment settings:
 
 Runtime accepts only short-lived credentials: managed-identity assertions,
 Google STS tokens, and impersonated FCM access tokens are each bounded to one
-hour. Exchange, parsing, expiry, delivery, and cleanup outcomes produce fixed
-event names. Tokens, assertions, provider bodies, and transport errors never
-enter those events.
+hour. Exchange denials, transport failures, parsing, expiry, delivery, and
+failed invalid-token cleanup produce distinct fixed event names. Tokens,
+assertions, provider bodies, and transport errors never enter those events.
 
 ## Least privilege
 
@@ -71,6 +71,7 @@ reviewed fixed Change Reminder payload.
 Before enabling proof, private operations must add stronger ingress
 authorization such as private access or identity-aware proxy, keep function key
 in approved secret storage, set fixed proof values, and record reviewed evidence.
-Disable proof immediately afterward. Generic Bicep forces
-`FCM_RUNTIME_ENABLED=false` and `FCM_PROOF_ENABLED=false`; environment-specific
-override and evidence remain private.
+Disable proof immediately afterward. Generic Bicep defaults `fcm.enabled` to
+`false`, maps it to `FCM_RUNTIME_ENABLED`, and always forces
+`FCM_PROOF_ENABLED=false`. Environment-specific runtime enablement, proof
+override, and evidence remain private.

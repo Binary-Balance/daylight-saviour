@@ -31,9 +31,11 @@ export type KeylessFcmFailure =
   | 'impersonation-denied'
   | 'impersonation-expired'
   | 'impersonation-malformed'
+  | 'impersonation-transport'
   | 'sts-denied'
   | 'sts-expired'
   | 'sts-malformed'
+  | 'sts-transport'
   | 'timeout';
 
 export type KeylessFcmLogEvent =
@@ -289,7 +291,7 @@ export function createKeylessFcmAccessTokenProvider(
         );
       } catch (error) {
         const kind =
-          error instanceof ExchangeTimeoutError ? 'timeout' : 'sts-denied';
+          error instanceof ExchangeTimeoutError ? 'timeout' : 'sts-transport';
         report(dependencies.logger, `fcm-credential-${kind}`);
         throw new KeylessFcmAccessTokenError(kind);
       }
@@ -351,7 +353,7 @@ export function createKeylessFcmAccessTokenProvider(
         const kind =
           error instanceof ExchangeTimeoutError
             ? 'timeout'
-            : 'impersonation-denied';
+            : 'impersonation-transport';
         report(dependencies.logger, `fcm-credential-${kind}`);
         throw new KeylessFcmAccessTokenError(kind);
       }
