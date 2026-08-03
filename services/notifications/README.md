@@ -72,6 +72,6 @@ Before enabling proof, private operations must add stronger ingress
 authorization such as private access or identity-aware proxy, keep function key
 in approved secret storage, set fixed proof values, and record reviewed evidence.
 Disable proof immediately afterward. Generic Bicep defaults `fcm.enabled` to
-`false`, maps it to `FCM_RUNTIME_ENABLED`, and always forces
+`false`, maps it to lowercase `true` or `false` in `FCM_RUNTIME_ENABLED`, and always forces
 `FCM_PROOF_ENABLED=false`. Environment-specific runtime enablement, proof
 override, and evidence remain private.
