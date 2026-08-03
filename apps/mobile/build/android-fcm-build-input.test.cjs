@@ -49,19 +49,138 @@ test('configures an FCM proof build from an external Firebase file path', (t) =>
   );
 });
 
-test('rejects an FCM proof build without reviewed public runtime inputs', (t) => {
+test('configures an FCM proof build with bundled Time-Zone Data only', (t) => {
+  const googleServicesFile = externalFixture(t, 'configured');
+
+  assert.deepEqual(
+    configureAndroidFcm(baseAndroidConfig, {
+      EXPO_PUBLIC_REMINDER_REGISTRATION_URL:
+        proofRuntimeInputs.EXPO_PUBLIC_REMINDER_REGISTRATION_URL,
+      DAYLIGHT_SAVIOUR_ANDROID_GOOGLE_SERVICES_FILE: googleServicesFile,
+      DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD: '1',
+    }),
+    {
+      ...baseAndroidConfig,
+      googleServicesFile,
+    },
+  );
+});
+
+test('rejects an FCM proof build without reminder registration URL', (t) => {
   assert.throws(
     () =>
       configureAndroidFcm(baseAndroidConfig, {
+        EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL:
+          proofRuntimeInputs.EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL,
+        EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON:
+          proofRuntimeInputs.EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON,
         DAYLIGHT_SAVIOUR_ANDROID_GOOGLE_SERVICES_FILE: externalFixture(
           t,
           'configured',
         ),
         DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD: '1',
       }),
-    /FCM proof build requires EXPO_PUBLIC_REMINDER_REGISTRATION_URL, EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL, EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON/,
+    /FCM proof build requires valid EXPO_PUBLIC_REMINDER_REGISTRATION_URL HTTPS endpoint/,
   );
 });
+
+for (const endpoint of [
+  'http://reminders.example.invalid/registrations',
+  'https://user:password@reminders.example.invalid/registrations',
+  'not a URL',
+]) {
+  test(`rejects invalid reminder registration endpoint ${endpoint}`, (t) => {
+    assert.throws(
+      () =>
+        configureAndroidFcm(baseAndroidConfig, {
+          ...proofRuntimeInputs,
+          EXPO_PUBLIC_REMINDER_REGISTRATION_URL: endpoint,
+          DAYLIGHT_SAVIOUR_ANDROID_GOOGLE_SERVICES_FILE: externalFixture(
+            t,
+            'configured',
+          ),
+          DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD: '1',
+        }),
+      /FCM proof build requires valid EXPO_PUBLIC_REMINDER_REGISTRATION_URL HTTPS endpoint/,
+    );
+  });
+}
+
+for (const [configuredName, missingName] of [
+  [
+    'EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL',
+    'EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON',
+  ],
+  [
+    'EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON',
+    'EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL',
+  ],
+]) {
+  test(`rejects an FCM proof build with ${configuredName} only`, (t) => {
+    assert.throws(
+      () =>
+        configureAndroidFcm(baseAndroidConfig, {
+          EXPO_PUBLIC_REMINDER_REGISTRATION_URL:
+            proofRuntimeInputs.EXPO_PUBLIC_REMINDER_REGISTRATION_URL,
+          [configuredName]: proofRuntimeInputs[configuredName],
+          DAYLIGHT_SAVIOUR_ANDROID_GOOGLE_SERVICES_FILE: externalFixture(
+            t,
+            'configured',
+          ),
+          DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD: '1',
+        }),
+      new RegExp(
+        `FCM proof build remote Time-Zone Data configuration requires ${missingName}`,
+      ),
+    );
+  });
+}
+
+for (const [manifestUrl, trustedKeysJson, description] of [
+  [
+    'http://time-zone-data.example.invalid/manifest.json',
+    proofRuntimeInputs.EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON,
+    'non-HTTPS manifest URL',
+  ],
+  [
+    'https://time-zone-data.example.invalid/manifest.json?latest=1',
+    proofRuntimeInputs.EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON,
+    'manifest URL query',
+  ],
+  [
+    proofRuntimeInputs.EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL,
+    '{bad',
+    'malformed trusted-key JSON',
+  ],
+  [
+    proofRuntimeInputs.EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL,
+    '{}',
+    'empty trusted-key ring',
+  ],
+  [
+    proofRuntimeInputs.EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL,
+    '{"synthetic-key":"not-a-public-key"}',
+    'malformed trusted key',
+  ],
+]) {
+  test(`rejects remote Time-Zone Data config with ${description}`, (t) => {
+    assert.throws(
+      () =>
+        configureAndroidFcm(baseAndroidConfig, {
+          EXPO_PUBLIC_REMINDER_REGISTRATION_URL:
+            proofRuntimeInputs.EXPO_PUBLIC_REMINDER_REGISTRATION_URL,
+          EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL: manifestUrl,
+          EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON: trustedKeysJson,
+          DAYLIGHT_SAVIOUR_ANDROID_GOOGLE_SERVICES_FILE: externalFixture(
+            t,
+            'configured',
+          ),
+          DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD: '1',
+        }),
+      /FCM proof build requires valid remote Time-Zone Data manifest URL and trusted keys/,
+    );
+  });
+}
 
 test('rejects an FCM proof build without Firebase configuration', () => {
   assert.throws(

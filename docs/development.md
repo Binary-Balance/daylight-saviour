@@ -6,9 +6,9 @@
 | --------------------- | ----------------- |
 | Node.js               | 24.18.0           |
 | npm                   | 11.16.0           |
-| Expo                  | 57.0.8            |
+| Expo                  | 57.0.9            |
 | React                 | 19.2.3            |
-| React Native          | 0.86.0            |
+| React Native          | 0.86.2            |
 | TypeScript            | 6.0.3             |
 | Eclipse Temurin JDK   | 17.0.19+10        |
 | Gradle wrapper        | 9.3.1             |
@@ -35,7 +35,7 @@ Add each dependency to its consuming workspace. Keep React, React DOM, and React
 
 Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycle-script approvals to suppress dependency problems. Resolve conflicts explicitly, document accepted advisories, and verify dependency shape with `npm run dependencies:check`.
 
-`npm run audit` fails closed for moderate, high, and critical advisories. It has one temporary exception until **2026-08-31 UTC**: source `1124334` / `GHSA-mh99-v99m-4gvg` for the root `brace-expansion@1.1.16` required through Expo SDK 57's Jest 29 and ESLint 9 build/test tooling. That old API processes static repository patterns, not product-runtime input; this reduces exposure but does not remove risk. The lockfile updates the independent 5.x runtime/tool instances to `5.0.8`. Remove this exception when a compatible Expo/Jest/ESLint bridge no longer retains the old consumer, or by the deadline; the audit policy fails after expiry.
+`npm run audit` fails closed for moderate, high, and critical advisories.
 
 Portable signed-pack verification pins `@noble/ed25519` 3.1.0 and
 `@noble/hashes` 2.2.0 in `@daylight-saviour/contracts`. Both are MIT,

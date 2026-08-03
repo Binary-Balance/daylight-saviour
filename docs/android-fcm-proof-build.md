@@ -12,11 +12,13 @@ Review these inputs in the private build environment before starting:
 - `DAYLIGHT_SAVIOUR_ANDROID_GOOGLE_SERVICES_FILE` — absolute path to a
   `google-services.json` file held outside the public checkout. Expo native
   generation copies it into ignored generated Android output.
-- `EXPO_PUBLIC_REMINDER_REGISTRATION_URL` — reviewed registration-service URL.
-- `EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL` — reviewed Time-Zone Data Pack
-  manifest URL.
-- `EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON` — reviewed public verification
-  keys.
+- `EXPO_PUBLIC_REMINDER_REGISTRATION_URL` — reviewed, credential-free HTTPS
+  registration-service URL.
+- Optional remote Time-Zone Data pair:
+  - `EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL` — reviewed Time-Zone Data Pack
+    credential-free HTTPS manifest URL without query or fragment.
+  - `EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON` — reviewed public
+    verification-key JSON using canonical base64-encoded 32-byte Ed25519 keys.
 
 `EXPO_PUBLIC_*` values are public application configuration, not secrets. Expo
 inlines them while Gradle creates the JavaScript bundle. Do not print their
@@ -26,14 +28,19 @@ private operations data.
 `npm run android:build:fcm-proof` sets
 `DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD=1`. Native generation then fails unless the
 Firebase file exists, contains valid JSON, and has an Android client for exactly
-`au.com.binarybalance.daylightsaviour`. It also fails when any reviewed
-`EXPO_PUBLIC_*` input listed above is absent. Ordinary public CI needs no
-Firebase file and keeps the FCM proof flag unset.
+`au.com.binarybalance.daylightsaviour`. It also fails when the reviewed reminder
+registration URL is absent or invalid. Remote Time-Zone Data inputs must either
+both be present and valid or both be absent. Build validation uses the same URL,
+JSON, key-ID, and Ed25519 public-key parser as mobile runtime configuration. When
+both are absent, the app uses its bundled known-good pack and disables network
+refresh. Ordinary public CI needs no Firebase file and keeps the FCM proof flag
+unset.
 
 ## Build
 
-Start from a reviewed, clean commit. Export all inputs from the private build
-environment without copying them into the checkout, then run:
+Start from a reviewed, clean commit. Export required inputs and either both or
+neither optional remote Time-Zone Data inputs from the private build environment
+without copying them into the checkout, then run:
 
 ```sh
 npm run android:build:fcm-proof
