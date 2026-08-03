@@ -5,8 +5,8 @@ const ANDROID_PACKAGE = 'au.com.binarybalance.daylightsaviour';
 const GOOGLE_SERVICES_FILE_ENV =
   'DAYLIGHT_SAVIOUR_ANDROID_GOOGLE_SERVICES_FILE';
 const FCM_PROOF_BUILD_ENV = 'DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD';
-const FCM_PROOF_RUNTIME_INPUTS = [
-  'EXPO_PUBLIC_REMINDER_REGISTRATION_URL',
+const REMINDER_REGISTRATION_URL_ENV = 'EXPO_PUBLIC_REMINDER_REGISTRATION_URL';
+const REMOTE_TIME_ZONE_DATA_INPUTS = [
   'EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL',
   'EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON',
 ];
@@ -105,13 +105,26 @@ function configureAndroidFcm(androidConfig, environment = process.env) {
   }
 
   if (proofBuild) {
-    const missingRuntimeInputs = FCM_PROOF_RUNTIME_INPUTS.filter(
-      (name) => !environment[name]?.trim(),
+    if (!environment[REMINDER_REGISTRATION_URL_ENV]?.trim()) {
+      throw new Error(
+        `FCM proof build requires ${REMINDER_REGISTRATION_URL_ENV}`,
+      );
+    }
+
+    const configuredRemoteInputs = REMOTE_TIME_ZONE_DATA_INPUTS.filter((name) =>
+      environment[name]?.trim(),
     );
 
-    if (missingRuntimeInputs.length > 0) {
+    if (
+      configuredRemoteInputs.length > 0 &&
+      configuredRemoteInputs.length < REMOTE_TIME_ZONE_DATA_INPUTS.length
+    ) {
+      const missingRemoteInputs = REMOTE_TIME_ZONE_DATA_INPUTS.filter(
+        (name) => !environment[name]?.trim(),
+      );
+
       throw new Error(
-        `FCM proof build requires ${missingRuntimeInputs.join(', ')}`,
+        `FCM proof build remote Time-Zone Data configuration requires ${missingRemoteInputs.join(', ')}`,
       );
     }
   }
