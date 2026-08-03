@@ -9,8 +9,8 @@ import {
 } from '@daylight-saviour/contracts';
 import { activateAustralianTimeZoneDataPack } from '@daylight-saviour/domain';
 
-import { decodeCanonicalBase64 } from '../../public-runtime-configuration.cjs';
-export { parseTimeZoneDataPackRemoteConfig } from '../../public-runtime-configuration.cjs';
+import { decodeCanonicalBase64 } from './time-zone-data-remote-configuration.cjs';
+export { parseTimeZoneDataPackRemoteConfig } from './time-zone-data-remote-configuration.cjs';
 
 const foregroundCheckIntervalMs = 24 * 60 * 60 * 1_000;
 const maximumManifestBytes = 64 * 1024;

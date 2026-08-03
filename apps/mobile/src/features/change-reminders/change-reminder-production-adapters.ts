@@ -5,7 +5,7 @@ import { Linking, Platform } from 'react-native';
 import { parseReminderSubscriptionRegistrationResponse } from '@daylight-saviour/contracts';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
-import { parseReminderRegistrationEndpoint } from '../../public-runtime-configuration.cjs';
+import { parseReminderRegistrationEndpoint } from './reminder-registration-endpoint.cjs';
 import type {
   ChangeReminderAdapters,
   ChangeReminderEnableResult,

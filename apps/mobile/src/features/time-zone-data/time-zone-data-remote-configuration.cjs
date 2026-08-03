@@ -50,23 +50,6 @@ function decodeCanonicalBase64(value, maximumBytes) {
   return bytes;
 }
 
-function parseReminderRegistrationEndpoint(value) {
-  if (value === undefined || value.length === 0) return null;
-  try {
-    const url = new URL(value);
-    if (
-      url.protocol !== 'https:' ||
-      url.username.length > 0 ||
-      url.password.length > 0
-    ) {
-      return null;
-    }
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
 function isCanonicalRawPublicKey(value) {
   return (
     typeof value === 'string' &&
@@ -111,6 +94,5 @@ function parseTimeZoneDataPackRemoteConfig({ manifestUrl, trustedKeysJson }) {
 
 module.exports = {
   decodeCanonicalBase64,
-  parseReminderRegistrationEndpoint,
   parseTimeZoneDataPackRemoteConfig,
 };

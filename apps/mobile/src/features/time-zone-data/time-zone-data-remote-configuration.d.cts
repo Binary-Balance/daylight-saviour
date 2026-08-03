@@ -3,10 +3,6 @@ export function decodeCanonicalBase64(
   maximumBytes: number,
 ): Uint8Array | null;
 
-export function parseReminderRegistrationEndpoint(
-  value: string | undefined,
-): string | null;
-
 export function parseTimeZoneDataPackRemoteConfig(input: {
   readonly manifestUrl: string | undefined;
   readonly trustedKeysJson: string | undefined;

@@ -3,8 +3,10 @@ const { dirname, isAbsolute, relative, sep } = require('node:path');
 
 const {
   parseReminderRegistrationEndpoint,
+} = require('../src/features/change-reminders/reminder-registration-endpoint.cjs');
+const {
   parseTimeZoneDataPackRemoteConfig,
-} = require('../src/public-runtime-configuration.cjs');
+} = require('../src/features/time-zone-data/time-zone-data-remote-configuration.cjs');
 
 const ANDROID_PACKAGE = 'au.com.binarybalance.daylightsaviour';
 const GOOGLE_SERVICES_FILE_ENV =
