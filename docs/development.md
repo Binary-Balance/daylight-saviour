@@ -6,9 +6,9 @@
 | --------------------- | ----------------- |
 | Node.js               | 24.18.0           |
 | npm                   | 11.16.0           |
-| Expo                  | 57.0.8            |
+| Expo                  | 57.0.9            |
 | React                 | 19.2.3            |
-| React Native          | 0.86.0            |
+| React Native          | 0.86.2            |
 | TypeScript            | 6.0.3             |
 | Eclipse Temurin JDK   | 17.0.19+10        |
 | Gradle wrapper        | 9.3.1             |
