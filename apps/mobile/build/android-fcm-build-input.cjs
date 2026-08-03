@@ -1,6 +1,11 @@
 const { readFileSync, realpathSync } = require('node:fs');
 const { dirname, isAbsolute, relative, sep } = require('node:path');
 
+const {
+  parseReminderRegistrationEndpoint,
+  parseTimeZoneDataPackRemoteConfig,
+} = require('../src/public-runtime-configuration.cjs');
+
 const ANDROID_PACKAGE = 'au.com.binarybalance.daylightsaviour';
 const GOOGLE_SERVICES_FILE_ENV =
   'DAYLIGHT_SAVIOUR_ANDROID_GOOGLE_SERVICES_FILE';
@@ -105,9 +110,13 @@ function configureAndroidFcm(androidConfig, environment = process.env) {
   }
 
   if (proofBuild) {
-    if (!environment[REMINDER_REGISTRATION_URL_ENV]?.trim()) {
+    if (
+      parseReminderRegistrationEndpoint(
+        environment[REMINDER_REGISTRATION_URL_ENV],
+      ) === null
+    ) {
       throw new Error(
-        `FCM proof build requires ${REMINDER_REGISTRATION_URL_ENV}`,
+        `FCM proof build requires valid ${REMINDER_REGISTRATION_URL_ENV} HTTPS endpoint`,
       );
     }
 
@@ -125,6 +134,19 @@ function configureAndroidFcm(androidConfig, environment = process.env) {
 
       throw new Error(
         `FCM proof build remote Time-Zone Data configuration requires ${missingRemoteInputs.join(', ')}`,
+      );
+    }
+
+    if (
+      configuredRemoteInputs.length === REMOTE_TIME_ZONE_DATA_INPUTS.length &&
+      parseTimeZoneDataPackRemoteConfig({
+        manifestUrl: environment.EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL,
+        trustedKeysJson:
+          environment.EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON,
+      }) === null
+    ) {
+      throw new Error(
+        'FCM proof build requires valid remote Time-Zone Data manifest URL and trusted keys',
       );
     }
   }

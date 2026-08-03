@@ -5,6 +5,7 @@ import { Linking, Platform } from 'react-native';
 import { parseReminderSubscriptionRegistrationResponse } from '@daylight-saviour/contracts';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
+import { parseReminderRegistrationEndpoint } from '../../public-runtime-configuration.cjs';
 import type {
   ChangeReminderAdapters,
   ChangeReminderEnableResult,
@@ -239,23 +240,6 @@ async function createRegistrationRequestId() {
   return bytesToLowerHex(await Crypto.getRandomBytesAsync(32));
 }
 
-function validHttpsEndpoint(value: string | undefined) {
-  if (value === undefined || value.length === 0) return null;
-  try {
-    const url = new URL(value);
-    if (
-      url.protocol !== 'https:' ||
-      url.username.length > 0 ||
-      url.password.length > 0
-    ) {
-      return null;
-    }
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
 function updateEndpoint(registrationEndpoint: string, installationId: string) {
   const url = new URL(registrationEndpoint);
   url.pathname = `${url.pathname.replace(/\/$/, '')}/${encodeURIComponent(installationId)}`;
@@ -318,7 +302,7 @@ export function createProductionChangeReminderAdapters({
     deviceToken: string,
     forceTokenReplacement: boolean,
   ): Promise<ChangeReminderEnableResult> {
-    const registrationEndpoint = validHttpsEndpoint(endpoint);
+    const registrationEndpoint = parseReminderRegistrationEndpoint(endpoint);
     if (registrationEndpoint === null || !validDeviceToken(deviceToken)) {
       return { kind: 'failed' };
     }
@@ -468,7 +452,9 @@ export function createProductionChangeReminderAdapters({
           kind: permission.canAskAgain ? 'permission-denied' : 'os-blocked',
         };
       }
-      if (validHttpsEndpoint(endpoint) === null) return { kind: 'failed' };
+      if (parseReminderRegistrationEndpoint(endpoint) === null) {
+        return { kind: 'failed' };
+      }
       const token = await notifications.getDevicePushTokenAsync();
       return synchronize(homeTimeZone, token.data, false);
     } catch {
