@@ -90,7 +90,7 @@ describe('minimal Functions platform Bicep module', () => {
     assert.equal(appSettings.FCM_PROOF_ENABLED, 'false');
     assert.equal(
       appSettings.FCM_RUNTIME_ENABLED,
-      "[string(parameters('fcmEnabled'))]",
+      "[if(parameters('fcmEnabled'), 'true', 'false')]",
     );
     assert.equal(
       JSON.stringify(compiledTemplate).includes(

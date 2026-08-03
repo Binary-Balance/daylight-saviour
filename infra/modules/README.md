@@ -42,8 +42,8 @@ Global names remain caller responsibility. Module never generates names or embed
 - Key Vault uses Azure RBAC, soft delete, and purge protection; module provisions no secret values.
 - Function App requires HTTPS/TLS 1.2, disables FTP and remote debugging, and denies FTP and SCM basic publishing credentials.
 - FCM workload federation values remain caller-supplied and
-  `FCM_RUNTIME_ENABLED` reflects `fcm.enabled`. Controlled FCM proof remains
-  hard-disabled in generic infrastructure;
+  `FCM_RUNTIME_ENABLED` maps `fcm.enabled` to canonical lowercase `true` or
+  `false`. Controlled FCM proof remains hard-disabled in generic infrastructure;
   private operations owns stronger ingress authorization, fixed proof values,
   temporary enablement, and evidence.
 - Function App logs, Key Vault audit events, and supported platform metrics route to Log Analytics. Application Insights local authentication is disabled.
