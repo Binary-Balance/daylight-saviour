@@ -12,7 +12,7 @@ import type { ActivatedTimeZoneDataPack } from '@daylight-saviour/contracts';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import type { TimeZoneDataPackFreshness } from '../time-zone-data/time-zone-data-manager';
-import type { ChangeReminderTap } from '../change-reminders/change-reminder-notification-runtime';
+import type { ReviewedNotificationTap } from '../change-reminders/change-reminder-notification-runtime';
 
 export type ChangeReminderTapContext =
   | { readonly kind: 'matched'; readonly relation: 'past' | 'upcoming' }
@@ -20,6 +20,9 @@ export type ChangeReminderTapContext =
   | { readonly kind: 'event-mismatch' }
   | { readonly kind: 'event-unavailable' }
   | { readonly kind: 'report-unavailable' }
+  | { readonly kind: 'transport-proof' }
+  | { readonly kind: 'transport-proof-report-unavailable' }
+  | { readonly kind: 'transport-proof-zone-mismatch' }
   | { readonly kind: 'zone-mismatch' };
 
 export type StatusViewModel =
@@ -63,6 +66,10 @@ export type StatusViewModel =
       readonly zoneId: string;
     };
 
+function isTransportProofTap(tap: ReviewedNotificationTap) {
+  return 'notificationKind' in tap;
+}
+
 export function createStatusViewModel(
   activePack: ActivatedTimeZoneDataPack,
   dataFreshness: TimeZoneDataPackFreshness,
@@ -71,7 +78,7 @@ export function createStatusViewModel(
   uses24hourClock: boolean,
   installationSeed: string,
   acknowledgedEventAt: string | null = null,
-  notificationTap: ChangeReminderTap | null = null,
+  notificationTap: ReviewedNotificationTap | null = null,
 ): StatusViewModel {
   const packDetails = {
     packVersion: activePack.packVersion,
@@ -82,7 +89,13 @@ export function createStatusViewModel(
     let requestedEventAt: string | null = null;
     if (notificationTap !== null) {
       if (notificationTap.homeTimeZone !== zoneId) {
-        notificationContext = { kind: 'zone-mismatch' };
+        notificationContext = {
+          kind: isTransportProofTap(notificationTap)
+            ? 'transport-proof-zone-mismatch'
+            : 'zone-mismatch',
+        };
+      } else if (isTransportProofTap(notificationTap)) {
+        notificationContext = { kind: 'transport-proof' };
       } else {
         const expectedDirection =
           notificationTap.changeDirection === 'forward'
@@ -214,7 +227,13 @@ export function createStatusViewModel(
       message: copy.civilTimeReport.decisionUnavailable.message(error.reason),
       ...packDetails,
       notificationContext:
-        notificationTap === null ? null : { kind: 'report-unavailable' },
+        notificationTap === null
+          ? null
+          : {
+              kind: isTransportProofTap(notificationTap)
+                ? 'transport-proof-report-unavailable'
+                : 'report-unavailable',
+            },
       unavailabilityReason: error.reason,
       zoneId,
     };

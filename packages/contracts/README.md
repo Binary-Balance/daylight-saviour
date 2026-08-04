@@ -25,3 +25,12 @@ declarations, metadata mismatch, and malformed pack content fail closed.
 Trusted keys are application build configuration. Manifests and downloaded
 packs never add or replace trust anchors. Portable verification uses exact
 `@noble/ed25519` 3.1.0 and `@noble/hashes` 2.2.0; signing remains Node-only.
+
+Notification data contracts also fail closed on exact keys. A Change Reminder
+contains reviewed event instant, direction, timing, and Home Time Zone. Separate
+FCM transport-proof data contains only canonical `homeTimeZone` and fixed
+`notificationKind: fcm-transport-proof`; calendar facts and reminder timing are
+not valid transport-proof fields. After exact remote data activation, Android
+proof builds use a separate exact local-presentation contract with fixed
+`presentationKind: local-notification`; provider messages cannot supply that
+field and local notifications cannot be replayed as remote task input.

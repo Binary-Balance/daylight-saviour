@@ -25,6 +25,13 @@ export interface ChangeReminderNotification {
   readonly reminderKind: 'change-reminder';
   readonly reminderTiming: 'one-week' | 'one-day';
 }
+export interface FcmTransportProofNotification {
+  readonly homeTimeZone: string;
+  readonly notificationKind: 'fcm-transport-proof';
+}
+export interface FcmTransportProofPresentation extends FcmTransportProofNotification {
+  readonly presentationKind: 'local-notification';
+}
 export const reminderSubscriptionPlatforms =
   runtime.reminderSubscriptionPlatforms as readonly ReminderSubscriptionPlatform[];
 export const ReminderSubscriptionValidationError =
@@ -47,3 +54,15 @@ export const parseChangeReminderNotification =
   runtime.parseChangeReminderNotification as (
     value: unknown,
   ) => ChangeReminderNotification;
+export const FcmTransportProofNotificationValidationError =
+  runtime.FcmTransportProofNotificationValidationError;
+export const parseFcmTransportProofNotification =
+  runtime.parseFcmTransportProofNotification as (
+    value: unknown,
+  ) => FcmTransportProofNotification;
+export const FcmTransportProofPresentationValidationError =
+  runtime.FcmTransportProofPresentationValidationError;
+export const parseFcmTransportProofPresentation =
+  runtime.parseFcmTransportProofPresentation as (
+    value: unknown,
+  ) => FcmTransportProofPresentation;

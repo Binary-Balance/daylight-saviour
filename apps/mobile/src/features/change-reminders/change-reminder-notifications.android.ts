@@ -5,12 +5,13 @@ import * as Notifications from 'expo-notifications';
 import {
   createChangeReminderNotificationRuntime,
   createChangeReminderTapVisit,
-  type ChangeReminderTap,
+  type ReviewedNotificationTap,
 } from './change-reminder-notification-runtime';
+import { fcmTransportProofBuild } from './fcm-transport-proof-build';
 
 /** Android Expo binding kept separate from portable notification activation. */
 export function useProductionChangeReminderTap() {
-  const [tap, setTap] = useState<ChangeReminderTap | null>(null);
+  const [tap, setTap] = useState<ReviewedNotificationTap | null>(null);
   const visit = useMemo(
     () => createChangeReminderTapVisit({ onChange: setTap }),
     [],
@@ -32,6 +33,7 @@ export function useProductionChangeReminderTap() {
             Notifications.setNotificationHandler(handler),
         },
         onTap: visit.receive,
+        transportProofBuild: fcmTransportProofBuild,
       }),
     [visit],
   );

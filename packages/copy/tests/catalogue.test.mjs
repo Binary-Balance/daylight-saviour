@@ -85,6 +85,43 @@ describe('Australian-English copy catalogue', () => {
     });
   });
 
+  it('owns unmistakable fixed FCM transport-test wording', () => {
+    assert.equal(
+      Object.isFrozen(
+        australianEnglish.changeReminders.transportProof.notification,
+      ),
+      true,
+    );
+    assert.deepEqual(
+      australianEnglish.changeReminders.transportProof.notification,
+      {
+        body: 'Test only. No Change Reminder is due.',
+        title: 'FCM transport test',
+      },
+    );
+    assert.equal(
+      australianEnglish.changeReminders.transportProof.diagnostic.registration({
+        homeTimeZone: 'Australia/Sydney',
+        installationId: 'installation-123',
+      }),
+      'Installation ID: installation-123. Home Time Zone: Australia/Sydney.',
+    );
+    assert.deepEqual(
+      australianEnglish.changeReminders.transportProof.zoneMismatch,
+      {
+        body: 'Transport test received for a different Home Time Zone. This app did not switch zones. Scheduler timing and Change Reminder eligibility were not tested.',
+        heading: 'FCM TRANSPORT TEST HOME TIME ZONE MISMATCH',
+      },
+    );
+    assert.deepEqual(
+      australianEnglish.changeReminders.transportProof.reportUnavailable,
+      {
+        body: 'Transport test received. Verified Civil Time Report details are unavailable. Scheduler timing and Change Reminder eligibility were not tested.',
+        heading: 'FCM TRANSPORT TEST REPORT UNAVAILABLE',
+      },
+    );
+  });
+
   it('owns exact safe Change Reminder report-context wording', () => {
     assert.deepEqual(australianEnglish.changeReminders.notificationContext, {
       opened: {

@@ -3,7 +3,11 @@ import { describe, it } from 'node:test';
 
 import {
   ChangeReminderNotificationValidationError,
+  FcmTransportProofNotificationValidationError,
+  FcmTransportProofPresentationValidationError,
   parseChangeReminderNotification,
+  parseFcmTransportProofNotification,
+  parseFcmTransportProofPresentation,
   parseReminderSubscriptionRegistration,
   parseReminderSubscriptionUpdate,
   ReminderSubscriptionValidationError,
@@ -56,6 +60,50 @@ describe('reminder subscription registration contract', () => {
     assert.throws(
       () => parseChangeReminderNotification(null),
       ChangeReminderNotificationValidationError,
+    );
+  });
+  it('activates only exact FCM transport-proof data', () => {
+    const notification = {
+      homeTimeZone: 'Australia/Sydney',
+      notificationKind: 'fcm-transport-proof',
+    };
+    assert.deepEqual(
+      parseFcmTransportProofNotification(notification),
+      notification,
+    );
+    for (const extra of [
+      { changeDirection: 'forward' },
+      { changeEventAt: '2026-10-03T16:00:00.000Z' },
+      { reminderTiming: 'one-week' },
+      { copy: 'caller selected' },
+    ]) {
+      assert.throws(
+        () => parseFcmTransportProofNotification({ ...notification, ...extra }),
+        FcmTransportProofNotificationValidationError,
+      );
+    }
+  });
+  it('separates exact local transport-proof presentation data', () => {
+    const presentation = {
+      homeTimeZone: 'Australia/Sydney',
+      notificationKind: 'fcm-transport-proof',
+      presentationKind: 'local-notification',
+    };
+    assert.deepEqual(
+      parseFcmTransportProofPresentation(presentation),
+      presentation,
+    );
+    assert.throws(
+      () => parseFcmTransportProofNotification(presentation),
+      FcmTransportProofNotificationValidationError,
+    );
+    assert.throws(
+      () =>
+        parseFcmTransportProofPresentation({
+          ...presentation,
+          presentationKind: 'remote-notification',
+        }),
+      FcmTransportProofPresentationValidationError,
     );
   });
   it('accepts native platform token shapes', () => {

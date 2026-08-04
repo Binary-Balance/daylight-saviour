@@ -29,12 +29,12 @@ import {
 } from '../../theme';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
 import { createHomeTimeZoneSession } from './home-time-zone-session';
-import type { ChangeReminderTap } from '../change-reminders/change-reminder-notification-runtime';
+import type { ReviewedNotificationTap } from '../change-reminders/change-reminder-notification-runtime';
 
 interface HomeTimeZoneScreenProps {
   readonly adapters: HomeTimeZoneAdapters;
   readonly now?: Date;
-  readonly notificationTap?: ChangeReminderTap | null;
+  readonly notificationTap?: ReviewedNotificationTap | null;
 }
 
 interface ChooserProps {
@@ -208,6 +208,15 @@ export default function HomeTimeZoneScreen({
       stop();
     };
   }, [session]);
+
+  useEffect(() => {
+    if (notificationTap !== null && 'notificationKind' in notificationTap) {
+      session.dispatch({
+        type: 'open-proof-report',
+        zoneId: notificationTap.homeTimeZone,
+      });
+    }
+  }, [notificationTap, session]);
 
   if (snapshot.kind === 'ready') {
     return (

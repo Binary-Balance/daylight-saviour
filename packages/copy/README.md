@@ -28,13 +28,14 @@ notification copy will be added only with implemented notification journeys.
 
 The emitting notification service imports
 `@daylight-saviour/copy/change-reminder-notification`. Its authoritative source
-is `src/change-reminder-notification.ts`; `npm run build` emits its JavaScript
-and declaration to ignored `dist/`, and the public subpath resolves only to
-that compiled output. `pretest` builds it before copy tests. Notification
+is `src/change-reminder-notification.ts`; `npm run build` emits JavaScript and a
+declaration to ignored `dist/`, and the public subpath resolves only to that
+compiled output. `pretest` builds it before copy tests. Notification
 `pretypecheck`, `pretest`, and `prebuild` build it first, so a clean checkout
 resolves the same runtime artifact during local checks and production builds.
-Tests assert source and public runtime wording plus immutability. No other copy
-may bypass the facade.
+Tests assert source and public runtime wording plus immutability. Mobile code
+continues through the `australianEnglish` facade; no other copy may bypass these
+boundaries.
 
 ## Ownership boundaries
 

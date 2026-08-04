@@ -47,30 +47,41 @@ References:
 [service-account impersonation roles](https://cloud.google.com/iam/docs/service-account-permissions),
 and [FCM IAM permissions](https://cloud.google.com/iam/docs/roles-permissions/firebasecloudmessaging).
 
-## Controlled FCM proof
+## Controlled FCM transport proof
 
 `POST /internal/fcm-proof` is a deployment proof, not a product endpoint. It is
 disabled unless both `FCM_RUNTIME_ENABLED` and `FCM_PROOF_ENABLED` are exactly
 `true`, and requires Azure Functions `function` authorization after deployment.
 Local Functions execution does not enforce access keys.
 
-Proof inputs are environment-owned:
+Beyond standing runtime and federation settings, proof has one
+environment-owned input:
 
-| Setting                      | Accepted value                                                     |
-| ---------------------------- | ------------------------------------------------------------------ |
-| `FCM_PROOF_INSTALLATION_ID`  | Existing installation ID resolving to stored Android registration. |
-| `FCM_PROOF_HOME_TIME_ZONE`   | Canonical supported Australian Home Time Zone.                     |
-| `FCM_PROOF_CHANGE_EVENT_AT`  | Exact ISO-8601 UTC instant.                                        |
-| `FCM_PROOF_CHANGE_DIRECTION` | `forward` or `backward`.                                           |
-| `FCM_PROOF_TIMING`           | `one-week` or `one-day`.                                           |
+| Setting                     | Accepted value                                                     |
+| --------------------------- | ------------------------------------------------------------------ |
+| `FCM_PROOF_INSTALLATION_ID` | Existing installation ID resolving to stored Android registration. |
 
-Request body is ignored. Caller cannot supply device token, project, service
-account, payload, or copy. Runtime resolves existing registration and builds
-reviewed fixed Change Reminder payload.
+Request body is ignored. Caller cannot supply calendar facts, device token,
+project, service account, payload, or copy. Runtime resolves an existing
+registration and immediately sends a high-priority data-only FCM message. Exact
+provider data contains only `notificationKind: fcm-transport-proof` and stored
+canonical `homeTimeZone`; title, body, Change Event instant, direction, and
+reminder timing are absent. Provider
+acceptance, rejection classification, and conditional invalid-token removal use
+the same implementation as Change Reminder delivery.
+
+Only an exact Android proof build may turn accepted proof data into the fixed
+local `FCM transport test` notification stating that no Change Reminder is due.
+Ordinary Android installs cannot present proof data, including after replacing
+a proof build whose background-task registration persisted.
+
+This path proves keyless authentication and FCM transport only. Calendar
+eligibility and scheduled dispatch require separate deterministic evidence; no
+real-world Change Event wait participates.
 
 Before enabling proof, private operations must add stronger ingress
 authorization such as private access or identity-aware proxy, keep function key
-in approved secret storage, set fixed proof values, and record reviewed evidence.
+in approved secret storage, set the installation ID, and record reviewed evidence.
 Disable proof immediately afterward. Generic Bicep defaults `fcm.enabled` to
 `false`, maps it to lowercase `true` or `false` in `FCM_RUNTIME_ENABLED`, and always forces
 `FCM_PROOF_ENABLED=false`. Environment-specific runtime enablement, proof

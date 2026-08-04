@@ -1,5 +1,8 @@
 import { changeReminderNotification } from '@daylight-saviour/copy/change-reminder-notification';
-import type { ChangeReminderNotification } from '@daylight-saviour/contracts/reminder-subscription-runtime';
+import type {
+  ChangeReminderNotification,
+  FcmTransportProofNotification,
+} from '@daylight-saviour/contracts/reminder-subscription-runtime';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
 const fcmOrigin = 'https://fcm.googleapis.com';
@@ -45,21 +48,27 @@ export interface FcmAccessTokenProvider {
 }
 
 export interface FcmChangeReminderPayload {
-  readonly message: {
-    readonly android: {
-      readonly notification: {
-        readonly channel_id: 'change-reminders';
-        readonly sound: 'default';
+  readonly message:
+    | {
+        readonly android: {
+          readonly notification: {
+            readonly channel_id: 'change-reminders';
+            readonly sound: 'default';
+          };
+          readonly priority: 'HIGH';
+        };
+        readonly data: ChangeReminderNotification;
+        readonly notification: {
+          readonly body: string;
+          readonly title: string;
+        };
+        readonly token: string;
+      }
+    | {
+        readonly android: { readonly priority: 'HIGH' };
+        readonly data: FcmTransportProofNotification;
+        readonly token: string;
       };
-      readonly priority: 'HIGH';
-    };
-    readonly data: ChangeReminderNotification;
-    readonly notification: {
-      readonly body: string;
-      readonly title: string;
-    };
-    readonly token: string;
-  };
 }
 
 export interface FcmHttpRequest {
@@ -102,7 +111,13 @@ export type FcmChangeReminderLogEvent =
   | 'fcm-change-reminder-malformed-response'
   | 'fcm-change-reminder-permanent-invalid-token'
   | 'fcm-change-reminder-permanent-rejection'
-  | 'fcm-change-reminder-transient-rejection';
+  | 'fcm-change-reminder-transient-rejection'
+  | 'fcm-transport-proof-accepted'
+  | 'fcm-transport-proof-invalid-token-cleanup-failed'
+  | 'fcm-transport-proof-malformed-response'
+  | 'fcm-transport-proof-permanent-invalid-token'
+  | 'fcm-transport-proof-permanent-rejection'
+  | 'fcm-transport-proof-transient-rejection';
 
 export interface FcmChangeReminderLogger {
   readonly write: (event: FcmChangeReminderLogEvent) => void;
@@ -126,6 +141,10 @@ export interface FcmChangeReminderSender {
   readonly send: (
     subscription: FcmChangeReminderSubscription,
     facts: ReviewedChangeReminderFacts,
+  ) => Promise<FcmChangeReminderResult>;
+  readonly sendTransportProof: (
+    subscription: FcmChangeReminderSubscription,
+    homeTimeZone: string,
   ) => Promise<FcmChangeReminderResult>;
 }
 
@@ -283,6 +302,13 @@ function assertReviewedFacts(
   }
 }
 
+function assertSubscription(subscription: FcmChangeReminderSubscription) {
+  if (!installationIdPattern.test(subscription.installationId))
+    throw new Error('Invalid reminder subscription installation ID');
+  if (!deviceTokenPattern.test(subscription.deviceToken))
+    throw new Error('Invalid reminder subscription token');
+}
+
 function buildPayload(
   subscription: FcmChangeReminderSubscription,
   facts: ReviewedChangeReminderFacts,
@@ -312,6 +338,26 @@ function buildPayload(
   };
 }
 
+function buildTransportProofPayload(
+  subscription: FcmChangeReminderSubscription,
+  homeTimeZone: string,
+): FcmChangeReminderPayload {
+  assertSubscription(subscription);
+  if (canonicalAustralianZoneId(homeTimeZone) !== homeTimeZone) {
+    throw new Error('Invalid transport-proof Home Time Zone');
+  }
+  return {
+    message: {
+      android: { priority: 'HIGH' },
+      data: {
+        homeTimeZone,
+        notificationKind: 'fcm-transport-proof',
+      },
+      token: subscription.deviceToken,
+    },
+  };
+}
+
 function hasUsableAccessToken(token: FcmAccessToken, now: Date) {
   return (
     typeof token.value === 'string' &&
@@ -327,28 +373,45 @@ function hasUsableAccessToken(token: FcmAccessToken, now: Date) {
 function report(
   logger: FcmChangeReminderLogger,
   result: FcmChangeReminderResult,
+  deliveryKind: 'change-reminder' | 'transport-proof',
 ): FcmChangeReminderResult {
-  const event: Record<
-    FcmChangeReminderResult['kind'],
-    FcmChangeReminderLogEvent
+  const events: Record<
+    'change-reminder' | 'transport-proof',
+    Record<FcmChangeReminderResult['kind'], FcmChangeReminderLogEvent>
   > = {
-    accepted: 'fcm-change-reminder-accepted',
-    'malformed-response': 'fcm-change-reminder-malformed-response',
-    'permanent-invalid-token': 'fcm-change-reminder-permanent-invalid-token',
-    'permanent-rejection': 'fcm-change-reminder-permanent-rejection',
-    'transient-rejection': 'fcm-change-reminder-transient-rejection',
+    'change-reminder': {
+      accepted: 'fcm-change-reminder-accepted',
+      'malformed-response': 'fcm-change-reminder-malformed-response',
+      'permanent-invalid-token': 'fcm-change-reminder-permanent-invalid-token',
+      'permanent-rejection': 'fcm-change-reminder-permanent-rejection',
+      'transient-rejection': 'fcm-change-reminder-transient-rejection',
+    },
+    'transport-proof': {
+      accepted: 'fcm-transport-proof-accepted',
+      'malformed-response': 'fcm-transport-proof-malformed-response',
+      'permanent-invalid-token': 'fcm-transport-proof-permanent-invalid-token',
+      'permanent-rejection': 'fcm-transport-proof-permanent-rejection',
+      'transient-rejection': 'fcm-transport-proof-transient-rejection',
+    },
   };
   try {
-    logger.write(event[result.kind]);
+    logger.write(events[deliveryKind][result.kind]);
   } catch {
     // Logging must not alter a provider delivery result.
   }
   return result;
 }
 
-function reportCleanupFailure(logger: FcmChangeReminderLogger): void {
+function reportCleanupFailure(
+  logger: FcmChangeReminderLogger,
+  deliveryKind: 'change-reminder' | 'transport-proof',
+): void {
   try {
-    logger.write('fcm-change-reminder-invalid-token-cleanup-failed');
+    logger.write(
+      deliveryKind === 'change-reminder'
+        ? 'fcm-change-reminder-invalid-token-cleanup-failed'
+        : 'fcm-transport-proof-invalid-token-cleanup-failed',
+    );
   } catch {
     // Logging must not alter a provider delivery result.
   }
@@ -413,67 +476,113 @@ export function createFcmChangeReminderSender(
   const endpoint = fcmSendEndpoint(projectId);
   const clock = dependencies.clock ?? (() => new Date());
 
+  async function send(
+    subscription: FcmChangeReminderSubscription,
+    payload: FcmChangeReminderPayload,
+    deliveryKind: 'change-reminder' | 'transport-proof',
+  ): Promise<FcmChangeReminderResult> {
+    let accessToken: FcmAccessToken;
+    const now = clock();
+    try {
+      accessToken = await dependencies.accessTokenProvider.getAccessToken();
+    } catch {
+      return report(
+        dependencies.logger,
+        { kind: 'transient-rejection' },
+        deliveryKind,
+      );
+    }
+    if (!hasUsableAccessToken(accessToken, now)) {
+      return report(
+        dependencies.logger,
+        { kind: 'transient-rejection' },
+        deliveryKind,
+      );
+    }
+
+    let response: FcmHttpResponse;
+    try {
+      response = await dependencies.transport.post({
+        accessToken: accessToken.value,
+        endpoint,
+        payload,
+      });
+    } catch {
+      return report(
+        dependencies.logger,
+        { kind: 'transient-rejection' },
+        deliveryKind,
+      );
+    }
+
+    const body = parseJson(response.body);
+    if (isAcceptedResponse(response.status, body)) {
+      return report(dependencies.logger, { kind: 'accepted' }, deliveryKind);
+    }
+
+    const error = parseProviderError(response.status, body);
+    if (error === undefined) {
+      return report(
+        dependencies.logger,
+        { kind: 'malformed-response' },
+        deliveryKind,
+      );
+    }
+    if (error.hasUnregisteredToken) {
+      if (response.status !== 404 || error.status !== 'NOT_FOUND') {
+        return report(
+          dependencies.logger,
+          { kind: 'malformed-response' },
+          deliveryKind,
+        );
+      }
+      let cleanup: FcmSubscriptionCleanupStatus = 'failed';
+      try {
+        cleanup = cleanupStatus(
+          await dependencies.subscriptionRemover.removeIfDeviceTokenMatches(
+            subscription,
+          ),
+        );
+      } catch {
+        // Provider rejection remains permanent when storage cleanup needs retry.
+      }
+      const result = report(
+        dependencies.logger,
+        { kind: 'permanent-invalid-token', cleanupStatus: cleanup },
+        deliveryKind,
+      );
+      if (cleanup === 'failed') {
+        reportCleanupFailure(dependencies.logger, deliveryKind);
+      }
+      return result;
+    }
+    return report(
+      dependencies.logger,
+      {
+        kind:
+          error.classification === 'transient'
+            ? 'transient-rejection'
+            : 'permanent-rejection',
+      },
+      deliveryKind,
+    );
+  }
+
   return {
     async send(subscription, facts) {
       assertReviewedFacts(subscription, facts);
-      let accessToken: FcmAccessToken;
-      const now = clock();
-      try {
-        accessToken = await dependencies.accessTokenProvider.getAccessToken();
-      } catch {
-        return report(dependencies.logger, { kind: 'transient-rejection' });
-      }
-      if (!hasUsableAccessToken(accessToken, now)) {
-        return report(dependencies.logger, { kind: 'transient-rejection' });
-      }
-
-      let response: FcmHttpResponse;
-      try {
-        response = await dependencies.transport.post({
-          accessToken: accessToken.value,
-          endpoint,
-          payload: buildPayload(subscription, facts),
-        });
-      } catch {
-        return report(dependencies.logger, { kind: 'transient-rejection' });
-      }
-
-      const body = parseJson(response.body);
-      if (isAcceptedResponse(response.status, body)) {
-        return report(dependencies.logger, { kind: 'accepted' });
-      }
-
-      const error = parseProviderError(response.status, body);
-      if (error === undefined) {
-        return report(dependencies.logger, { kind: 'malformed-response' });
-      }
-      if (error.hasUnregisteredToken) {
-        if (response.status !== 404 || error.status !== 'NOT_FOUND') {
-          return report(dependencies.logger, { kind: 'malformed-response' });
-        }
-        let cleanup: FcmSubscriptionCleanupStatus = 'failed';
-        try {
-          cleanup = cleanupStatus(
-            await dependencies.subscriptionRemover.removeIfDeviceTokenMatches(
-              subscription,
-            ),
-          );
-        } catch {
-          // The FCM response stays permanent even when storage cleanup needs a retry.
-        }
-        const result = report(dependencies.logger, {
-          kind: 'permanent-invalid-token',
-          cleanupStatus: cleanup,
-        });
-        if (cleanup === 'failed') {
-          reportCleanupFailure(dependencies.logger);
-        }
-        return result;
-      }
-      if (error.classification === 'transient') {
-        return report(dependencies.logger, { kind: 'transient-rejection' });
-      }
-      return report(dependencies.logger, { kind: 'permanent-rejection' });
+      return send(
+        subscription,
+        buildPayload(subscription, facts),
+        'change-reminder',
+      );
+    },
+    async sendTransportProof(subscription, homeTimeZone) {
+      return send(
+        subscription,
+        buildTransportProofPayload(subscription, homeTimeZone),
+        'transport-proof',
+      );
     },
   };
 }

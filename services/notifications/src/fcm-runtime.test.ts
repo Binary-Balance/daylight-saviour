@@ -12,12 +12,8 @@ import type { ReminderSubscriptionStore } from './reminder-subscriptions.js';
 const environment = {
   FCM_ENTRA_ASSERTION_AUDIENCE: 'api://portable-google-federation',
   FCM_PROJECT_ID: 'portable-project',
-  FCM_PROOF_CHANGE_DIRECTION: 'forward',
-  FCM_PROOF_CHANGE_EVENT_AT: '2026-10-04T16:00:00.000Z',
   FCM_PROOF_ENABLED: 'true',
-  FCM_PROOF_HOME_TIME_ZONE: 'Australia/Sydney',
   FCM_PROOF_INSTALLATION_ID: 'a'.repeat(43),
-  FCM_PROOF_TIMING: 'one-week',
   FCM_RUNTIME_ENABLED: 'true',
   FCM_SERVICE_ACCOUNT_EMAIL:
     'portable-fcm-sender@portable-project.iam.gserviceaccount.com',
@@ -36,7 +32,7 @@ function store(
     createSubscription: async () => 'accepted',
     getFcmProofSubscription: async () => ({
       deviceToken: storedDeviceToken,
-      homeTimeZone: environment.FCM_PROOF_HOME_TIME_ZONE,
+      homeTimeZone: 'Australia/Sydney',
       installationId: environment.FCM_PROOF_INSTALLATION_ID,
       oneDayEnabled: true,
       oneWeekEnabled: true,
@@ -134,27 +130,22 @@ describe('FCM runtime composition', () => {
     );
     const fcmRequest = JSON.parse(requests[2]?.body ?? '') as {
       readonly message: {
+        readonly android: Record<string, string>;
         readonly data: Record<string, string>;
-        readonly notification: Record<string, string>;
         readonly token: string;
       };
     };
     assert.equal(fcmRequest.message.token, storedDeviceToken);
     assert.deepEqual(fcmRequest.message.data, {
-      changeDirection: 'forward',
-      changeEventAt: '2026-10-04T16:00:00.000Z',
       homeTimeZone: 'Australia/Sydney',
-      reminderKind: 'change-reminder',
-      reminderTiming: 'one-week',
+      notificationKind: 'fcm-transport-proof',
     });
-    assert.deepEqual(fcmRequest.message.notification, {
-      body: 'Your Home Time Zone changes soon.',
-      title: 'Change Reminder',
-    });
+    assert.deepEqual(fcmRequest.message.android, { priority: 'HIGH' });
+    assert.equal('notification' in fcmRequest.message, false);
     assert.doesNotMatch(requests[2]?.body ?? '', /caller-controlled/);
     assert.deepEqual(events, [
       'fcm-credential-ready',
-      'fcm-change-reminder-accepted',
+      'fcm-transport-proof-accepted',
     ]);
   });
 
@@ -222,42 +213,6 @@ describe('FCM runtime composition', () => {
     assert.doesNotMatch(JSON.stringify(denied), new RegExp(sensitiveFailure));
   });
 
-  it('denies proof when stored zone or reminder preference does not match fixed facts', async () => {
-    for (const registration of [
-      {
-        deviceToken: storedDeviceToken,
-        homeTimeZone: 'Australia/Perth',
-        installationId: environment.FCM_PROOF_INSTALLATION_ID,
-        oneDayEnabled: true,
-        oneWeekEnabled: true,
-      },
-      {
-        deviceToken: storedDeviceToken,
-        homeTimeZone: environment.FCM_PROOF_HOME_TIME_ZONE,
-        installationId: environment.FCM_PROOF_INSTALLATION_ID,
-        oneDayEnabled: true,
-        oneWeekEnabled: false,
-      },
-    ]) {
-      const requests: { body: string | undefined; input: string }[] = [];
-      const handler = createFcmProofHandler(
-        environment,
-        dependencies(
-          [],
-          requests,
-          store({ getFcmProofSubscription: async () => registration }),
-        ),
-      );
-
-      assert.deepEqual(await handler({} as never), {
-        headers: { 'Cache-Control': 'no-store' },
-        jsonBody: { error: 'Registration unavailable' },
-        status: 404,
-      });
-      assert.deepEqual(requests, []);
-    }
-  });
-
   it('exposes token-cleanup failure classification without sensitive details', async () => {
     const events: FcmRuntimeLogEvent[] = [];
     const requests: { body: string | undefined; input: string }[] = [];
@@ -309,8 +264,8 @@ describe('FCM runtime composition', () => {
     });
     assert.deepEqual(events, [
       'fcm-credential-ready',
-      'fcm-change-reminder-permanent-invalid-token',
-      'fcm-change-reminder-invalid-token-cleanup-failed',
+      'fcm-transport-proof-permanent-invalid-token',
+      'fcm-transport-proof-invalid-token-cleanup-failed',
     ]);
     assert.doesNotMatch(JSON.stringify(events), new RegExp(storedDeviceToken));
   });
@@ -343,7 +298,7 @@ describe('FCM runtime composition', () => {
     });
     assert.deepEqual(events, [
       'fcm-credential-ready',
-      'fcm-change-reminder-transient-rejection',
+      'fcm-transport-proof-transient-rejection',
     ]);
     assert.doesNotMatch(JSON.stringify(events), new RegExp(storedDeviceToken));
   });

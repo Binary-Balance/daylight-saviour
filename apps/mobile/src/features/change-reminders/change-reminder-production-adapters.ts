@@ -57,6 +57,17 @@ interface ProductionAdapterDependencies {
   readonly timeoutMs?: number;
 }
 
+export interface FcmTransportProofDiagnostic {
+  readonly homeTimeZone: string;
+  readonly installationId: string;
+}
+
+export interface FcmTransportProofDiagnosticReader {
+  readonly read: (
+    homeTimeZone: string,
+  ) => Promise<FcmTransportProofDiagnostic | null>;
+}
+
 function validStoredBase(candidate: Record<string, unknown>) {
   return (
     (candidate.version === 3 || candidate.version === 4) &&
@@ -636,6 +647,32 @@ export function createProductionChangeReminderAdapters({
   };
 }
 
+export function createFcmTransportProofDiagnosticReader(secureStore: {
+  readonly getItemAsync: (key: string) => Promise<string | null>;
+}): FcmTransportProofDiagnosticReader {
+  return {
+    async read(homeTimeZone) {
+      try {
+        const saved = await secureStore.getItemAsync(registrationKey);
+        if (saved === null) return null;
+        const state = parseStoredState(saved);
+        if (
+          state.state !== 'registered' ||
+          state.homeTimeZone !== homeTimeZone
+        ) {
+          return null;
+        }
+        return {
+          homeTimeZone: state.homeTimeZone,
+          installationId: state.installationId,
+        };
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
 export const productionChangeReminderAdapters =
   createProductionChangeReminderAdapters({
     createRegistrationRequestId,
@@ -646,3 +683,6 @@ export const productionChangeReminderAdapters =
     platform: Platform.OS,
     secureStore: SecureStore,
   });
+
+export const productionFcmTransportProofDiagnosticReader =
+  createFcmTransportProofDiagnosticReader(SecureStore);
