@@ -209,6 +209,15 @@ export default function HomeTimeZoneScreen({
     };
   }, [session]);
 
+  useEffect(() => {
+    if (notificationTap !== null && 'notificationKind' in notificationTap) {
+      session.dispatch({
+        type: 'open-proof-report',
+        zoneId: notificationTap.homeTimeZone,
+      });
+    }
+  }, [notificationTap, session]);
+
   if (snapshot.kind === 'ready') {
     return (
       <StatusScreen

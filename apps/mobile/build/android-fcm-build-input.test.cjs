@@ -254,7 +254,10 @@ test('embeds transport-proof capability only in validated proof builds', (t) => 
   const googleServicesFile = externalFixture(t, 'configured');
   const config = { android: baseAndroidConfig, extra: { retained: true } };
 
-  assert.deepEqual(createAppConfig(config, {}), config);
+  assert.deepEqual(createAppConfig(config, {}), {
+    ...config,
+    extra: { retained: true, fcmTransportProofBuild: false },
+  });
   assert.deepEqual(
     createAppConfig(config, {
       EXPO_PUBLIC_REMINDER_REGISTRATION_URL:
@@ -267,5 +270,34 @@ test('embeds transport-proof capability only in validated proof builds', (t) => 
       android: { ...baseAndroidConfig, googleServicesFile },
       extra: { retained: true, fcmTransportProofBuild: true },
     },
+  );
+});
+
+test('overwrites poisoned reserved proof-build extra from validated environment', (t) => {
+  const googleServicesFile = externalFixture(t, 'configured');
+  assert.equal(
+    createAppConfig(
+      {
+        android: baseAndroidConfig,
+        extra: { fcmTransportProofBuild: true },
+      },
+      {},
+    ).extra.fcmTransportProofBuild,
+    false,
+  );
+  assert.equal(
+    createAppConfig(
+      {
+        android: baseAndroidConfig,
+        extra: { fcmTransportProofBuild: false },
+      },
+      {
+        EXPO_PUBLIC_REMINDER_REGISTRATION_URL:
+          proofRuntimeInputs.EXPO_PUBLIC_REMINDER_REGISTRATION_URL,
+        DAYLIGHT_SAVIOUR_ANDROID_GOOGLE_SERVICES_FILE: googleServicesFile,
+        DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD: '1',
+      },
+    ).extra.fcmTransportProofBuild,
+    true,
   );
 });

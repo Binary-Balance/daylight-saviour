@@ -1,7 +1,7 @@
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 import {
   parseChangeReminderNotification,
-  parseFcmTransportProofNotification,
+  parseFcmTransportProofPresentation,
   type ChangeReminderNotification,
   type FcmTransportProofNotification,
 } from '@daylight-saviour/contracts';
@@ -77,10 +77,13 @@ export function parseFcmTransportProofTap(
   value: unknown,
 ): FcmTransportProofTap | null {
   try {
-    const notification = parseFcmTransportProofNotification(value);
+    const notification = parseFcmTransportProofPresentation(value);
     return canonicalAustralianZoneId(notification.homeTimeZone) ===
       notification.homeTimeZone
-      ? notification
+      ? {
+          homeTimeZone: notification.homeTimeZone,
+          notificationKind: notification.notificationKind,
+        }
       : null;
   } catch {
     return null;

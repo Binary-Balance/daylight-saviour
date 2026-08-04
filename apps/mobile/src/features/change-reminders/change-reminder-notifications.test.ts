@@ -96,8 +96,12 @@ describe('Change Reminder notification runtime', () => {
     const proof = {
       homeTimeZone: 'Australia/Sydney',
       notificationKind: 'fcm-transport-proof',
+      presentationKind: 'local-notification',
     } as const;
-    expect(parseFcmTransportProofTap(proof)).toEqual(proof);
+    expect(parseFcmTransportProofTap(proof)).toEqual({
+      homeTimeZone: 'Australia/Sydney',
+      notificationKind: 'fcm-transport-proof',
+    });
     expect(parseFcmTransportProofTap({ ...proof, extra: 'nope' })).toBeNull();
     expect(
       parseFcmTransportProofTap({ ...proof, homeTimeZone: 'Australia/ACT' }),
@@ -110,6 +114,7 @@ describe('Change Reminder notification runtime', () => {
       data: {
         homeTimeZone: 'Australia/Sydney',
         notificationKind: 'fcm-transport-proof',
+        presentationKind: 'local-notification',
       },
       title: 'FCM transport test',
     } as const;
@@ -140,6 +145,32 @@ describe('Change Reminder notification runtime', () => {
           : [],
       );
     }
+  });
+
+  it('never presents or opens raw remote proof data directly', async () => {
+    const test = harness({ transportProofBuild: true });
+    await test.runtime.start();
+    const handler = test.notificationHandler();
+    if (handler === undefined) throw new Error('Expected notification handler');
+    const remoteContent = {
+      body: 'Test only. No Change Reminder is due.',
+      data: {
+        homeTimeZone: 'Australia/Sydney',
+        notificationKind: 'fcm-transport-proof',
+      },
+      title: 'FCM transport test',
+    } as const;
+
+    await expect(
+      handler.handleNotification({ request: { content: remoteContent } }),
+    ).resolves.toEqual({
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+      shouldShowBanner: false,
+      shouldShowList: false,
+    });
+    test.emitResponse(response(remoteContent));
+    expect(test.taps).toEqual([]);
   });
 
   it('fails closed for malformed or unreviewed foreground receipt copy', async () => {

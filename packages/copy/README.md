@@ -24,17 +24,20 @@ storage, React, React Native, Expo, or Azure dependency. The implemented Change
 Reminder journey owns its fixed FCM notification title and body here. Other
 notification copy will be added only with implemented notification journeys.
 
-### Node runtime bridge
+### Node runtime bridges
 
-The emitting notification service imports
-`@daylight-saviour/copy/change-reminder-notification`. Its authoritative source
-is `src/change-reminder-notification.ts`; `npm run build` emits its JavaScript
-and declaration to ignored `dist/`, and the public subpath resolves only to
-that compiled output. `pretest` builds it before copy tests. Notification
-`pretypecheck`, `pretest`, and `prebuild` build it first, so a clean checkout
+The package exposes fixed Node-runtime copy through
+`@daylight-saviour/copy/change-reminder-notification` and
+`@daylight-saviour/copy/fcm-transport-proof-notification`. Their authoritative
+sources are `src/change-reminder-notification.ts` and
+`src/fcm-transport-proof-notification.ts`; `npm run build` emits JavaScript and
+declarations to ignored `dist/`, and both public subpaths resolve only to that
+compiled output. `pretest` builds them before copy tests. Notification
+`pretypecheck`, `pretest`, and `prebuild` build them first, so a clean checkout
 resolves the same runtime artifact during local checks and production builds.
-Tests assert source and public runtime wording plus immutability. No other copy
-may bypass the facade.
+Tests assert source and both public runtime bridges plus immutability. Mobile
+code continues through the `australianEnglish` facade; no other copy may bypass
+these boundaries.
 
 ## Ownership boundaries
 

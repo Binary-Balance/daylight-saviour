@@ -62,13 +62,18 @@ environment-owned input:
 | `FCM_PROOF_INSTALLATION_ID` | Existing installation ID resolving to stored Android registration. |
 
 Request body is ignored. Caller cannot supply calendar facts, device token,
-project, service account, payload, or copy. Runtime resolves existing
-registration and immediately sends source-controlled `FCM transport test` copy
-stating that no Change Reminder is due. Exact data contains only
-`notificationKind: fcm-transport-proof` and stored canonical `homeTimeZone`;
-Change Event instant, direction, and reminder timing are absent. Provider
+project, service account, payload, or copy. Runtime resolves an existing
+registration and immediately sends a high-priority data-only FCM message. Exact
+provider data contains only `notificationKind: fcm-transport-proof` and stored
+canonical `homeTimeZone`; title, body, Change Event instant, direction, and
+reminder timing are absent. Provider
 acceptance, rejection classification, and conditional invalid-token removal use
 the same implementation as Change Reminder delivery.
+
+Only an exact Android proof build may turn accepted proof data into the fixed
+local `FCM transport test` notification stating that no Change Reminder is due.
+Ordinary Android installs cannot present proof data, including after replacing
+a proof build whose background-task registration persisted.
 
 This path proves keyless authentication and FCM transport only. Calendar
 eligibility and scheduled dispatch require separate deterministic evidence; no

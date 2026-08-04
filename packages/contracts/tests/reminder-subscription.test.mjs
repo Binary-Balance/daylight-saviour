@@ -4,8 +4,10 @@ import { describe, it } from 'node:test';
 import {
   ChangeReminderNotificationValidationError,
   FcmTransportProofNotificationValidationError,
+  FcmTransportProofPresentationValidationError,
   parseChangeReminderNotification,
   parseFcmTransportProofNotification,
+  parseFcmTransportProofPresentation,
   parseReminderSubscriptionRegistration,
   parseReminderSubscriptionUpdate,
   ReminderSubscriptionValidationError,
@@ -80,6 +82,29 @@ describe('reminder subscription registration contract', () => {
         FcmTransportProofNotificationValidationError,
       );
     }
+  });
+  it('separates exact local transport-proof presentation data', () => {
+    const presentation = {
+      homeTimeZone: 'Australia/Sydney',
+      notificationKind: 'fcm-transport-proof',
+      presentationKind: 'local-notification',
+    };
+    assert.deepEqual(
+      parseFcmTransportProofPresentation(presentation),
+      presentation,
+    );
+    assert.throws(
+      () => parseFcmTransportProofNotification(presentation),
+      FcmTransportProofNotificationValidationError,
+    );
+    assert.throws(
+      () =>
+        parseFcmTransportProofPresentation({
+          ...presentation,
+          presentationKind: 'remote-notification',
+        }),
+      FcmTransportProofPresentationValidationError,
+    );
   });
   it('accepts native platform token shapes', () => {
     assert.deepEqual(

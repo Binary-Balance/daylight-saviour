@@ -49,6 +49,7 @@ export type HomeTimeZoneSessionEvent =
   | { readonly type: 'select-zone'; readonly zoneId: string }
   | { readonly type: 'acknowledge-aftermath'; readonly eventAt: string }
   | { readonly type: 'manual-refresh' }
+  | { readonly type: 'open-proof-report'; readonly zoneId: string }
   | { readonly type: 'foreground' };
 
 export interface HomeTimeZoneSession {
@@ -356,6 +357,21 @@ export function createHomeTimeZoneSession({
         void adapters.timeZoneDataPacks
           .refresh('manual')
           .catch(() => undefined);
+        return;
+      case 'open-proof-report':
+        if (
+          flow.kind === 'choose' &&
+          !flow.saving &&
+          flow.returnZoneId === event.zoneId
+        ) {
+          setFlow({
+            acknowledgedEventAt: flow.returnAcknowledgedEventAt,
+            kind: 'ready',
+            secondaryCopySeed: flow.secondaryCopySeed,
+            uses24hourClock: flow.uses24hourClock,
+            zoneId: flow.returnZoneId,
+          });
+        }
         return;
       case 'foreground':
         void adapters.timeZoneDataPacks

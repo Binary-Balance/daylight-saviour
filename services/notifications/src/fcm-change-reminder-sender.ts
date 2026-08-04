@@ -1,5 +1,4 @@
 import { changeReminderNotification } from '@daylight-saviour/copy/change-reminder-notification';
-import { fcmTransportProofNotification } from '@daylight-saviour/copy/fcm-transport-proof-notification';
 import type {
   ChangeReminderNotification,
   FcmTransportProofNotification,
@@ -49,21 +48,27 @@ export interface FcmAccessTokenProvider {
 }
 
 export interface FcmChangeReminderPayload {
-  readonly message: {
-    readonly android: {
-      readonly notification: {
-        readonly channel_id: 'change-reminders';
-        readonly sound: 'default';
+  readonly message:
+    | {
+        readonly android: {
+          readonly notification: {
+            readonly channel_id: 'change-reminders';
+            readonly sound: 'default';
+          };
+          readonly priority: 'HIGH';
+        };
+        readonly data: ChangeReminderNotification;
+        readonly notification: {
+          readonly body: string;
+          readonly title: string;
+        };
+        readonly token: string;
+      }
+    | {
+        readonly android: { readonly priority: 'HIGH' };
+        readonly data: FcmTransportProofNotification;
+        readonly token: string;
       };
-      readonly priority: 'HIGH';
-    };
-    readonly data: ChangeReminderNotification | FcmTransportProofNotification;
-    readonly notification: {
-      readonly body: string;
-      readonly title: string;
-    };
-    readonly token: string;
-  };
 }
 
 export interface FcmHttpRequest {
@@ -343,18 +348,11 @@ function buildTransportProofPayload(
   }
   return {
     message: {
-      android: {
-        notification: {
-          channel_id: 'change-reminders',
-          sound: 'default',
-        },
-        priority: 'HIGH',
-      },
+      android: { priority: 'HIGH' },
       data: {
         homeTimeZone,
         notificationKind: 'fcm-transport-proof',
       },
-      notification: fcmTransportProofNotification,
       token: subscription.deviceToken,
     },
   };

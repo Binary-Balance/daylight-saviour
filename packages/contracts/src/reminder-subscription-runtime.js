@@ -21,6 +21,13 @@ export class FcmTransportProofNotificationValidationError extends Error {
   }
 }
 
+export class FcmTransportProofPresentationValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'FcmTransportProofPresentationValidationError';
+  }
+}
+
 function object(value, ErrorType = ReminderSubscriptionValidationError) {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     throw new ErrorType('Expected an object');
@@ -188,6 +195,33 @@ export function parseFcmTransportProofNotification(value) {
     !/^[A-Za-z0-9._+-]+(?:\/[A-Za-z0-9._+-]+)+$/.test(input.homeTimeZone)
   ) {
     throw new FcmTransportProofNotificationValidationError(
+      'Invalid Home Time Zone',
+    );
+  }
+  return input;
+}
+
+export function parseFcmTransportProofPresentation(value) {
+  const input = object(value, FcmTransportProofPresentationValidationError);
+  exactKeys(
+    input,
+    ['homeTimeZone', 'notificationKind', 'presentationKind'],
+    FcmTransportProofPresentationValidationError,
+    'Unexpected FCM transport proof presentation fields',
+  );
+  if (
+    input.notificationKind !== 'fcm-transport-proof' ||
+    input.presentationKind !== 'local-notification'
+  ) {
+    throw new FcmTransportProofPresentationValidationError(
+      'Invalid transport proof presentation kind',
+    );
+  }
+  if (
+    typeof input.homeTimeZone !== 'string' ||
+    !/^[A-Za-z0-9._+-]+(?:\/[A-Za-z0-9._+-]+)+$/.test(input.homeTimeZone)
+  ) {
+    throw new FcmTransportProofPresentationValidationError(
       'Invalid Home Time Zone',
     );
   }

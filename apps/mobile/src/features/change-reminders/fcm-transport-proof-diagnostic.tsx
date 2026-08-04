@@ -41,7 +41,11 @@ export default function FcmTransportProofDiagnostic({
         </Text>
       </Pressable>
       {diagnostic === null ? null : (
-        <View accessibilityLabel="FCM transport test registration">
+        <View
+          accessibilityLabel={
+            copy.changeReminders.transportProof.diagnostic.registrationLabel
+          }
+        >
           <Text selectable style={[styles.value, { color: palette.ink }]}>
             {diagnostic.installationId}
           </Text>

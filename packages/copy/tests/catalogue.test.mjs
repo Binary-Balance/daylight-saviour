@@ -101,6 +101,11 @@ describe('Australian-English copy catalogue', () => {
       body: 'Test only. No Change Reminder is due.',
       title: 'FCM transport test',
     });
+    assert.equal(
+      australianEnglish.changeReminders.transportProof.diagnostic
+        .registrationLabel,
+      'FCM transport test registration',
+    );
   });
 
   it('owns exact safe Change Reminder report-context wording', () => {

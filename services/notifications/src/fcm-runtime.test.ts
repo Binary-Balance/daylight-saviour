@@ -130,8 +130,8 @@ describe('FCM runtime composition', () => {
     );
     const fcmRequest = JSON.parse(requests[2]?.body ?? '') as {
       readonly message: {
+        readonly android: Record<string, string>;
         readonly data: Record<string, string>;
-        readonly notification: Record<string, string>;
         readonly token: string;
       };
     };
@@ -140,10 +140,8 @@ describe('FCM runtime composition', () => {
       homeTimeZone: 'Australia/Sydney',
       notificationKind: 'fcm-transport-proof',
     });
-    assert.deepEqual(fcmRequest.message.notification, {
-      body: 'Test only. No Change Reminder is due.',
-      title: 'FCM transport test',
-    });
+    assert.deepEqual(fcmRequest.message.android, { priority: 'HIGH' });
+    assert.equal('notification' in fcmRequest.message, false);
     assert.doesNotMatch(requests[2]?.body ?? '', /caller-controlled/);
     assert.deepEqual(events, [
       'fcm-credential-ready',

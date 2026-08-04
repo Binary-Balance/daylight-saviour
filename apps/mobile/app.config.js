@@ -8,14 +8,10 @@ function createAppConfig(config, environment = process.env) {
   return {
     ...config,
     android: configureAndroidFcm(config.android, environment),
-    ...(proofBuild
-      ? {
-          extra: {
-            ...config.extra,
-            fcmTransportProofBuild: true,
-          },
-        }
-      : {}),
+    extra: {
+      ...config.extra,
+      fcmTransportProofBuild: proofBuild,
+    },
   };
 }
 

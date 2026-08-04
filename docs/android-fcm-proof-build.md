@@ -35,7 +35,7 @@ registration URL is absent or invalid. Remote Time-Zone Data inputs must either
 both be present and valid or both be absent. Build validation uses the same URL,
 JSON, key-ID, and Ed25519 public-key parser as mobile runtime configuration. When
 both are absent, the app uses its bundled known-good pack and disables network
-refresh. Ordinary builds keep the proof flag absent, suppress transport-proof
+refresh. Ordinary builds embed the proof flag as `false`, suppress transport-proof
 receipts, ignore their taps, and render no installation-ID diagnostic.
 
 After a successful Change Reminder registration for the displayed Home Time
@@ -50,6 +50,16 @@ Zone Civil Time Report and states that transport succeeded while scheduler
 timing and Change Reminder eligibility were not tested. Proof data contains no
 Change Event instant, direction, or reminder timing, so testing never waits for
 a real civil-time change.
+
+Provider proof messages are high-priority and data-only, so Android does not
+auto-present them in background or terminated states. Proof builds register an
+Expo background notification task at module scope. It strictly activates exact
+proof data, then schedules the fixed local test notification on the
+`change-reminders` channel. Ordinary builds check the immutable false build
+flag inside the task handler and unregister any task persisted from an installed
+proof build. Physical-device evidence must cover foreground, background, and
+terminated receipt plus tap; unit and build checks cannot prove Android headless
+delivery under real device power and process conditions.
 
 ## Build
 

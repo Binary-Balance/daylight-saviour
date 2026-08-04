@@ -265,6 +265,87 @@ describe('HomeTimeZoneScreen', () => {
     ).toBeTruthy();
   });
 
+  it('opens matching proof report from warm chooser without changing zone', async () => {
+    const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+    const view = render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+    fireEvent.press(
+      await screen.findByRole('button', {
+        name: 'Home Time Zone, Sydney, Canberra & most of NSW, Australia/Sydney',
+      }),
+    );
+
+    view.rerender(
+      <HomeTimeZoneScreen
+        adapters={adapters}
+        notificationTap={{
+          homeTimeZone: 'Australia/Sydney',
+          notificationKind: 'fcm-transport-proof',
+        }}
+        now={now}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('alert', {
+        name: /fcm transport test opened/i,
+      }),
+    ).toBeTruthy();
+    expect(adapters.storage.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps chooser unchanged for mismatched warm proof tap', async () => {
+    const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+    const view = render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+    fireEvent.press(
+      await screen.findByRole('button', {
+        name: 'Home Time Zone, Sydney, Canberra & most of NSW, Australia/Sydney',
+      }),
+    );
+
+    view.rerender(
+      <HomeTimeZoneScreen
+        adapters={adapters}
+        notificationTap={{
+          homeTimeZone: 'Australia/Perth',
+          notificationKind: 'fcm-transport-proof',
+        }}
+        now={now}
+      />,
+    );
+
+    expect(
+      screen.getByRole('header', { name: 'Choose Home Time Zone' }),
+    ).toBeTruthy();
+    expect(screen.queryByText('FCM TRANSPORT TEST OPENED')).toBeNull();
+  });
+
+  it('keeps unpersisted confirmation unchanged for matching warm proof tap', async () => {
+    const adapters = createAdapters({ deviceZone: 'Australia/Sydney' });
+    const view = render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+    await screen.findByRole('header', {
+      name: 'Sydney, Canberra & most of NSW',
+    });
+
+    view.rerender(
+      <HomeTimeZoneScreen
+        adapters={adapters}
+        notificationTap={{
+          homeTimeZone: 'Australia/Sydney',
+          notificationKind: 'fcm-transport-proof',
+        }}
+        now={now}
+      />,
+    );
+
+    expect(
+      screen.getByRole('header', {
+        name: 'Sydney, Canberra & most of NSW',
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByText('FCM TRANSPORT TEST OPENED')).toBeNull();
+    expect(adapters.storage.save).not.toHaveBeenCalled();
+  });
+
   it('prevents cancel from racing a pending zone save', async () => {
     const adapters = createAdapters({ savedZone: 'Australia/Brisbane' });
     let resolveSave: (() => void) | undefined;

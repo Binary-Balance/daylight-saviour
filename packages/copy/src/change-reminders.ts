@@ -33,6 +33,7 @@ export const changeReminders = Object.freeze({
     diagnostic: Object.freeze({
       action: 'Show transport-test installation ID',
       heading: 'FCM TRANSPORT TEST DIAGNOSTIC',
+      registrationLabel: 'FCM transport test registration',
       unavailable:
         'Enable Change Reminders for this Home Time Zone before reading the test installation ID.',
     }),

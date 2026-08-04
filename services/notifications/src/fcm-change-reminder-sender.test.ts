@@ -163,13 +163,13 @@ describe('FCM Change Reminder sender', () => {
       homeTimeZone: 'Australia/Sydney',
       notificationKind: 'fcm-transport-proof',
     });
-    assert.deepEqual(test.requests[0]?.payload.message.notification, {
-      body: 'Test only. No Change Reminder is due.',
-      title: 'FCM transport test',
+    assert.deepEqual(test.requests[0]?.payload.message.android, {
+      priority: 'HIGH',
     });
+    assert.equal('notification' in test.requests[0]!.payload.message, false);
     assert.doesNotMatch(
       JSON.stringify(test.requests[0]?.payload),
-      /changeEventAt|changeDirection|reminderTiming/,
+      /changeEventAt|changeDirection|reminderTiming|title|body/,
     );
     assert.deepEqual(test.logs, ['fcm-transport-proof-accepted']);
   });
