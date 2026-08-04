@@ -5,6 +5,9 @@ import { australianEnglish as copy } from '@daylight-saviour/copy';
 import type { DaylightSaviourPalette } from '../../theme';
 import type { ChangeReminderAdapters } from './change-reminder-adapters';
 import { createChangeReminderSession } from './change-reminder-session';
+import FcmTransportProofDiagnostic from './fcm-transport-proof-diagnostic';
+import { fcmTransportProofBuild } from './fcm-transport-proof-build';
+import { productionFcmTransportProofDiagnosticReader } from './change-reminder-production-adapters';
 
 export default function ChangeReminderSection({
   adapters,
@@ -188,6 +191,13 @@ export default function ChangeReminderSection({
               : copy.changeReminders.permissionRevoked.openSettings}
           </Text>
         </Pressable>
+      ) : null}
+      {fcmTransportProofBuild && snapshot.kind === 'enabled' ? (
+        <FcmTransportProofDiagnostic
+          homeTimeZone={homeTimeZone}
+          palette={palette}
+          reader={productionFcmTransportProofDiagnosticReader}
+        />
       ) : null}
     </View>
   );

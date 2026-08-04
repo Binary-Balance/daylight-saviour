@@ -1,6 +1,23 @@
-const { configureAndroidFcm } = require('./build/android-fcm-build-input.cjs');
+const {
+  configureAndroidFcm,
+  isFcmProofBuild,
+} = require('./build/android-fcm-build-input.cjs');
 
-module.exports = ({ config }) => ({
-  ...config,
-  android: configureAndroidFcm(config.android),
-});
+function createAppConfig(config, environment = process.env) {
+  const proofBuild = isFcmProofBuild(environment);
+  return {
+    ...config,
+    android: configureAndroidFcm(config.android, environment),
+    ...(proofBuild
+      ? {
+          extra: {
+            ...config.extra,
+            fcmTransportProofBuild: true,
+          },
+        }
+      : {}),
+  };
+}
+
+module.exports = ({ config }) => createAppConfig(config);
+module.exports.createAppConfig = createAppConfig;

@@ -17,7 +17,9 @@ export {
   parseReminderSubscriptionRegistrationResponse,
   parseReminderSubscriptionUpdate,
   parseChangeReminderNotification,
+  parseFcmTransportProofNotification,
   ChangeReminderNotificationValidationError,
+  FcmTransportProofNotificationValidationError,
   reminderSubscriptionPlatforms,
   ReminderSubscriptionValidationError,
   type ReminderSubscriptionPlatform,
@@ -25,6 +27,7 @@ export {
   type ReminderSubscriptionRegistrationResponse,
   type ReminderSubscriptionUpdate,
   type ChangeReminderNotification,
+  type FcmTransportProofNotification,
 } from './reminder-subscription.ts';
 
 export interface TimeZoneState {

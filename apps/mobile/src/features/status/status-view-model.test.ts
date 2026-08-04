@@ -120,6 +120,51 @@ describe('createStatusViewModel', () => {
     });
   });
 
+  it('opens current report for matching transport proof without selecting an event', () => {
+    const pack = activateAustralianTimeZoneDataPack(bundledAustralianDataPack);
+    const viewModel = createStatusViewModel(
+      pack,
+      'current',
+      'Australia/Sydney',
+      new Date('2026-07-19T00:00:00.000Z'),
+      false,
+      'test-installation',
+      null,
+      {
+        homeTimeZone: 'Australia/Sydney',
+        notificationKind: 'fcm-transport-proof',
+      },
+    );
+
+    expect(viewModel).toMatchObject({
+      notificationContext: { kind: 'transport-proof' },
+      phase: 'ordinary',
+      zoneId: 'Australia/Sydney',
+    });
+  });
+
+  it('does not switch Home Time Zone for a mismatched transport proof', () => {
+    const pack = activateAustralianTimeZoneDataPack(bundledAustralianDataPack);
+    const viewModel = createStatusViewModel(
+      pack,
+      'current',
+      'Australia/Sydney',
+      new Date('2026-07-19T00:00:00.000Z'),
+      false,
+      'test-installation',
+      null,
+      {
+        homeTimeZone: 'Australia/Perth',
+        notificationKind: 'fcm-transport-proof',
+      },
+    );
+
+    expect(viewModel).toMatchObject({
+      notificationContext: { kind: 'zone-mismatch' },
+      zoneId: 'Australia/Sydney',
+    });
+  });
+
   it('keeps current report for changed zones and unavailable reminder events', () => {
     const pack = activateAustralianTimeZoneDataPack(bundledAustralianDataPack);
     const base = [

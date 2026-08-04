@@ -194,6 +194,28 @@ describe('StatusScreen facade', () => {
     ).toBeNull();
   });
 
+  it('states transport-only scope when proof tap opens current matching report', () => {
+    render(
+      <StatusScreen
+        notificationTap={{
+          homeTimeZone: 'Australia/Sydney',
+          notificationKind: 'fcm-transport-proof',
+        }}
+        now={new Date('2026-07-19T00:00:00.000Z')}
+        reducedMotion
+      />,
+    );
+
+    expect(
+      screen.getByRole('alert', {
+        name: /fcm transport test opened\. transport test received.*scheduler timing and change reminder eligibility were not tested/i,
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText('NO CHANGE IMMINENT', { includeHiddenElements: true }),
+    ).toBeTruthy();
+  });
+
   it.each([
     [
       'matched upcoming',

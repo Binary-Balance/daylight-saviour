@@ -1,7 +1,9 @@
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 import {
   parseChangeReminderNotification,
+  parseFcmTransportProofNotification,
   type ChangeReminderNotification,
+  type FcmTransportProofNotification,
 } from '@daylight-saviour/contracts';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
@@ -9,6 +11,8 @@ export type ChangeReminderTap = Omit<
   ChangeReminderNotification,
   'reminderKind'
 >;
+export type FcmTransportProofTap = FcmTransportProofNotification;
+export type ReviewedNotificationTap = ChangeReminderTap | FcmTransportProofTap;
 
 export interface ChangeReminderNotificationContent {
   readonly body: string | null;
@@ -69,6 +73,20 @@ export function parseChangeReminderTap(
   }
 }
 
+export function parseFcmTransportProofTap(
+  value: unknown,
+): FcmTransportProofTap | null {
+  try {
+    const notification = parseFcmTransportProofNotification(value);
+    return canonicalAustralianZoneId(notification.homeTimeZone) ===
+      notification.homeTimeZone
+      ? notification
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isReviewedChangeReminderReceipt(
   content: ChangeReminderNotificationContent,
 ) {
@@ -79,12 +97,35 @@ export function isReviewedChangeReminderReceipt(
   );
 }
 
+function reviewedTap(
+  content: ChangeReminderNotificationContent,
+  transportProofBuild: boolean,
+): ReviewedNotificationTap | null {
+  const reminderTap = parseChangeReminderTap(content.data);
+  if (
+    reminderTap !== null &&
+    content.title === copy.changeReminders.notification.title &&
+    content.body === copy.changeReminders.notification.body
+  ) {
+    return reminderTap;
+  }
+  if (!transportProofBuild) return null;
+  const proofTap = parseFcmTransportProofTap(content.data);
+  return proofTap !== null &&
+    content.title === copy.changeReminders.transportProof.notification.title &&
+    content.body === copy.changeReminders.transportProof.notification.body
+    ? proofTap
+    : null;
+}
+
 export function createChangeReminderNotificationRuntime({
   notifications,
   onTap,
+  transportProofBuild = false,
 }: {
   readonly notifications: ChangeReminderNotifications;
-  readonly onTap: (tap: ChangeReminderTap) => void;
+  readonly onTap: (tap: ReviewedNotificationTap) => void;
+  readonly transportProofBuild?: boolean;
 }) {
   const failClosed = {
     shouldPlaySound: false,
@@ -103,7 +144,7 @@ export function createChangeReminderNotificationRuntime({
   function receive(
     content: ChangeReminderNotificationContent,
   ): typeof failClosed | typeof showReviewedReminder {
-    return isReviewedChangeReminderReceipt(content)
+    return reviewedTap(content, transportProofBuild) !== null
       ? showReviewedReminder
       : failClosed;
   }
@@ -112,8 +153,7 @@ export function createChangeReminderNotificationRuntime({
     if (response.actionIdentifier !== notifications.defaultActionIdentifier)
       return;
     const content = response.notification.request.content;
-    if (!isReviewedChangeReminderReceipt(content)) return;
-    const tap = parseChangeReminderTap(content.data);
+    const tap = reviewedTap(content, transportProofBuild);
     if (tap !== null) onTap(tap);
   }
 
@@ -153,12 +193,12 @@ export function createChangeReminderNotificationRuntime({
 export function createChangeReminderTapVisit({
   onChange,
 }: {
-  readonly onChange: (tap: ChangeReminderTap | null) => void;
+  readonly onChange: (tap: ReviewedNotificationTap | null) => void;
 }) {
   let active = true;
-  let pending: ChangeReminderTap | null = null;
+  let pending: ReviewedNotificationTap | null = null;
   return {
-    receive(tap: ChangeReminderTap) {
+    receive(tap: ReviewedNotificationTap) {
       if (active) {
         onChange(tap);
       } else {

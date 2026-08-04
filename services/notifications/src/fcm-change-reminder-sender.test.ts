@@ -145,6 +145,35 @@ describe('FCM Change Reminder sender', () => {
     assert.deepEqual(test.removalRequests, []);
   });
 
+  it('sends source-controlled transport proof without calendar facts', async () => {
+    const test = sender(
+      response(
+        200,
+        JSON.stringify({ name: 'projects/portable-project/messages/proof-1' }),
+      ),
+    );
+
+    const result = await test.instance.sendTransportProof(
+      subscription,
+      'Australia/Sydney',
+    );
+
+    assert.deepEqual(result, { kind: 'accepted' });
+    assert.deepEqual(test.requests[0]?.payload.message.data, {
+      homeTimeZone: 'Australia/Sydney',
+      notificationKind: 'fcm-transport-proof',
+    });
+    assert.deepEqual(test.requests[0]?.payload.message.notification, {
+      body: 'Test only. No Change Reminder is due.',
+      title: 'FCM transport test',
+    });
+    assert.doesNotMatch(
+      JSON.stringify(test.requests[0]?.payload),
+      /changeEventAt|changeDirection|reminderTiming/,
+    );
+    assert.deepEqual(test.logs, ['fcm-transport-proof-accepted']);
+  });
+
   it('uses injected fetch for the FCM HTTP v1 request', async () => {
     let input: string | undefined;
     let init:

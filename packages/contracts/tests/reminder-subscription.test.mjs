@@ -3,7 +3,9 @@ import { describe, it } from 'node:test';
 
 import {
   ChangeReminderNotificationValidationError,
+  FcmTransportProofNotificationValidationError,
   parseChangeReminderNotification,
+  parseFcmTransportProofNotification,
   parseReminderSubscriptionRegistration,
   parseReminderSubscriptionUpdate,
   ReminderSubscriptionValidationError,
@@ -57,6 +59,27 @@ describe('reminder subscription registration contract', () => {
       () => parseChangeReminderNotification(null),
       ChangeReminderNotificationValidationError,
     );
+  });
+  it('activates only exact FCM transport-proof data', () => {
+    const notification = {
+      homeTimeZone: 'Australia/Sydney',
+      notificationKind: 'fcm-transport-proof',
+    };
+    assert.deepEqual(
+      parseFcmTransportProofNotification(notification),
+      notification,
+    );
+    for (const extra of [
+      { changeDirection: 'forward' },
+      { changeEventAt: '2026-10-03T16:00:00.000Z' },
+      { reminderTiming: 'one-week' },
+      { copy: 'caller selected' },
+    ]) {
+      assert.throws(
+        () => parseFcmTransportProofNotification({ ...notification, ...extra }),
+        FcmTransportProofNotificationValidationError,
+      );
+    }
   });
   it('accepts native platform token shapes', () => {
     assert.deepEqual(

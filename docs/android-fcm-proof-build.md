@@ -26,15 +26,30 @@ values into public logs or evidence because production identifiers remain
 private operations data.
 
 `npm run android:build:fcm-proof` sets
-`DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD=1`. Native generation then fails unless the
+`DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD=1`. Native generation validates that flag and
+embeds immutable Expo configuration enabling transport-proof receipt, tap, and
+diagnostic handling. Native generation then fails unless the
 Firebase file exists, contains valid JSON, and has an Android client for exactly
 `au.com.binarybalance.daylightsaviour`. It also fails when the reviewed reminder
 registration URL is absent or invalid. Remote Time-Zone Data inputs must either
 both be present and valid or both be absent. Build validation uses the same URL,
 JSON, key-ID, and Ed25519 public-key parser as mobile runtime configuration. When
 both are absent, the app uses its bundled known-good pack and disables network
-refresh. Ordinary public CI needs no Firebase file and keeps the FCM proof flag
-unset.
+refresh. Ordinary builds keep the proof flag absent, suppress transport-proof
+receipts, ignore their taps, and render no installation-ID diagnostic.
+
+After a successful Change Reminder registration for the displayed Home Time
+Zone, the proof build shows `FCM TRANSPORT TEST DIAGNOSTIC`. Its explicit
+`Show transport-test installation ID` action reveals selectable text containing
+only the opaque installation ID and matching canonical Home Time Zone. It never
+reveals or logs the installation credential or device token. Missing, pending,
+corrupt, or different-zone registrations fail closed.
+
+A reviewed transport-proof notification opens the current matching Home Time
+Zone Civil Time Report and states that transport succeeded while scheduler
+timing and Change Reminder eligibility were not tested. Proof data contains no
+Change Event instant, direction, or reminder timing, so testing never waits for
+a real civil-time change.
 
 ## Build
 
@@ -78,8 +93,9 @@ adb install -r "$APK"
 Expected application ID:
 `au.com.binarybalance.daylightsaviour`. Presence of
 `assets/index.android.bundle` confirms JavaScript is packaged for launch without
-Expo Go or Metro. Physical-device notification delivery remains required
-runtime evidence; compilation alone does not prove registration or FCM receipt.
+Expo Go or Metro. Physical-device notification receipt and tap remain required
+runtime evidence; compilation alone does not prove registration or FCM
+transport.
 
 ## Evidence record
 

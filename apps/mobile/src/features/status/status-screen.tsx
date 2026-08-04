@@ -18,13 +18,13 @@ import ChangeReminderSection from '../change-reminders/change-reminder-section';
 import { productionChangeReminderAdapters } from '../change-reminders/change-reminder-production-adapters';
 import { createStatusViewModel } from './status-view-model';
 import type { TimeZoneDataPackSnapshot } from '../time-zone-data/time-zone-data-manager';
-import type { ChangeReminderTap } from '../change-reminders/change-reminder-notification-runtime';
+import type { ReviewedNotificationTap } from '../change-reminders/change-reminder-notification-runtime';
 
 interface StatusScreenProps {
   readonly acknowledgedEventAt?: string | null;
   readonly dataPackSnapshot: TimeZoneDataPackSnapshot;
   readonly now?: Date;
-  readonly notificationTap?: ChangeReminderTap | null;
+  readonly notificationTap?: ReviewedNotificationTap | null;
   readonly onAcknowledgeAftermath?: (eventAt: string) => void;
   readonly onChooseZone?: () => void;
   readonly onRetryDataPack?: () => void | Promise<void>;

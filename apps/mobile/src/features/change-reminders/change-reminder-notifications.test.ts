@@ -1,6 +1,7 @@
 import {
   createChangeReminderNotificationRuntime,
   createChangeReminderTapVisit,
+  parseFcmTransportProofTap,
   parseChangeReminderTap,
   type ChangeReminderNotificationContent,
 } from './change-reminder-notification-runtime';
@@ -19,7 +20,7 @@ const content: ChangeReminderNotificationContent = {
   title: 'Change Reminder',
 };
 
-function response(overrides: Partial<typeof content> = {}) {
+function response(overrides: Partial<ChangeReminderNotificationContent> = {}) {
   return {
     actionIdentifier: 'default',
     notification: { request: { content: { ...content, ...overrides } } },
@@ -28,8 +29,10 @@ function response(overrides: Partial<typeof content> = {}) {
 
 function harness({
   coldResponse = null,
+  transportProofBuild = false,
 }: {
   readonly coldResponse?: ReturnType<typeof response> | null;
+  readonly transportProofBuild?: boolean;
 } = {}) {
   let responseListener:
     | ((next: ReturnType<typeof response>) => void)
@@ -37,7 +40,9 @@ function harness({
   let notificationHandler:
     | {
         readonly handleNotification: (notification: {
-          readonly request: { readonly content: typeof content };
+          readonly request: {
+            readonly content: ChangeReminderNotificationContent;
+          };
         }) => Promise<unknown>;
       }
     | undefined;
@@ -63,6 +68,7 @@ function harness({
     runtime: createChangeReminderNotificationRuntime({
       notifications,
       onTap: (tap) => taps.push(tap),
+      transportProofBuild,
     }),
     taps,
     remove,
@@ -84,6 +90,56 @@ describe('Change Reminder notification runtime', () => {
     expect(
       parseChangeReminderTap({ ...payload, changeEventAt: '2026-10-03' }),
     ).toBeNull();
+  });
+
+  it('parses only exact transport-proof data', () => {
+    const proof = {
+      homeTimeZone: 'Australia/Sydney',
+      notificationKind: 'fcm-transport-proof',
+    } as const;
+    expect(parseFcmTransportProofTap(proof)).toEqual(proof);
+    expect(parseFcmTransportProofTap({ ...proof, extra: 'nope' })).toBeNull();
+    expect(
+      parseFcmTransportProofTap({ ...proof, homeTimeZone: 'Australia/ACT' }),
+    ).toBeNull();
+  });
+
+  it('accepts transport-proof receipt and tap only in exact proof builds', async () => {
+    const proofContent = {
+      body: 'Test only. No Change Reminder is due.',
+      data: {
+        homeTimeZone: 'Australia/Sydney',
+        notificationKind: 'fcm-transport-proof',
+      },
+      title: 'FCM transport test',
+    } as const;
+    for (const transportProofBuild of [false, true]) {
+      const test = harness({ transportProofBuild });
+      await test.runtime.start();
+      const handler = test.notificationHandler();
+      if (handler === undefined)
+        throw new Error('Expected notification handler');
+
+      await expect(
+        handler.handleNotification({ request: { content: proofContent } }),
+      ).resolves.toEqual({
+        shouldPlaySound: transportProofBuild,
+        shouldSetBadge: false,
+        shouldShowBanner: transportProofBuild,
+        shouldShowList: transportProofBuild,
+      });
+      test.emitResponse(response(proofContent));
+      expect(test.taps).toEqual(
+        transportProofBuild
+          ? [
+              {
+                homeTimeZone: 'Australia/Sydney',
+                notificationKind: 'fcm-transport-proof',
+              },
+            ]
+          : [],
+      );
+    }
   });
 
   it('fails closed for malformed or unreviewed foreground receipt copy', async () => {

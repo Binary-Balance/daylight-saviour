@@ -13,22 +13,24 @@ export default function ChangeReminderNotificationContext({
 }) {
   if (context === null) return null;
   const content =
-    context.kind === 'matched'
-      ? {
-          body: copy.changeReminders.notificationContext.opened[
-            context.relation
-          ],
-          heading: copy.changeReminders.notificationContext.opened.heading,
-        }
-      : context.kind === 'aged-out'
-        ? copy.changeReminders.notificationContext.agedOut
-        : context.kind === 'event-mismatch'
-          ? copy.changeReminders.notificationContext.eventMismatch
-          : context.kind === 'event-unavailable'
-            ? copy.changeReminders.notificationContext.eventUnavailable
-            : context.kind === 'report-unavailable'
-              ? copy.changeReminders.notificationContext.reportUnavailable
-              : copy.changeReminders.notificationContext.zoneMismatch;
+    context.kind === 'transport-proof'
+      ? copy.changeReminders.transportProof.opened
+      : context.kind === 'matched'
+        ? {
+            body: copy.changeReminders.notificationContext.opened[
+              context.relation
+            ],
+            heading: copy.changeReminders.notificationContext.opened.heading,
+          }
+        : context.kind === 'aged-out'
+          ? copy.changeReminders.notificationContext.agedOut
+          : context.kind === 'event-mismatch'
+            ? copy.changeReminders.notificationContext.eventMismatch
+            : context.kind === 'event-unavailable'
+              ? copy.changeReminders.notificationContext.eventUnavailable
+              : context.kind === 'report-unavailable'
+                ? copy.changeReminders.notificationContext.reportUnavailable
+                : copy.changeReminders.notificationContext.zoneMismatch;
   return (
     <View
       accessibilityLabel={`${content.heading}. ${content.body}`}

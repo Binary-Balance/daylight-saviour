@@ -159,4 +159,4 @@ function configureAndroidFcm(androidConfig, environment = process.env) {
   };
 }
 
-module.exports = { configureAndroidFcm };
+module.exports = { configureAndroidFcm, isFcmProofBuild };

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { changeReminderNotification as runtimeChangeReminderNotification } from '@daylight-saviour/copy/change-reminder-notification';
+import { fcmTransportProofNotification as runtimeFcmTransportProofNotification } from '@daylight-saviour/copy/fcm-transport-proof-notification';
 import { changeReminderNotification } from '../src/change-reminder-notification.ts';
+import { fcmTransportProofNotification } from '../src/fcm-transport-proof-notification.ts';
 import * as copyModule from '../src/index.ts';
 
 const { australianEnglish } = copyModule;
@@ -82,6 +84,22 @@ describe('Australian-English copy catalogue', () => {
     assert.deepEqual(changeReminderNotification, {
       body: 'Your Home Time Zone changes soon.',
       title: 'Change Reminder',
+    });
+  });
+
+  it('owns unmistakable fixed FCM transport-test wording', () => {
+    assert.strictEqual(
+      australianEnglish.changeReminders.transportProof.notification,
+      fcmTransportProofNotification,
+    );
+    assert.deepEqual(
+      runtimeFcmTransportProofNotification,
+      fcmTransportProofNotification,
+    );
+    assert.equal(Object.isFrozen(fcmTransportProofNotification), true);
+    assert.deepEqual(fcmTransportProofNotification, {
+      body: 'Test only. No Change Reminder is due.',
+      title: 'FCM transport test',
     });
   });
 

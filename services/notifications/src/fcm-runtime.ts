@@ -8,7 +8,6 @@ import {
   createFcmChangeReminderSender,
   createFetchFcmHttpTransport,
   type FcmChangeReminderLogEvent,
-  type FcmChangeReminderResult,
 } from './fcm-change-reminder-sender.js';
 import {
   createKeylessFcmAccessTokenProvider,
@@ -16,6 +15,7 @@ import {
   type KeylessFcmLogEvent,
   type ManagedIdentityAssertionCredential,
 } from './keyless-fcm-access-token.js';
+import { createFcmTransportProof } from './fcm-transport-proof.js';
 import {
   createAzureReminderSubscriptionStore,
   type ReminderSubscriptionStore,
@@ -58,15 +58,11 @@ export interface FcmRuntimeDependencies {
 }
 
 interface FcmProofConfiguration {
-  readonly changeDirection: 'forward' | 'backward';
-  readonly changeEventAt: Date;
   readonly entraAssertionAudience: string;
-  readonly homeTimeZone: string;
   readonly installationId: string;
   readonly managedIdentityClientId: string;
   readonly projectId: string;
   readonly serviceAccountEmail: string;
-  readonly timing: 'one-week' | 'one-day';
   readonly workloadIdentityProvider: string;
 }
 
@@ -92,36 +88,15 @@ function required(environment: NodeJS.ProcessEnv, name: string) {
 function proofConfiguration(
   environment: NodeJS.ProcessEnv,
 ): FcmProofConfiguration {
-  const changeDirection = required(environment, 'FCM_PROOF_CHANGE_DIRECTION');
-  if (changeDirection !== 'forward' && changeDirection !== 'backward') {
-    throw new Error('FCM_PROOF_CHANGE_DIRECTION is invalid');
-  }
-  const timing = required(environment, 'FCM_PROOF_TIMING');
-  if (timing !== 'one-week' && timing !== 'one-day') {
-    throw new Error('FCM_PROOF_TIMING is invalid');
-  }
-  const changeEventAt = new Date(
-    required(environment, 'FCM_PROOF_CHANGE_EVENT_AT'),
-  );
-  if (
-    Number.isNaN(changeEventAt.getTime()) ||
-    changeEventAt.toISOString() !==
-      required(environment, 'FCM_PROOF_CHANGE_EVENT_AT')
-  ) {
-    throw new Error('FCM_PROOF_CHANGE_EVENT_AT is invalid');
-  }
   const installationId = required(environment, 'FCM_PROOF_INSTALLATION_ID');
   if (!proofInstallationIdPattern.test(installationId)) {
     throw new Error('FCM_PROOF_INSTALLATION_ID is invalid');
   }
   return {
-    changeDirection,
-    changeEventAt,
     entraAssertionAudience: required(
       environment,
       'FCM_ENTRA_ASSERTION_AUDIENCE',
     ),
-    homeTimeZone: required(environment, 'FCM_PROOF_HOME_TIME_ZONE'),
     installationId,
     managedIdentityClientId: required(
       environment,
@@ -129,7 +104,6 @@ function proofConfiguration(
     ),
     projectId: required(environment, 'FCM_PROJECT_ID'),
     serviceAccountEmail: required(environment, 'FCM_SERVICE_ACCOUNT_EMAIL'),
-    timing,
     workloadIdentityProvider: required(
       environment,
       'FCM_WORKLOAD_IDENTITY_PROVIDER',
@@ -185,27 +159,10 @@ function createRuntime(
         : { timeoutMs: dependencies.timeoutMs }),
     }),
   });
-  return {
-    async sendProof(): Promise<FcmChangeReminderResult | null> {
-      const subscription = await store.getFcmProofSubscription(
-        configuration.installationId,
-      );
-      if (subscription === null) return null;
-      if (
-        subscription.homeTimeZone !== configuration.homeTimeZone ||
-        (configuration.timing === 'one-week' && !subscription.oneWeekEnabled) ||
-        (configuration.timing === 'one-day' && !subscription.oneDayEnabled)
-      ) {
-        return null;
-      }
-      return sender.send(subscription, {
-        changeDirection: configuration.changeDirection,
-        changeEventAt: configuration.changeEventAt,
-        homeTimeZone: configuration.homeTimeZone,
-        timing: configuration.timing,
-      });
-    },
-  };
+  return createFcmTransportProof(configuration.installationId, {
+    registrationResolver: store,
+    sender,
+  });
 }
 
 export function createFcmProofHandler(
@@ -225,7 +182,7 @@ export function createFcmProofHandler(
         environment,
         configuration,
         dependencies,
-      ).sendProof();
+      ).send();
       if (result === null) {
         return response(404, { error: 'Registration unavailable' });
       }
