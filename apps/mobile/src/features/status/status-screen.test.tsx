@@ -216,6 +216,56 @@ describe('StatusScreen facade', () => {
     ).toBeTruthy();
   });
 
+  it('keeps current zone and announces proof-specific mismatch semantics', () => {
+    const result = render(
+      <StatusScreen
+        notificationTap={{
+          homeTimeZone: 'Australia/Perth',
+          notificationKind: 'fcm-transport-proof',
+        }}
+        now={new Date('2026-07-19T00:00:00.000Z')}
+        reducedMotion
+      />,
+    );
+    const label =
+      'FCM TRANSPORT TEST HOME TIME ZONE MISMATCH. Transport test received for a different Home Time Zone. This app did not switch zones. Scheduler timing and Change Reminder eligibility were not tested.';
+
+    expect(screen.getByRole('alert', { name: label })).toBeTruthy();
+    expect(
+      screen.getByLabelText(
+        'Home Time Zone, Sydney, Canberra & most of NSW, Australia/Sydney',
+      ),
+    ).toBeTruthy();
+    expect(explicitAccessibilityOrder(result.toJSON() as RenderNode)).toContain(
+      label,
+    );
+    expect(screen.queryByText(/this reminder was sent/i)).toBeNull();
+  });
+
+  it('announces proof-specific context when current report is unavailable', () => {
+    const result = render(
+      <StatusScreen
+        notificationTap={{
+          homeTimeZone: 'Australia/Sydney',
+          notificationKind: 'fcm-transport-proof',
+        }}
+        now={new Date('2031-01-01T00:00:00.000Z')}
+        reducedMotion
+      />,
+    );
+    const label =
+      'FCM TRANSPORT TEST REPORT UNAVAILABLE. Transport test received. Verified Civil Time Report details are unavailable. Scheduler timing and Change Reminder eligibility were not tested.';
+
+    expect(screen.getByRole('alert', { name: label })).toBeTruthy();
+    expect(explicitAccessibilityOrder(result.toJSON() as RenderNode)).toContain(
+      label,
+    );
+    expect(screen.queryByText(/reminder report unavailable/i)).toBeNull();
+    expect(
+      screen.getByRole('header', { name: 'Civil-time decision unavailable' }),
+    ).toBeTruthy();
+  });
+
   it.each([
     [
       'matched upcoming',

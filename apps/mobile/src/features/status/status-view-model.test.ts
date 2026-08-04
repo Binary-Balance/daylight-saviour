@@ -160,7 +160,30 @@ describe('createStatusViewModel', () => {
     );
 
     expect(viewModel).toMatchObject({
-      notificationContext: { kind: 'zone-mismatch' },
+      notificationContext: { kind: 'transport-proof-zone-mismatch' },
+      zoneId: 'Australia/Sydney',
+    });
+  });
+
+  it('keeps transport-proof identity when current report is unavailable', () => {
+    const pack = activateAustralianTimeZoneDataPack(bundledAustralianDataPack);
+    const viewModel = createStatusViewModel(
+      pack,
+      'expired',
+      'Australia/Sydney',
+      new Date('2031-01-01T00:00:00.000Z'),
+      false,
+      'test-installation',
+      null,
+      {
+        homeTimeZone: 'Australia/Sydney',
+        notificationKind: 'fcm-transport-proof',
+      },
+    );
+
+    expect(viewModel).toMatchObject({
+      availability: 'unavailable',
+      notificationContext: { kind: 'transport-proof-report-unavailable' },
       zoneId: 'Australia/Sydney',
     });
   });

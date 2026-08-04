@@ -51,6 +51,14 @@ export const changeReminders = Object.freeze({
       body: 'Transport test received. This current Civil Time Report is for the matching Home Time Zone. Scheduler timing and Change Reminder eligibility were not tested.',
       heading: 'FCM TRANSPORT TEST OPENED',
     }),
+    reportUnavailable: Object.freeze({
+      body: 'Transport test received. Verified Civil Time Report details are unavailable. Scheduler timing and Change Reminder eligibility were not tested.',
+      heading: 'FCM TRANSPORT TEST REPORT UNAVAILABLE',
+    }),
+    zoneMismatch: Object.freeze({
+      body: 'Transport test received for a different Home Time Zone. This app did not switch zones. Scheduler timing and Change Reminder eligibility were not tested.',
+      heading: 'FCM TRANSPORT TEST HOME TIME ZONE MISMATCH',
+    }),
   }),
   notificationContext: Object.freeze({
     opened: Object.freeze({

@@ -21,6 +21,8 @@ export type ChangeReminderTapContext =
   | { readonly kind: 'event-unavailable' }
   | { readonly kind: 'report-unavailable' }
   | { readonly kind: 'transport-proof' }
+  | { readonly kind: 'transport-proof-report-unavailable' }
+  | { readonly kind: 'transport-proof-zone-mismatch' }
   | { readonly kind: 'zone-mismatch' };
 
 export type StatusViewModel =
@@ -64,6 +66,10 @@ export type StatusViewModel =
       readonly zoneId: string;
     };
 
+function isTransportProofTap(tap: ReviewedNotificationTap) {
+  return 'notificationKind' in tap;
+}
+
 export function createStatusViewModel(
   activePack: ActivatedTimeZoneDataPack,
   dataFreshness: TimeZoneDataPackFreshness,
@@ -83,8 +89,12 @@ export function createStatusViewModel(
     let requestedEventAt: string | null = null;
     if (notificationTap !== null) {
       if (notificationTap.homeTimeZone !== zoneId) {
-        notificationContext = { kind: 'zone-mismatch' };
-      } else if ('notificationKind' in notificationTap) {
+        notificationContext = {
+          kind: isTransportProofTap(notificationTap)
+            ? 'transport-proof-zone-mismatch'
+            : 'zone-mismatch',
+        };
+      } else if (isTransportProofTap(notificationTap)) {
         notificationContext = { kind: 'transport-proof' };
       } else {
         const expectedDirection =
@@ -217,7 +227,13 @@ export function createStatusViewModel(
       message: copy.civilTimeReport.decisionUnavailable.message(error.reason),
       ...packDetails,
       notificationContext:
-        notificationTap === null ? null : { kind: 'report-unavailable' },
+        notificationTap === null
+          ? null
+          : {
+              kind: isTransportProofTap(notificationTap)
+                ? 'transport-proof-report-unavailable'
+                : 'report-unavailable',
+            },
       unavailabilityReason: error.reason,
       zoneId,
     };
