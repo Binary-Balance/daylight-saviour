@@ -24,7 +24,7 @@ export type FcmTransportProofBackgroundResult =
   | 'no-data';
 
 interface BackgroundTaskPayload {
-  readonly data?: { readonly dataString?: unknown };
+  readonly data?: Record<string, unknown>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -33,12 +33,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function parseFcmTransportProofBackgroundData(value: unknown) {
   if (!isRecord(value) || !isRecord(value.data)) return null;
-  const dataString = value.data.dataString;
-  if (typeof dataString !== 'string' || dataString.length > 4_096) return null;
+  const { dataString, ...providerData } = value.data;
+  if (
+    Object.prototype.hasOwnProperty.call(value.data, 'dataString') &&
+    dataString !== null
+  ) {
+    return null;
+  }
   try {
-    const notification = parseFcmTransportProofNotification(
-      JSON.parse(dataString),
-    );
+    const notification = parseFcmTransportProofNotification(providerData);
     return canonicalAustralianZoneId(notification.homeTimeZone) ===
       notification.homeTimeZone
       ? notification

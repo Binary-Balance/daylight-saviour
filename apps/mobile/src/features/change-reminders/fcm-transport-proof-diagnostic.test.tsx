@@ -28,6 +28,11 @@ describe('FCM transport proof diagnostic', () => {
 
     expect(await screen.findByText('i'.repeat(43))).toBeTruthy();
     expect(screen.getByText('Australia/Sydney')).toBeTruthy();
+    expect(
+      screen.getByLabelText(
+        `Installation ID: ${'i'.repeat(43)}. Home Time Zone: Australia/Sydney.`,
+      ),
+    ).toHaveProp('accessible', true);
     expect(reader.read).toHaveBeenCalledWith('Australia/Sydney');
     expect(JSON.stringify(screen.toJSON())).not.toContain('credential');
     expect(JSON.stringify(screen.toJSON())).not.toContain('deviceToken');

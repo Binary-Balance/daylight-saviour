@@ -54,12 +54,19 @@ a real civil-time change.
 Provider proof messages are high-priority and data-only, so Android does not
 auto-present them in background or terminated states. Proof builds register an
 Expo background notification task at module scope. It strictly activates exact
-proof data, then schedules the fixed local test notification on the
-`change-reminders` channel. Ordinary builds check the immutable false build
-flag inside the task handler and unregister any task persisted from an installed
-proof build. Physical-device evidence must cover foreground, background, and
-terminated receipt plus tap; unit and build checks cannot prove Android headless
-delivery under real device power and process conditions.
+proof data from the pinned Expo Android serializer: provider fields appear
+directly inside task `data`, with platform `dataString` accepted only when null
+or absent. It then schedules the fixed local test notification on the
+`change-reminders` channel. Ordinary builds check the immutable false build flag
+inside the task handler and unregister any task persisted from an installed
+proof build. Unit and build checks cannot prove Android headless delivery under
+real device power and process conditions. Record this physical-device matrix:
+
+| App state  | Receipt shown | Tap opens matching report |
+| ---------- | ------------- | ------------------------- |
+| Foreground | Required      | Required                  |
+| Background | Required      | Required                  |
+| Terminated | Required      | Required                  |
 
 ## Build
 

@@ -1,5 +1,4 @@
 import { changeReminderNotification } from './change-reminder-notification.ts';
-import { fcmTransportProofNotification } from './fcm-transport-proof-notification.ts';
 
 export const changeReminders = Object.freeze({
   accessibility: Object.freeze({
@@ -33,11 +32,21 @@ export const changeReminders = Object.freeze({
     diagnostic: Object.freeze({
       action: 'Show transport-test installation ID',
       heading: 'FCM TRANSPORT TEST DIAGNOSTIC',
-      registrationLabel: 'FCM transport test registration',
+      registration: ({
+        homeTimeZone,
+        installationId,
+      }: {
+        readonly homeTimeZone: string;
+        readonly installationId: string;
+      }) =>
+        `Installation ID: ${installationId}. Home Time Zone: ${homeTimeZone}.`,
       unavailable:
         'Enable Change Reminders for this Home Time Zone before reading the test installation ID.',
     }),
-    notification: fcmTransportProofNotification,
+    notification: Object.freeze({
+      body: 'Test only. No Change Reminder is due.',
+      title: 'FCM transport test',
+    }),
     opened: Object.freeze({
       body: 'Transport test received. This current Civil Time Report is for the matching Home Time Zone. Scheduler timing and Change Reminder eligibility were not tested.',
       heading: 'FCM TRANSPORT TEST OPENED',

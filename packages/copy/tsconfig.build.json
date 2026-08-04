@@ -7,8 +7,5 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": [
-    "src/change-reminder-notification.ts",
-    "src/fcm-transport-proof-notification.ts"
-  ]
+  "include": ["src/change-reminder-notification.ts"]
 }
