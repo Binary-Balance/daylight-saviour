@@ -14,3 +14,4 @@ Daylight Saviour will launch without accounts, advertising, behavioral analytics
 - Explicit reminder disable or in-app deletion promptly removes the server subscription; inactivity alone does not silently cancel an enabled service.
 - Token-free dispatch-ledger and operational records are retained for 30 days, then purged automatically.
 - Adding client analytics or diagnostics later requires a deliberate review of consent, disclosure, data minimisation, and this ADR.
+- The non-promotable FCM transport-proof build is a deliberate, narrow exception for physical-device delivery evidence: after a successful matching registration, an explicit local operator action may display only an opaque installation ID and matching Home Time Zone. It never displays a credential or push token, is not client telemetry because it is neither transmitted nor logged, and is absent from ordinary builds and ordinary support diagnostics.

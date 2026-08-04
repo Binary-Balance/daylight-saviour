@@ -45,6 +45,14 @@ only the opaque installation ID and matching canonical Home Time Zone. It never
 reveals or logs the installation credential or device token. Missing, pending,
 corrupt, or different-zone registrations fail closed.
 
+This is a deliberate, narrow, non-promotable proof-build exception to the
+ordinary support-diagnostic redaction rules in
+[ADR 0006](adr/0006-minimise-user-data-and-client-telemetry.md) and
+[ADR 0017](adr/0017-use-low-infrastructure-support-channels.md). It is an
+explicit local operator action for physical-device evidence, not client
+telemetry: it is neither transmitted nor logged, reveals no credential or token,
+and is absent from ordinary builds.
+
 A reviewed transport-proof notification opens the current matching Home Time
 Zone Civil Time Report and states that transport succeeded while scheduler
 timing and Change Reminder eligibility were not tested. Proof data contains no
