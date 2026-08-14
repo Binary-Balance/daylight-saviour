@@ -19,11 +19,12 @@ Portable composition reads these environment settings:
 | `FCM_PROJECT_ID`                      | Exact Firebase/Google project used in FCM HTTP v1 send URLs.                                                               |
 | `FCM_RUNTIME_ENABLED`                 | Must be exactly `true` before FCM runtime or proof composition is available.                                               |
 
-Runtime accepts only short-lived credentials: managed-identity assertions,
-Google STS tokens, and impersonated FCM access tokens are each bounded to one
-hour. Exchange denials, transport failures, parsing, expiry, delivery, and
-failed invalid-token cleanup produce distinct fixed event names. Tokens,
-assertions, provider bodies, and transport errors never enter those events.
+Runtime accepts only short-lived credentials: managed-identity assertions must
+have a valid future expiry, while Google STS tokens and impersonated FCM access
+tokens are each bounded to one hour. Exchange denials, transport failures,
+parsing, expiry, delivery, and failed invalid-token cleanup produce distinct
+fixed event names. Tokens, assertions, provider bodies, and transport errors
+never enter those events.
 
 ## Least privilege
 

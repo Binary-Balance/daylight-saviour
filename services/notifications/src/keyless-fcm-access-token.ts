@@ -125,10 +125,14 @@ function validToken(value: unknown): value is string {
 function validExpiry(expiresAt: Date, now: Date) {
   const lifetime = expiresAt.getTime() - now.getTime();
   return (
-    !Number.isNaN(expiresAt.getTime()) &&
+    Number.isFinite(expiresAt.getTime()) &&
     lifetime > 0 &&
     lifetime <= maximumTokenLifetimeMs
   );
+}
+
+function validFutureTimestamp(timestamp: number, now: Date) {
+  return Number.isFinite(timestamp) && timestamp > now.getTime();
 }
 
 function parseResponseBody(body: string): unknown | undefined {
@@ -261,7 +265,7 @@ export function createKeylessFcmAccessTokenProvider(
       }
       if (
         !Number.isSafeInteger(assertion.expiresOnTimestamp) ||
-        !validExpiry(new Date(assertion.expiresOnTimestamp), clock())
+        !validFutureTimestamp(assertion.expiresOnTimestamp, clock())
       ) {
         report(dependencies.logger, 'fcm-credential-entra-expired');
         throw new KeylessFcmAccessTokenError('entra-expired');
