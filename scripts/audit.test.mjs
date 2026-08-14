@@ -72,7 +72,7 @@ test('rejects unresolved audit references', () => {
     allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
     allowedAdvisory('https://github.com/advisories/GHSA-5p2g-fcmc-qvqq'),
   ]);
-  report.vulnerabilities.metro = { via: ['missing'] };
+  report.vulnerabilities.metro = { severity: 'high', via: ['missing'] };
   assert.throws(
     () => validateAudit(report, lock),
     /unresolved npm audit references/i,
@@ -87,6 +87,17 @@ test('rejects a moderate-or-higher record without an advisory chain', () => {
   assert.throws(
     () => validateAudit(report, lock),
     /unexpected npm audit vulnerability chains/i,
+  );
+});
+
+test('rejects a vulnerability record without a valid severity', () => {
+  const report = audit([
+    allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
+  ]);
+  report.vulnerabilities.evil = { severity: 'urgent', via: ['image-size'] };
+  assert.throws(
+    () => validateAudit(report, lock),
+    /invalid npm audit vulnerabilities/i,
   );
 });
 

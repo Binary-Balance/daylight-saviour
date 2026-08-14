@@ -38,8 +38,9 @@ export function validateAudit(audit, lock) {
   const malformed = entries
     .filter(
       ([, vulnerability]) =>
-        severities.has(vulnerability.severity) &&
-        !Array.isArray(vulnerability.via),
+        !validSeverities.has(vulnerability.severity) ||
+        (severities.has(vulnerability.severity) &&
+          !Array.isArray(vulnerability.via)),
     )
     .map(([packageName]) => packageName);
   if (malformed.length)
