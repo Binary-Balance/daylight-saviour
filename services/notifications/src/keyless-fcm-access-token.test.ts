@@ -148,6 +148,19 @@ describe('keyless FCM access-token provider', () => {
     assert.deepEqual(test.events, ['fcm-credential-ready']);
   });
 
+  it('accepts a 90-minute Entra assertion for STS and impersonation', async () => {
+    const test = harness(successfulResponses(), {
+      assertionExpiresOnTimestamp: now.getTime() + 90 * 60 * 1000,
+    });
+
+    assert.deepEqual(await test.provider.getAccessToken(), {
+      expiresAt: new Date('2026-07-28T01:30:00.000Z'),
+      value: fcmToken,
+    });
+    assert.equal(test.requests.length, 2);
+    assert.deepEqual(test.events, ['fcm-credential-ready']);
+  });
+
   it('classifies provider denial without logging credentials or response bodies', async () => {
     const sensitiveBody = `denied ${entraAssertion} ${federatedToken} ${fcmToken}`;
     const test = harness([response(403, sensitiveBody)]);
