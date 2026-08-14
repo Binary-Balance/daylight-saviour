@@ -90,6 +90,17 @@ test('rejects a moderate-or-higher record without an advisory chain', () => {
   );
 });
 
+test('rejects an advisory without a valid severity', () => {
+  const report = audit([
+    allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
+    { name: 'other', dependency: 'other', url: 'https://example.test/other' },
+  ]);
+  assert.throws(
+    () => validateAudit(report, lock),
+    /invalid npm audit advisories/i,
+  );
+});
+
 test('requires an active temporary image-size advisory', () => {
   assert.throws(
     () => validateAudit(audit([]), lock),

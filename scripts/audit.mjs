@@ -6,6 +6,7 @@ const allowedUrls = new Set([
   'https://github.com/advisories/GHSA-5p2g-fcmc-qvqq',
 ]);
 const severities = new Set(['moderate', 'high', 'critical']);
+const validSeverities = new Set(['info', 'low', ...severities]);
 
 const isMetroImageSize = (vulnerability, advisory) =>
   vulnerability.effects?.length === 1 &&
@@ -57,6 +58,20 @@ export function validateAudit(audit, lock) {
   if (unresolved.length)
     throw new Error(
       `Unresolved npm audit references: ${unresolved.join(', ')}`,
+    );
+
+  const malformedAdvisories = entries.flatMap(([packageName, vulnerability]) =>
+    (vulnerability.via ?? [])
+      .filter(
+        (advisory) =>
+          typeof advisory !== 'string' &&
+          (!advisory || !validSeverities.has(advisory.severity)),
+      )
+      .map(() => packageName),
+  );
+  if (malformedAdvisories.length)
+    throw new Error(
+      `Invalid npm audit advisories: ${malformedAdvisories.join(', ')}`,
     );
 
   // ponytail: temporary image-size exception; remove when a compatible patched image-size release is published.
