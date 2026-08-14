@@ -79,6 +79,17 @@ test('rejects unresolved audit references', () => {
   );
 });
 
+test('rejects a moderate-or-higher record without an advisory chain', () => {
+  const report = audit([
+    allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
+  ]);
+  report.vulnerabilities.evil = { severity: 'critical', via: [] };
+  assert.throws(
+    () => validateAudit(report, lock),
+    /unexpected npm audit vulnerability chains/i,
+  );
+});
+
 test('requires an active temporary image-size advisory', () => {
   assert.throws(
     () => validateAudit(audit([]), lock),

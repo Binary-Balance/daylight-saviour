@@ -15,6 +15,11 @@ const isMetroImageSize = (vulnerability, advisory) =>
   advisory.name === 'image-size' &&
   advisory.dependency === 'image-size';
 
+const isAllowedAdvisory = (packageName, vulnerability, advisory) =>
+  packageName === 'image-size' &&
+  allowedUrls.has(advisory.url) &&
+  isMetroImageSize(vulnerability, advisory);
+
 export function validateAudit(audit, lock) {
   if (audit?.error)
     throw new Error(
@@ -28,11 +33,23 @@ export function validateAudit(audit, lock) {
     throw new Error('Invalid npm audit output');
   }
 
-  const references = Object.values(audit.vulnerabilities).flatMap(
-    (vulnerability) =>
-      (vulnerability.via ?? []).filter(
-        (advisory) => typeof advisory === 'string',
-      ),
+  const entries = Object.entries(audit.vulnerabilities);
+  const malformed = entries
+    .filter(
+      ([, vulnerability]) =>
+        severities.has(vulnerability.severity) &&
+        !Array.isArray(vulnerability.via),
+    )
+    .map(([packageName]) => packageName);
+  if (malformed.length)
+    throw new Error(
+      `Invalid npm audit vulnerabilities: ${malformed.join(', ')}`,
+    );
+
+  const references = entries.flatMap(([, vulnerability]) =>
+    (vulnerability.via ?? []).filter(
+      (advisory) => typeof advisory === 'string',
+    ),
   );
   const unresolved = references.filter(
     (reference) => !audit.vulnerabilities[reference],
@@ -44,18 +61,14 @@ export function validateAudit(audit, lock) {
 
   // ponytail: temporary image-size exception; remove when a compatible patched image-size release is published.
   const allowed = new Set();
-  const unexpected = Object.entries(audit.vulnerabilities).flatMap(
-    ([packageName, vulnerability]) =>
-      (vulnerability.via ?? []).filter((advisory) => {
-        if (typeof advisory === 'string' || !severities.has(advisory.severity))
-          return false;
-        const isAllowed =
-          packageName === 'image-size' &&
-          allowedUrls.has(advisory.url) &&
-          isMetroImageSize(vulnerability, advisory);
-        if (isAllowed) allowed.add(advisory.url);
-        return !isAllowed;
-      }),
+  const unexpected = entries.flatMap(([packageName, vulnerability]) =>
+    (vulnerability.via ?? []).filter((advisory) => {
+      if (typeof advisory === 'string' || !severities.has(advisory.severity))
+        return false;
+      const isAllowed = isAllowedAdvisory(packageName, vulnerability, advisory);
+      if (isAllowed) allowed.add(advisory.url);
+      return !isAllowed;
+    }),
   );
 
   if (unexpected.length) {
@@ -68,6 +81,30 @@ export function validateAudit(audit, lock) {
       'Temporary image-size exception changed; remove it when a compatible patched release is available',
     );
   }
+
+  const reachesAllowedAdvisory = (packageName, seen = new Set()) => {
+    if (seen.has(packageName)) return false;
+    const vulnerability = audit.vulnerabilities[packageName];
+    const nextSeen = new Set(seen).add(packageName);
+    return vulnerability.via.some((advisory) =>
+      typeof advisory === 'string'
+        ? reachesAllowedAdvisory(advisory, nextSeen)
+        : severities.has(advisory.severity) &&
+          isAllowedAdvisory(packageName, vulnerability, advisory),
+    );
+  };
+  const disconnected = entries
+    .filter(
+      ([packageName, vulnerability]) =>
+        severities.has(vulnerability.severity) &&
+        !reachesAllowedAdvisory(packageName),
+    )
+    .map(([packageName]) => packageName);
+  if (disconnected.length)
+    throw new Error(
+      `Unexpected npm audit vulnerability chains: ${disconnected.join(', ')}`,
+    );
+
   if (
     !lock?.packages?.['node_modules/image-size'] ||
     !lock.packages['node_modules/metro']?.dependencies?.['image-size']
