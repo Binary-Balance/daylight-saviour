@@ -6,7 +6,7 @@
 | --------------------- | ----------------- |
 | Node.js               | 24.18.0           |
 | npm                   | 11.16.0           |
-| Expo                  | 57.0.9            |
+| Expo                  | 57.0.12           |
 | React                 | 19.2.3            |
 | React Native          | 0.86.2            |
 | TypeScript            | 6.0.3             |
@@ -36,6 +36,13 @@ Add each dependency to its consuming workspace. Keep React, React DOM, and React
 Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycle-script approvals to suppress dependency problems. Resolve conflicts explicitly, document accepted advisories, and verify dependency shape with `npm run dependencies:check`.
 
 `npm run audit` fails closed for moderate, high, and critical advisories.
+
+Until a compatible patched `image-size` release is published, the audit command
+allows only [GHSA-w3rx-r6r6-pgpr](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr)
+and [GHSA-5p2g-fcmc-qvqq](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq).
+They apply only to the installed Metro build tool at build time, not the shipped
+application. Remove this temporary exception immediately when that compatible
+patched release is available.
 
 Portable signed-pack verification pins `@noble/ed25519` 3.1.0 and
 `@noble/hashes` 2.2.0 in `@daylight-saviour/contracts`. Both are MIT,
