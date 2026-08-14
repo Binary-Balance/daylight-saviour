@@ -37,6 +37,13 @@ Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycl
 
 `npm run audit` fails closed for moderate, high, and critical advisories.
 
+Until a compatible patched `image-size` release is published, the audit command
+allows only [GHSA-w3rx-r6r6-pgpr](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr)
+and [GHSA-5p2g-fcmc-qvqq](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq).
+They apply only to the installed Metro build tool at build time, not the shipped
+application. Remove this temporary exception immediately when that compatible
+patched release is available.
+
 Portable signed-pack verification pins `@noble/ed25519` 3.1.0 and
 `@noble/hashes` 2.2.0 in `@daylight-saviour/contracts`. Both are MIT,
 zero-runtime-dependency modules. Verification wires pure JavaScript SHA
