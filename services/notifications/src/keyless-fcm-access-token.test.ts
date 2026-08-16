@@ -132,7 +132,7 @@ describe('keyless FCM access-token provider', () => {
       },
       {
         body: JSON.stringify({
-          lifetime: '3600s',
+          lifetime: '3300s',
           scope: ['https://www.googleapis.com/auth/firebase.messaging'],
         }),
         headers: {
@@ -158,6 +158,22 @@ describe('keyless FCM access-token provider', () => {
       value: fcmToken,
     });
     assert.equal(test.requests.length, 2);
+    assert.deepEqual(test.events, ['fcm-credential-ready']);
+  });
+
+  it('accepts an IAM expiry within the request clock-skew margin', async () => {
+    const test = harness([
+      successfulResponses()[0],
+      response(200, {
+        accessToken: fcmToken,
+        expireTime: '2026-07-28T01:59:00.000Z',
+      }),
+    ]);
+
+    assert.deepEqual(await test.provider.getAccessToken(), {
+      expiresAt: new Date('2026-07-28T01:59:00.000Z'),
+      value: fcmToken,
+    });
     assert.deepEqual(test.events, ['fcm-credential-ready']);
   });
 
