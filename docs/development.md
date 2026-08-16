@@ -98,9 +98,8 @@ No emulator or system image is required for compilation. Runtime testing can use
 
 ## Android build architecture
 
-Android builds must target only `arm64-v8a` by default. Contributors must use
-the Gradle command below for local validation, proof, and release builds;
-replace `assembleDebug` with `assembleRelease` for a release build:
+Android builds must target only `arm64-v8a` by default. The Gradle command below
+is for local debug validation:
 
 ```bash
 NODE_ENV=development apps/mobile/android/gradlew \
@@ -109,6 +108,10 @@ NODE_ENV=development apps/mobile/android/gradlew \
   --no-daemon \
   -PreactNativeArchitectures=arm64-v8a
 ```
+
+`npm run android:build:fcm-proof` runs the existing FCM proof build and supplies
+the same `-PreactNativeArchitectures=arm64-v8a` property. Any future or approved
+release command must also supply that property.
 
 Do not omit the architecture property. Build another architecture only when the
 current work has an explicit, documented need for it, such as an `x86_64`
