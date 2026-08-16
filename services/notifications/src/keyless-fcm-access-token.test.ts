@@ -161,6 +161,22 @@ describe('keyless FCM access-token provider', () => {
     assert.deepEqual(test.events, ['fcm-credential-ready']);
   });
 
+  it('accepts an IAM expiry within the request clock-skew margin', async () => {
+    const test = harness([
+      successfulResponses()[0],
+      response(200, {
+        accessToken: fcmToken,
+        expireTime: '2026-07-28T01:59:00.000Z',
+      }),
+    ]);
+
+    assert.deepEqual(await test.provider.getAccessToken(), {
+      expiresAt: new Date('2026-07-28T01:59:00.000Z'),
+      value: fcmToken,
+    });
+    assert.deepEqual(test.events, ['fcm-credential-ready']);
+  });
+
   it('classifies provider denial without logging credentials or response bodies', async () => {
     const sensitiveBody = `denied ${entraAssertion} ${federatedToken} ${fcmToken}`;
     const test = harness([response(403, sensitiveBody)]);
