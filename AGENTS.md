@@ -22,9 +22,9 @@ Cross-repository work must be split into paired issues. Public issue describes p
 
 ## Development, Build & Validation
 
-Follow [`docs/development.md`](docs/development.md) for the pinned toolchain, dependency policy, development commands, validation matrix, and Android build profiles. Run installs and checks from the repository root, keep one root `package-lock.json`, and add each dependency to its consuming workspace.
+Follow [`docs/development.md`](docs/development.md) for the pinned toolchain, dependency policy, development commands, validation matrix, and Android build architecture. Run installs and checks from the repository root, keep one root `package-lock.json`, and add each dependency to its consuming workspace.
 
-Generated native projects are disposable. Preserve native build caches during ordinary work; use clean or multi-ABI builds only when their documented evidence is relevant. Linux supports web and Android; iOS builds run on hosted macOS runners. Do not introduce EAS without revisiting ADR 0001.
+Generated native projects are disposable. Preserve native build caches during ordinary work and use clean builds only when their documented evidence is relevant. Build Android for `arm64-v8a` only unless the current work has an explicit, documented need for another architecture. Linux supports web and Android; iOS builds run on hosted macOS runners. Do not introduce EAS without revisiting ADR 0001.
 
 ## Coding Style & Naming
 

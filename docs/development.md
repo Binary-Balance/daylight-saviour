@@ -96,9 +96,10 @@ sdkmanager \
 
 No emulator or system image is required for compilation. Runtime testing can use a physical Android device or later CI/device infrastructure. iOS compilation uses hosted macOS infrastructure.
 
-## Android build profiles
+## Android build architecture
 
-Routine CI and local APK validation compile only `arm64-v8a`:
+Android builds must target only `arm64-v8a` by default. The Gradle command below
+is for local debug validation:
 
 ```bash
 NODE_ENV=development apps/mobile/android/gradlew \
@@ -108,16 +109,20 @@ NODE_ENV=development apps/mobile/android/gradlew \
   -PreactNativeArchitectures=arm64-v8a
 ```
 
-Full release-oriented validation builds all configured ABIs by omitting the architecture property:
+`npm run android:build:fcm-proof` runs the existing FCM proof build and supplies
+the same `-PreactNativeArchitectures=arm64-v8a` property. Any future or approved
+release command must also supply that property.
 
-```bash
-NODE_ENV=development apps/mobile/android/gradlew \
-  -p apps/mobile/android \
-  assembleDebug \
-  --no-daemon
-```
+Do not omit the architecture property. Build another architecture only when the
+current work has an explicit, documented need for it, such as an `x86_64`
+emulator or a release that explicitly supports that ABI. Build only the required
+architecture rather than the full ABI list.
 
-Full clean multi-ABI builds are release or major native-toolchain checks, not routine development. JavaScript/TypeScript changes normally need Metro, tests, typecheck, lint, and web export only. Preserve caches unless validating reproducibility or responding to native changes. `npm ci`, clean Expo prebuild, `gradlew clean`, native dependency changes, and changes to Expo, React Native, Gradle, Android Gradle Plugin, NDK, or CMake invalidate expensive build outputs.
+JavaScript/TypeScript changes normally need Metro, tests, typecheck, lint, and
+web export only. Preserve caches unless validating reproducibility or responding
+to native changes. `npm ci`, clean Expo prebuild, `gradlew clean`, native
+dependency changes, and changes to Expo, React Native, Gradle, Android Gradle
+Plugin, NDK, or CMake invalidate expensive build outputs.
 
 ## Browser screenshot evidence
 
@@ -231,9 +236,12 @@ npm test
 npm run dependencies:check
 npm run web:export
 npm run native:generate:android
-NODE_ENV=development apps/mobile/android/gradlew -p apps/mobile/android assembleDebug --no-daemon
+NODE_ENV=development apps/mobile/android/gradlew -p apps/mobile/android assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
 ```
 
-Generated native directories are disposable and ignored. Regenerate after Expo configuration or native dependency changes. Routine CI compiles `arm64-v8a`; release validation must restore every supported ABI.
+Generated native directories are disposable and ignored. Regenerate after Expo
+configuration or native dependency changes. All Android validation compiles only
+`arm64-v8a` unless the work identifies and documents a specific need for another
+architecture.
 
 Production identifier `au.com.binarybalance.daylightsaviour` applies to both the Android application ID and iOS bundle identifier. Signing and environment-specific release configuration remain private operations concerns.
