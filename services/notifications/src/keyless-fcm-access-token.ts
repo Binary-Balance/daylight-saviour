@@ -14,6 +14,8 @@ const tokenExchangeGrant = 'urn:ietf:params:oauth:grant-type:token-exchange';
 const accessTokenType = 'urn:ietf:params:oauth:token-type:access_token';
 const jwtTokenType = 'urn:ietf:params:oauth:token-type:jwt';
 const maximumTokenLifetimeMs = 60 * 60 * 1000;
+// Leave room below the ceiling for differences between Google and local clocks.
+const requestedAccessTokenLifetime = '3300s';
 const maximumResponseCharacters = 64 * 1024;
 const maximumTokenCharacters = 16 * 1024;
 const defaultTimeoutMs = 10_000;
@@ -343,7 +345,7 @@ export function createKeylessFcmAccessTokenProvider(
           endpoint,
           {
             body: JSON.stringify({
-              lifetime: '3600s',
+              lifetime: requestedAccessTokenLifetime,
               scope: [firebaseMessagingScope],
             }),
             headers: {

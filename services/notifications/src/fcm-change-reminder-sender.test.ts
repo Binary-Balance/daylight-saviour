@@ -62,6 +62,7 @@ function sender(
       readonly expiresAt: Date;
       readonly value: string;
     }>;
+    readonly clock?: () => Date;
     readonly removeIfDeviceTokenMatches?: () => Promise<FcmSubscriptionRemovalResult>;
     readonly post?: (request: FcmHttpRequest) => Promise<FcmHttpResponse>;
   } = {},
@@ -78,7 +79,7 @@ function sender(
           value: fullCredential,
         })),
     },
-    clock: () => now,
+    clock: options.clock ?? (() => now),
     logger: { write: (event) => logs.push(event) },
     subscriptionRemover: {
       removeIfDeviceTokenMatches: async (matchingSubscription) => {
@@ -377,6 +378,52 @@ describe('FCM Change Reminder sender', () => {
     assert.deepEqual(test.requests, []);
     assert.deepEqual(test.removalRequests, []);
     assert.deepEqual(test.logs, ['fcm-change-reminder-transient-rejection']);
+  });
+
+  it('rejects a token that expires during asynchronous acquisition', async () => {
+    let currentTime = now.getTime();
+    const test = sender(
+      response(
+        200,
+        JSON.stringify({ name: 'projects/portable-project/messages/1' }),
+      ),
+      {
+        accessToken: async () => {
+          const expiresAt = new Date(currentTime + 1_000);
+          currentTime += 2_000;
+          return {
+            expiresAt,
+            value: fullCredential,
+          };
+        },
+        clock: () => new Date(currentTime),
+      },
+    );
+
+    assert.deepEqual(await test.instance.send(subscription, facts), {
+      kind: 'transient-rejection',
+    });
+    assert.deepEqual(test.requests, []);
+  });
+
+  it('leaves maximum token lifetime policy to the credential provider', async () => {
+    const test = sender(
+      response(
+        200,
+        JSON.stringify({ name: 'projects/portable-project/messages/1' }),
+      ),
+      {
+        accessToken: async () => ({
+          expiresAt: new Date(now.getTime() + 61 * 60 * 1000),
+          value: fullCredential,
+        }),
+      },
+    );
+
+    assert.deepEqual(await test.instance.send(subscription, facts), {
+      kind: 'accepted',
+    });
+    assert.equal(test.requests.length, 1);
   });
 
   it('does not expose tokens, credentials, or provider responses through logs', async () => {

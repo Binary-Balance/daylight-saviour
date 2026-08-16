@@ -6,7 +6,6 @@ import type {
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
 const fcmOrigin = 'https://fcm.googleapis.com';
-const maxAccessTokenLifetimeMs = 60 * 60 * 1000;
 const maxFcmResponseCharacters = 64 * 1024;
 const fcmProjectIdPattern = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 const installationIdPattern = /^[A-Za-z0-9_-]{32,128}$/;
@@ -364,9 +363,8 @@ function hasUsableAccessToken(token: FcmAccessToken, now: Date) {
     token.value.length > 0 &&
     token.value.length <= 16 * 1024 &&
     token.expiresAt instanceof Date &&
-    !Number.isNaN(token.expiresAt.getTime()) &&
-    token.expiresAt.getTime() > now.getTime() &&
-    token.expiresAt.getTime() - now.getTime() <= maxAccessTokenLifetimeMs
+    Number.isFinite(token.expiresAt.getTime()) &&
+    token.expiresAt.getTime() > now.getTime()
   );
 }
 
@@ -482,7 +480,6 @@ export function createFcmChangeReminderSender(
     deliveryKind: 'change-reminder' | 'transport-proof',
   ): Promise<FcmChangeReminderResult> {
     let accessToken: FcmAccessToken;
-    const now = clock();
     try {
       accessToken = await dependencies.accessTokenProvider.getAccessToken();
     } catch {
@@ -492,7 +489,9 @@ export function createFcmChangeReminderSender(
         deliveryKind,
       );
     }
-    if (!hasUsableAccessToken(accessToken, now)) {
+    // The provider owns lifetime policy. After asynchronous acquisition, the
+    // sender only rechecks current usability.
+    if (!hasUsableAccessToken(accessToken, clock())) {
       return report(
         dependencies.logger,
         { kind: 'transient-rejection' },

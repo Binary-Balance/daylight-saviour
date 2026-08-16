@@ -132,7 +132,7 @@ describe('keyless FCM access-token provider', () => {
       },
       {
         body: JSON.stringify({
-          lifetime: '3600s',
+          lifetime: '3300s',
           scope: ['https://www.googleapis.com/auth/firebase.messaging'],
         }),
         headers: {
