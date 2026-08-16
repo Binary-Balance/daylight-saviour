@@ -23,7 +23,10 @@ import {
 
 const proofInstallationIdPattern = /^[A-Za-z0-9_-]{32,128}$/;
 
-export type FcmRuntimeLogEvent = FcmChangeReminderLogEvent | KeylessFcmLogEvent;
+export type FcmRuntimeLogEvent =
+  | FcmChangeReminderLogEvent
+  | KeylessFcmLogEvent
+  | 'fcm-proof-stale-configuration';
 
 interface FcmRuntimeLogger {
   readonly write: (event: FcmRuntimeLogEvent) => void;
@@ -74,6 +77,13 @@ function response(
     status,
     headers: { 'Cache-Control': 'no-store' },
     jsonBody,
+  };
+}
+
+function noContentResponse(): HttpResponseInit {
+  return {
+    status: 204,
+    headers: { 'Cache-Control': 'no-store' },
   };
 }
 
@@ -169,14 +179,33 @@ export function createFcmProofHandler(
   environment: NodeJS.ProcessEnv = process.env,
   dependencies: FcmRuntimeDependencies = defaultFcmRuntimeDependencies,
 ) {
-  return async (_request: HttpRequest): Promise<HttpResponseInit> => {
-    if (
-      environment.FCM_RUNTIME_ENABLED?.trim() !== 'true' ||
-      environment.FCM_PROOF_ENABLED?.trim() !== 'true'
-    ) {
-      return response(404, { error: 'Not found' });
-    }
+  return async (request: HttpRequest): Promise<HttpResponseInit> => {
     try {
+      const requestGeneration = request.headers?.get(
+        'x-fcm-proof-configuration-generation',
+      );
+      const staleConfiguration = () => {
+        dependencies.logger.write('fcm-proof-stale-configuration');
+        return response(409, { error: 'Proof configuration is stale' });
+      };
+
+      if (request.method === 'HEAD' || requestGeneration != null) {
+        const generation =
+          environment.FCM_PROOF_CONFIGURATION_GENERATION?.trim();
+        if (generation === undefined || generation.length === 0) {
+          return staleConfiguration();
+        }
+        if (requestGeneration !== generation) return staleConfiguration();
+        if (request.method === 'HEAD') return noContentResponse();
+      }
+
+      if (
+        environment.FCM_RUNTIME_ENABLED?.trim() !== 'true' ||
+        environment.FCM_PROOF_ENABLED?.trim() !== 'true'
+      ) {
+        return response(404, { error: 'Not found' });
+      }
+
       const configuration = proofConfiguration(environment);
       const result = await createRuntime(
         environment,
@@ -213,6 +242,6 @@ const defaultFcmRuntimeDependencies: FcmRuntimeDependencies = {
 export const fcmProofOptions: HttpFunctionOptions = {
   authLevel: 'function',
   handler: createFcmProofHandler(),
-  methods: ['POST'],
+  methods: ['HEAD', 'POST'],
   route: 'internal/fcm-proof',
 };

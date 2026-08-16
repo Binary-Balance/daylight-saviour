@@ -13,6 +13,7 @@ const environment = {
   FCM_ENTRA_ASSERTION_AUDIENCE: 'api://portable-google-federation',
   FCM_PROJECT_ID: 'portable-project',
   FCM_PROOF_ENABLED: 'true',
+  FCM_PROOF_CONFIGURATION_GENERATION: 'proof-config-1',
   FCM_PROOF_INSTALLATION_ID: 'a'.repeat(43),
   FCM_RUNTIME_ENABLED: 'true',
   FCM_SERVICE_ACCOUNT_EMAIL:
@@ -151,7 +152,7 @@ describe('FCM runtime composition', () => {
 
   it('is function-key gated and fails closed while proof is disabled', async () => {
     assert.equal(fcmProofOptions.authLevel, 'function');
-    assert.deepEqual(fcmProofOptions.methods, ['POST']);
+    assert.deepEqual(fcmProofOptions.methods, ['HEAD', 'POST']);
     assert.equal(fcmProofOptions.route, 'internal/fcm-proof');
 
     let constructions = 0;
@@ -174,6 +175,125 @@ describe('FCM runtime composition', () => {
       jsonBody: { error: 'Not found' },
       status: 404,
     });
+  });
+
+  it('confirms readiness only for the loaded proof configuration', async () => {
+    let constructions = 0;
+    const events: FcmRuntimeLogEvent[] = [];
+    const handler = createFcmProofHandler(
+      {
+        ...environment,
+        FCM_PROOF_ENABLED: 'false',
+        FCM_RUNTIME_ENABLED: 'false',
+      },
+      {
+        ...dependencies(events, []),
+        createStore: () => {
+          constructions += 1;
+          return store();
+        },
+      },
+    );
+
+    const ready = await handler({
+      headers: new Headers({
+        'x-fcm-proof-configuration-generation':
+          environment.FCM_PROOF_CONFIGURATION_GENERATION,
+      }),
+      method: 'HEAD',
+    } as never);
+    const stale = await handler({
+      headers: new Headers({
+        'x-fcm-proof-configuration-generation': 'proof-config-previous',
+      }),
+      method: 'HEAD',
+    } as never);
+    const missing = await handler({
+      headers: new Headers(),
+      method: 'HEAD',
+    } as never);
+    const {
+      FCM_PROOF_CONFIGURATION_GENERATION: _generation,
+      ...environmentWithoutGeneration
+    } = environment;
+    const missingWorkerGeneration = await createFcmProofHandler(
+      environmentWithoutGeneration,
+      dependencies(events, []),
+    )({
+      headers: new Headers({
+        'x-fcm-proof-configuration-generation': 'proof-config-previous',
+      }),
+      method: 'HEAD',
+    } as never);
+
+    assert.deepEqual(ready, {
+      headers: { 'Cache-Control': 'no-store' },
+      status: 204,
+    });
+    assert.deepEqual(stale, {
+      headers: { 'Cache-Control': 'no-store' },
+      jsonBody: { error: 'Proof configuration is stale' },
+      status: 409,
+    });
+    assert.deepEqual(missing, stale);
+    assert.deepEqual(missingWorkerGeneration, stale);
+    assert.equal(constructions, 0);
+    assert.deepEqual(events, [
+      'fcm-proof-stale-configuration',
+      'fcm-proof-stale-configuration',
+      'fcm-proof-stale-configuration',
+    ]);
+  });
+
+  it('rejects a stale proof request before storage or provider delivery', async () => {
+    let constructions = 0;
+    const events: FcmRuntimeLogEvent[] = [];
+    const requests: { body: string | undefined; input: string }[] = [];
+    const handler = createFcmProofHandler(environment, {
+      ...dependencies(events, requests),
+      createStore: () => {
+        constructions += 1;
+        return store();
+      },
+    });
+
+    const result = await handler({
+      headers: new Headers({
+        'x-fcm-proof-configuration-generation': 'proof-config-previous',
+      }),
+      method: 'POST',
+    } as never);
+
+    assert.deepEqual(result, {
+      headers: { 'Cache-Control': 'no-store' },
+      jsonBody: { error: 'Proof configuration is stale' },
+      status: 409,
+    });
+    assert.equal(constructions, 0);
+    assert.deepEqual(requests, []);
+    assert.deepEqual(events, ['fcm-proof-stale-configuration']);
+  });
+
+  it('keeps headerless proof requests available during configuration rollout', async () => {
+    const {
+      FCM_PROOF_CONFIGURATION_GENERATION: _generation,
+      ...environmentWithoutGeneration
+    } = environment;
+    const events: FcmRuntimeLogEvent[] = [];
+    const requests: { body: string | undefined; input: string }[] = [];
+    const handler = createFcmProofHandler(
+      environmentWithoutGeneration,
+      dependencies(events, requests),
+    );
+
+    const result = await handler({ method: 'POST' } as never);
+
+    assert.deepEqual(result, {
+      headers: { 'Cache-Control': 'no-store' },
+      jsonBody: { outcome: 'accepted' },
+      status: 200,
+    });
+    assert.equal(requests.length, 3);
   });
 
   it('returns secret-free outcomes for missing registrations and provider denial', async () => {
