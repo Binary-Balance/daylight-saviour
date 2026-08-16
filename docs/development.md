@@ -98,8 +98,9 @@ No emulator or system image is required for compilation. Runtime testing can use
 
 ## Android build architecture
 
-All Android builds compile only `arm64-v8a` by default, including CI, local
-validation, proof, and release builds:
+Android builds must target only `arm64-v8a` by default. Contributors must use
+the Gradle command below for local validation, proof, and release builds;
+replace `assembleDebug` with `assembleRelease` for a release build:
 
 ```bash
 NODE_ENV=development apps/mobile/android/gradlew \
