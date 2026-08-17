@@ -5,6 +5,10 @@ import { activateAustralianTimeZoneDataPack } from '@daylight-saviour/domain';
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
 import { daylightSaviourPalettes } from '../../theme';
+import {
+  FcmTransportProofDiagnosticStage,
+  recordFcmTransportProofDiagnostic,
+} from '../change-reminders/fcm-transport-proof-diagnostics';
 import RawStatusScreen from './status-screen';
 
 jest.mock('../change-reminders/change-reminder-production-adapters', () => ({
@@ -14,6 +18,17 @@ jest.mock('../change-reminders/change-reminder-production-adapters', () => ({
     restore: jest.fn(() => new Promise(() => undefined)),
     startTokenRefresh: jest.fn(() => () => undefined),
   },
+}));
+
+jest.mock('../change-reminders/fcm-transport-proof-build', () => ({
+  fcmTransportProofBuild: true,
+}));
+
+jest.mock('../change-reminders/fcm-transport-proof-diagnostics', () => ({
+  FcmTransportProofDiagnosticStage: {
+    CivilTimeReportApplied: 'civil-time-report-applied',
+  },
+  recordFcmTransportProofDiagnostic: jest.fn(),
 }));
 
 const bundledSnapshot = {
@@ -74,6 +89,7 @@ function explicitAccessibilityOrder(node: RenderNode | string | null) {
 
 describe('StatusScreen facade', () => {
   afterEach(() => {
+    jest.clearAllMocks();
     jest.restoreAllMocks();
     jest.useRealTimers();
   });
@@ -214,6 +230,46 @@ describe('StatusScreen facade', () => {
     expect(
       screen.getByText('NO CHANGE IMMINENT', { includeHiddenElements: true }),
     ).toBeTruthy();
+    expect(recordFcmTransportProofDiagnostic).toHaveBeenCalledWith(
+      true,
+      FcmTransportProofDiagnosticStage.CivilTimeReportApplied,
+    );
+  });
+
+  it('marks each consecutive matching proof tap once', () => {
+    const notificationTap = {
+      homeTimeZone: 'Australia/Sydney',
+      notificationKind: 'fcm-transport-proof' as const,
+    };
+    const props = {
+      now: new Date('2026-07-19T00:00:00.000Z'),
+      reducedMotion: true,
+    };
+    const view = render(
+      <StatusScreen notificationTap={notificationTap} {...props} />,
+    );
+
+    view.rerender(
+      <StatusScreen notificationTap={{ ...notificationTap }} {...props} />,
+    );
+
+    expect(recordFcmTransportProofDiagnostic).toHaveBeenCalledTimes(2);
+    expect(recordFcmTransportProofDiagnostic).toHaveBeenNthCalledWith(
+      1,
+      true,
+      FcmTransportProofDiagnosticStage.CivilTimeReportApplied,
+    );
+    expect(recordFcmTransportProofDiagnostic).toHaveBeenNthCalledWith(
+      2,
+      true,
+      FcmTransportProofDiagnosticStage.CivilTimeReportApplied,
+    );
+  });
+
+  it('does not mark an ordinary Civil Time Report as a proof tap', () => {
+    render(<StatusScreen now={new Date('2026-07-19T00:00:00.000Z')} />);
+
+    expect(recordFcmTransportProofDiagnostic).not.toHaveBeenCalled();
   });
 
   it('keeps current zone and announces proof-specific mismatch semantics', () => {
@@ -240,6 +296,7 @@ describe('StatusScreen facade', () => {
       label,
     );
     expect(screen.queryByText(/this reminder was sent/i)).toBeNull();
+    expect(recordFcmTransportProofDiagnostic).not.toHaveBeenCalled();
   });
 
   it('announces proof-specific context when current report is unavailable', () => {
@@ -257,6 +314,7 @@ describe('StatusScreen facade', () => {
       'FCM TRANSPORT TEST REPORT UNAVAILABLE. Transport test received. Verified Civil Time Report details are unavailable. Scheduler timing and Change Reminder eligibility were not tested.';
 
     expect(screen.getByRole('alert', { name: label })).toBeTruthy();
+    expect(recordFcmTransportProofDiagnostic).not.toHaveBeenCalled();
     expect(explicitAccessibilityOrder(result.toJSON() as RenderNode)).toContain(
       label,
     );

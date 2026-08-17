@@ -5,6 +5,7 @@ import {
   parseChangeReminderTap,
   type ChangeReminderNotificationContent,
 } from './change-reminder-notification-runtime';
+import { FcmTransportProofDiagnosticStage } from './fcm-transport-proof-diagnostics';
 
 const payload = {
   changeDirection: 'forward',
@@ -60,6 +61,7 @@ function harness({
     }),
   };
   const taps: unknown[] = [];
+  const stages: FcmTransportProofDiagnosticStage[] = [];
   return {
     emitResponse: (next: ReturnType<typeof response>) =>
       responseListener?.(next),
@@ -68,10 +70,12 @@ function harness({
     runtime: createChangeReminderNotificationRuntime({
       notifications,
       onTap: (tap) => taps.push(tap),
+      onProofDiagnosticStage: (stage) => stages.push(stage),
       transportProofBuild,
     }),
     taps,
     remove,
+    stages,
   };
 }
 
@@ -141,6 +145,14 @@ describe('Change Reminder notification runtime', () => {
                 homeTimeZone: 'Australia/Sydney',
                 notificationKind: 'fcm-transport-proof',
               },
+            ]
+          : [],
+      );
+      expect(test.stages).toEqual(
+        transportProofBuild
+          ? [
+              FcmTransportProofDiagnosticStage.ExpoResponseReceived,
+              FcmTransportProofDiagnosticStage.ReviewedDataAccepted,
             ]
           : [],
       );
@@ -276,5 +288,27 @@ describe('Change Reminder notification runtime', () => {
     visit.receive(tap);
 
     expect(values).toEqual([null, tap]);
+  });
+
+  it('marks proof taps only after delivering them to React state', () => {
+    const values: unknown[] = [];
+    const stages: FcmTransportProofDiagnosticStage[] = [];
+    const visit = createChangeReminderTapVisit({
+      onChange: (value) => values.push(value),
+      onProofDiagnosticStage: (stage) => stages.push(stage),
+    });
+    const proof = parseFcmTransportProofTap({
+      homeTimeZone: 'Australia/Sydney',
+      notificationKind: 'fcm-transport-proof',
+      presentationKind: 'local-notification',
+    });
+    if (proof === null) throw new Error('Expected valid proof tap');
+
+    visit.receive(proof);
+
+    expect(values).toEqual([proof]);
+    expect(stages).toEqual([
+      FcmTransportProofDiagnosticStage.TapDeliveredToReact,
+    ]);
   });
 });
