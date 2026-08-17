@@ -50,17 +50,24 @@ and [FCM IAM permissions](https://cloud.google.com/iam/docs/roles-permissions/fi
 
 ## Controlled FCM transport proof
 
-`POST /internal/fcm-proof` is a deployment proof, not a product endpoint. It is
-disabled unless both `FCM_RUNTIME_ENABLED` and `FCM_PROOF_ENABLED` are exactly
-`true`, and requires Azure Functions `function` authorization after deployment.
-Local Functions execution does not enforce access keys.
+`/internal/fcm-proof` is a deployment proof, not a product endpoint. Delivery
+`POST` is disabled unless both `FCM_RUNTIME_ENABLED` and `FCM_PROOF_ENABLED`
+are exactly `true`, and requires Azure Functions `function` authorization after
+deployment. Function-key-gated `HEAD` remains available while those flags are
+false for non-production verification. It sends nothing: caller provides
+`x-fcm-proof-configuration-generation` and receives `204` only when the worker
+holds that environment-owned generation; missing or stale values receive `409`.
+`POST` accepts the same header when supplied and rejects stale workers before
+storage lookup or provider delivery; headerless `POST` remains supported during
+rollout. Local Functions execution does not enforce access keys.
 
-Beyond standing runtime and federation settings, proof has one
-environment-owned input:
+Beyond standing runtime and federation settings, proof has two
+environment-owned inputs:
 
-| Setting                     | Accepted value                                                     |
-| --------------------------- | ------------------------------------------------------------------ |
-| `FCM_PROOF_INSTALLATION_ID` | Existing installation ID resolving to stored Android registration. |
+| Setting                              | Accepted value                                                     |
+| ------------------------------------ | ------------------------------------------------------------------ |
+| `FCM_PROOF_CONFIGURATION_GENERATION` | Non-secret deployment generation used only for readiness checks.   |
+| `FCM_PROOF_INSTALLATION_ID`          | Existing installation ID resolving to stored Android registration. |
 
 Request body is ignored. Caller cannot supply calendar facts, device token,
 project, service account, payload, or copy. Runtime resolves an existing
