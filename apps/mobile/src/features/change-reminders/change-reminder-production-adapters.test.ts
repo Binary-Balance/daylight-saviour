@@ -109,7 +109,7 @@ describe('production Change Reminder adapters', () => {
     expect(
       test.dependencies.notifications.setNotificationChannelAsync,
     ).toHaveBeenCalledWith('change-reminders', {
-      importance: AndroidImportance.DEFAULT,
+      importance: AndroidImportance.HIGH,
       name: 'Change Reminders',
     });
     expect(

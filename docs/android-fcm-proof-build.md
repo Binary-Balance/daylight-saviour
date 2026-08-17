@@ -37,6 +37,12 @@ JSON, key-ID, and Ed25519 public-key parser as mobile runtime configuration. Whe
 both are absent, the app uses its bundled known-good pack and disables network
 refresh. Ordinary builds embed the proof flag as `false`, suppress transport-proof
 receipts, ignore their taps, and render no installation-ID diagnostic.
+During physical-device diagnosis, proof builds write only these fixed enum
+stages to the local device log:
+`expo-response-received`, `reviewed-data-accepted`, `tap-delivered-to-react`,
+and `civil-time-report-applied`. The stages contain no payload, installation
+ID, Home Time Zone, token, credential, configuration, or other identifier;
+they are not transmitted or telemetry, and ordinary builds write none.
 
 After a successful Change Reminder registration for the displayed Home Time
 Zone, the proof build shows `FCM TRANSPORT TEST DIAGNOSTIC`. Its explicit

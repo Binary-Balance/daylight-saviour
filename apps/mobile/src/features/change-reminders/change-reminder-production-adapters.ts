@@ -447,7 +447,7 @@ export function createProductionChangeReminderAdapters({
     try {
       if (platform === 'android') {
         await notifications.setNotificationChannelAsync(notificationChannelId, {
-          importance: Notifications.AndroidImportance.DEFAULT,
+          importance: Notifications.AndroidImportance.HIGH,
           name: 'Change Reminders',
         });
       }

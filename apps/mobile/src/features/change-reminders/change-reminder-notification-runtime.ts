@@ -7,6 +7,8 @@ import {
 } from '@daylight-saviour/contracts';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
+import { FcmTransportProofDiagnosticStage } from './fcm-transport-proof-diagnostics';
+
 export type ChangeReminderTap = Omit<
   ChangeReminderNotification,
   'reminderKind'
@@ -124,10 +126,14 @@ function reviewedTap(
 export function createChangeReminderNotificationRuntime({
   notifications,
   onTap,
+  onProofDiagnosticStage,
   transportProofBuild = false,
 }: {
   readonly notifications: ChangeReminderNotifications;
   readonly onTap: (tap: ReviewedNotificationTap) => void;
+  readonly onProofDiagnosticStage?: (
+    stage: FcmTransportProofDiagnosticStage,
+  ) => void;
   readonly transportProofBuild?: boolean;
 }) {
   const failClosed = {
@@ -153,11 +159,21 @@ export function createChangeReminderNotificationRuntime({
   }
 
   function respond(response: ChangeReminderNotificationResponse) {
+    if (transportProofBuild)
+      onProofDiagnosticStage?.(
+        FcmTransportProofDiagnosticStage.ExpoResponseReceived,
+      );
     if (response.actionIdentifier !== notifications.defaultActionIdentifier)
       return;
     const content = response.notification.request.content;
     const tap = reviewedTap(content, transportProofBuild);
-    if (tap !== null) onTap(tap);
+    if (tap !== null) {
+      if (transportProofBuild)
+        onProofDiagnosticStage?.(
+          FcmTransportProofDiagnosticStage.ReviewedDataAccepted,
+        );
+      onTap(tap);
+    }
   }
 
   return {
@@ -195,8 +211,12 @@ export function createChangeReminderNotificationRuntime({
 
 export function createChangeReminderTapVisit({
   onChange,
+  onProofDiagnosticStage,
 }: {
   readonly onChange: (tap: ReviewedNotificationTap | null) => void;
+  readonly onProofDiagnosticStage?: (
+    stage: FcmTransportProofDiagnosticStage,
+  ) => void;
 }) {
   let active = true;
   let pending: ReviewedNotificationTap | null = null;
@@ -204,6 +224,10 @@ export function createChangeReminderTapVisit({
     receive(tap: ReviewedNotificationTap) {
       if (active) {
         onChange(tap);
+        if ('notificationKind' in tap)
+          onProofDiagnosticStage?.(
+            FcmTransportProofDiagnosticStage.TapDeliveredToReact,
+          );
       } else {
         pending = tap;
       }
@@ -218,6 +242,10 @@ export function createChangeReminderTapVisit({
         const tap = pending;
         pending = null;
         onChange(tap);
+        if ('notificationKind' in tap)
+          onProofDiagnosticStage?.(
+            FcmTransportProofDiagnosticStage.TapDeliveredToReact,
+          );
       }
     },
   };
