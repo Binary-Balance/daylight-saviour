@@ -6,6 +6,7 @@ param deploymentContainerUri string
 param functionAppName string
 param functionPlanName string
 param fcmEnabled bool
+param fcmTestSendEnabled bool
 param fcmEntraAssertionAudience string
 param fcmProjectId string
 param fcmServiceAccountEmail string
@@ -96,6 +97,7 @@ resource appSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     FCM_PROJECT_ID: fcmProjectId
     FCM_PROOF_ENABLED: 'false'
     FCM_RUNTIME_ENABLED: fcmEnabled ? 'true' : 'false'
+    FCM_TEST_SEND_ENABLED: fcmTestSendEnabled ? 'true' : 'false'
     FCM_SERVICE_ACCOUNT_EMAIL: fcmServiceAccountEmail
     FCM_WORKLOAD_IDENTITY_PROVIDER: fcmWorkloadIdentityProvider
     KEY_VAULT_URI: keyVaultUri

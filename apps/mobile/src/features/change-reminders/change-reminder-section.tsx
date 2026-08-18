@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
@@ -10,10 +10,12 @@ export default function ChangeReminderSection({
   adapters,
   homeTimeZone,
   palette,
+  testBuild = false,
 }: {
   readonly adapters: ChangeReminderAdapters;
   readonly homeTimeZone: string;
   readonly palette: DaylightSaviourPalette;
+  readonly testBuild?: boolean;
 }) {
   const session = useMemo(
     () => createChangeReminderSession({ adapters, homeTimeZone }),
@@ -24,6 +26,7 @@ export default function ChangeReminderSection({
     session.getSnapshot,
     session.getSnapshot,
   );
+  const [installationId, setInstallationId] = useState<string | null>(null);
 
   useEffect(() => session.start(), [session]);
   useEffect(() => {
@@ -38,6 +41,27 @@ export default function ChangeReminderSection({
       session.dispatch({ result, type: 'token-refresh' });
     });
   }, [adapters, homeTimeZone, session, snapshot.kind]);
+  useEffect(() => {
+    if (
+      !testBuild ||
+      snapshot.kind !== 'enabled' ||
+      adapters.readInstallationId === undefined
+    ) {
+      return;
+    }
+    let active = true;
+    void adapters
+      .readInstallationId()
+      .then((value) => {
+        if (active) setInstallationId(value);
+      })
+      .catch(() => {
+        if (active) setInstallationId(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [adapters, snapshot, testBuild]);
 
   const content =
     snapshot.kind === 'untouched'
@@ -188,6 +212,14 @@ export default function ChangeReminderSection({
               : copy.changeReminders.permissionRevoked.openSettings}
           </Text>
         </Pressable>
+      ) : null}
+      {testBuild && snapshot.kind === 'enabled' && installationId !== null ? (
+        <Text
+          selectable
+          style={[styles.metadata, { color: palette.secondaryInk }]}
+        >
+          Test installation ID: {installationId}
+        </Text>
       ) : null}
     </View>
   );

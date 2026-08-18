@@ -12,15 +12,16 @@ The deployed registration functions read the reminder settings below. Generic
 infrastructure also reserves the FCM settings for a future scheduled runtime;
 no current notification-service source reads them.
 
-| Setting                               | Purpose                                                                                               |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `REMINDER_MANAGED_IDENTITY_CLIENT_ID` | User-assigned Azure managed identity used by deployed registration and throttle-cleanup functions.    |
-| `REMINDER_STORAGE_ACCOUNT_NAME`       | Azure Table account used by deployed registration and throttle-cleanup functions.                     |
-| `FCM_ENTRA_ASSERTION_AUDIENCE`        | Reserved Entra Application ID URI for the reusable keyless access-token provider.                     |
-| `FCM_WORKLOAD_IDENTITY_PROVIDER`      | Reserved Google workload identity provider resource beginning `//iam.googleapis.com/projects/…`.      |
-| `FCM_SERVICE_ACCOUNT_EMAIL`           | Reserved exact Google service account to impersonate for FCM.                                         |
-| `FCM_PROJECT_ID`                      | Reserved exact Firebase/Google project for FCM HTTP v1 send URLs.                                     |
-| `FCM_RUNTIME_ENABLED`                 | Reserved deployment flag; it does not enable a hosted sender without a scheduled runtime composition. |
+| Setting                               | Purpose                                                                                            |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `REMINDER_MANAGED_IDENTITY_CLIENT_ID` | User-assigned Azure managed identity used by deployed registration and throttle-cleanup functions. |
+| `REMINDER_STORAGE_ACCOUNT_NAME`       | Azure Table account used by deployed registration and throttle-cleanup functions.                  |
+| `FCM_ENTRA_ASSERTION_AUDIENCE`        | Reserved Entra Application ID URI for the reusable keyless access-token provider.                  |
+| `FCM_WORKLOAD_IDENTITY_PROVIDER`      | Reserved Google workload identity provider resource beginning `//iam.googleapis.com/projects/…`.   |
+| `FCM_SERVICE_ACCOUNT_EMAIL`           | Reserved exact Google service account to impersonate for FCM.                                      |
+| `FCM_PROJECT_ID`                      | Reserved exact Firebase/Google project for FCM HTTP v1 send URLs.                                  |
+| `FCM_RUNTIME_ENABLED`                 | Enables the retained owner-controlled Change Reminder test composition.                            |
+| `FCM_TEST_SEND_ENABLED`               | Explicit second gate for the function-key-protected owner-controlled test endpoint.                |
 
 When composed, the keyless access-token provider accepts only short-lived
 credentials: managed-identity assertions must have a valid future expiry, while
@@ -53,7 +54,7 @@ References:
 and [FCM IAM permissions](https://cloud.google.com/iam/docs/roles-permissions/firebasecloudmessaging).
 
 Generic Bicep defaults `fcm.enabled` to `false` and maps it to lowercase `true`
-or `false` in the currently reserved `FCM_RUNTIME_ENABLED` setting. It
+or `false` in `FCM_RUNTIME_ENABLED`. `FCM_TEST_SEND_ENABLED` remains `false`
+until a private owner enables it for controlled testing. Generic Bicep also
 temporarily retains the unused `FCM_PROOF_ENABLED=false` app setting to avoid
-changing existing deployment lifecycle state; no runtime code reads either
-setting.
+changing existing deployment lifecycle state; no runtime code reads it.

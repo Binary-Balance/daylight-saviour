@@ -84,10 +84,19 @@ describe('minimal Functions platform Bicep module', () => {
       'entraAssertionAudience',
       'projectId',
       'serviceAccountEmail',
+      'testSendEnabled',
       'workloadIdentityProvider',
     ]);
     assert.equal(compiledTemplate.parameters.fcm.defaultValue.enabled, false);
+    assert.equal(
+      compiledTemplate.parameters.fcm.defaultValue.testSendEnabled,
+      false,
+    );
     assert.equal(appSettings.FCM_PROOF_ENABLED, 'false');
+    assert.equal(
+      appSettings.FCM_TEST_SEND_ENABLED,
+      "[if(parameters('fcmTestSendEnabled'), 'true', 'false')]",
+    );
     assert.equal(
       appSettings.FCM_RUNTIME_ENABLED,
       "[if(parameters('fcmEnabled'), 'true', 'false')]",

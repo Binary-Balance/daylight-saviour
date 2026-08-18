@@ -619,6 +619,10 @@ export function createProductionChangeReminderAdapters({
       enableInFlight = { homeTimeZone, promise };
       return promise;
     },
+    async readInstallationId() {
+      const saved = await loadStoredState();
+      return saved?.state === 'registered' ? saved.installationId : null;
+    },
     openSettings,
     startTokenRefresh(homeTimeZone, onResult = () => undefined) {
       if (platform === 'web') return () => undefined;

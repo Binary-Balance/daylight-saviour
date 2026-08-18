@@ -65,6 +65,7 @@ function store(
 ): ReminderSubscriptionStore {
   return {
     createSubscription: async () => 'accepted',
+    getSubscription: async () => null,
     purgeExpiredThrottleRecords: async () => undefined,
     removeIfDeviceTokenMatches: async () => 'not-found',
     takeInstallationAllowance: async () => true,
