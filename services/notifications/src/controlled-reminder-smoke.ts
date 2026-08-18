@@ -18,7 +18,7 @@ import {
 } from './reminder-subscriptions.js';
 
 const maxRequestBytes = 1024;
-const installationIdPattern = /^[A-Za-z0-9_-]{32,128}$/;
+const installationIdPattern = /^[A-Za-z0-9_-]{43}$/;
 
 interface ControlledReminderSmokeRequest extends ReviewedChangeReminderFacts {
   readonly installationId: string;

@@ -95,6 +95,7 @@ function subscriptionTable(
       readonly deviceToken: string;
       readonly etag: string;
       readonly partitionKey: string;
+      readonly platform?: 'android' | 'ios';
       readonly rowKey: string;
     }>;
     readonly replace: (
@@ -600,6 +601,70 @@ describe('Azure Table mapping', () => {
     assert.equal(entity?.attemptGeneration, 1);
     assert.equal('registrationRequestId' in (entity ?? {}), false);
     assert.equal(entity?.rowKey, 'installation-id');
+  });
+
+  it('returns only the exact stored Android subscription', async () => {
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable({
+        get: async () => ({
+          attemptGeneration: 1,
+          deviceToken: validRegistration.deviceToken,
+          etag: 'etag',
+          partitionKey: 'subscriptions-v1',
+          platform: 'android',
+          rowKey: 'installation-id',
+        }),
+      }),
+      unusedThrottleTable(),
+    );
+
+    assert.deepEqual(await tableStore.getSubscription('installation-id'), {
+      deviceToken: validRegistration.deviceToken,
+      installationId: 'installation-id',
+    });
+  });
+
+  it('does not return a non-Android subscription', async () => {
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable({
+        get: async () => ({
+          attemptGeneration: 1,
+          deviceToken: validRegistration.deviceToken,
+          etag: 'etag',
+          partitionKey: 'subscriptions-v1',
+          platform: 'ios',
+          rowKey: 'installation-id',
+        }),
+      }),
+      unusedThrottleTable(),
+    );
+
+    assert.equal(await tableStore.getSubscription('installation-id'), null);
+  });
+
+  it('maps a missing subscription to null', async () => {
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable(),
+      unusedThrottleTable(),
+    );
+
+    assert.equal(await tableStore.getSubscription('installation-id'), null);
+  });
+
+  it('preserves a non-404 subscription read failure', async () => {
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable({
+        get: async () => {
+          throw azureError(500);
+        },
+      }),
+      unusedThrottleTable(),
+    );
+
+    await assert.rejects(
+      tableStore.getSubscription('installation-id'),
+      /Azure 500/,
+    );
   });
 
   it('maps exact-token conditional deletion to the subscriptions table', async () => {

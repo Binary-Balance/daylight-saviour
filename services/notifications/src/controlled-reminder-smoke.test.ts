@@ -85,8 +85,15 @@ describe('controlled Change Reminder smoke handler', () => {
   });
 
   it('refuses disabled FCM runtime before accessing a subscription', async () => {
+    let lookups = 0;
     const result = await createControlledReminderSmokeHandler(
-      runtime({ runtimeEnabled: false }),
+      runtime({
+        getSubscription: async () => {
+          lookups += 1;
+          return null;
+        },
+        runtimeEnabled: false,
+      }),
     )(request(facts));
 
     assert.deepEqual(result, {
@@ -94,11 +101,19 @@ describe('controlled Change Reminder smoke handler', () => {
       jsonBody: { outcome: 'unavailable' },
       status: 503,
     });
+    assert.equal(lookups, 0);
   });
 
   it('refuses a disabled test-send gate before accessing a subscription', async () => {
+    let lookups = 0;
     const result = await createControlledReminderSmokeHandler(
-      runtime({ testSendEnabled: false }),
+      runtime({
+        getSubscription: async () => {
+          lookups += 1;
+          return null;
+        },
+        testSendEnabled: false,
+      }),
     )(request(facts));
 
     assert.deepEqual(result, {
@@ -106,11 +121,22 @@ describe('controlled Change Reminder smoke handler', () => {
       jsonBody: { outcome: 'unavailable' },
       status: 503,
     });
+    assert.equal(lookups, 0);
   });
 
   for (const [name, input, options] of [
     ['extra device token', { ...facts, deviceToken }, {}],
     ['invalid installation ID', { ...facts, installationId: 'bad' }, {}],
+    [
+      '42-character installation ID',
+      { ...facts, installationId: 'a'.repeat(42) },
+      {},
+    ],
+    [
+      '44-character installation ID',
+      { ...facts, installationId: 'a'.repeat(44) },
+      {},
+    ],
     ['invalid event instant', { ...facts, changeEventAt: 'not-a-date' }, {}],
     ['oversized declared body', facts, { contentLength: '1025' }],
   ] as const) {
@@ -172,6 +198,18 @@ describe('controlled Change Reminder smoke handler', () => {
         timing: 'one-week',
       },
       subscription: { deviceToken, installationId },
+    });
+  });
+
+  it('maps a non-accepted sender result to a fixed unavailable outcome', async () => {
+    const result = await createControlledReminderSmokeHandler(
+      runtime({ send: async () => ({ kind: 'transient-rejection' }) }),
+    )(request(facts));
+
+    assert.deepEqual(result, {
+      headers: { 'Cache-Control': 'no-store' },
+      jsonBody: { outcome: 'unavailable' },
+      status: 503,
     });
   });
 

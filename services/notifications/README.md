@@ -2,15 +2,16 @@
 
 Azure Functions hosts installation-scoped Change Reminder registration and
 throttle cleanup. This package also provides reusable FCM sender and keyless
-access-token primitives, but no scheduled runtime currently composes or invokes
-them for Change Reminder delivery. No Google service-account key or long-lived
-FCM credential is accepted.
+access-token primitives. No scheduled runtime currently composes or invokes
+them for Change Reminder delivery; the owner-gated on-demand handler composes
+them only when both FCM gates are enabled. No Google service-account key or
+long-lived FCM credential is accepted.
 
 ## Deployment settings
 
-The deployed registration functions read the reminder settings below. Generic
-infrastructure also reserves the FCM settings for a future scheduled runtime;
-no current notification-service source reads them.
+The deployed registration functions read the reminder settings below. The
+owner-gated on-demand handler reads the FCM settings only after both gates are
+enabled.
 
 | Setting                               | Purpose                                                                                            |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------- |
