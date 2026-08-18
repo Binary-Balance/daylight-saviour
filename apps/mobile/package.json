@@ -1,6 +1,6 @@
 {
   "name": "@daylight-saviour/mobile",
-  "main": "expo-router/entry",
+  "main": "src/fcm-transport-proof-entry.ts",
   "version": "0.0.0",
   "dependencies": {
     "@daylight-saviour/contracts": "*",
