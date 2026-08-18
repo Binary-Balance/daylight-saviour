@@ -1,8 +1,8 @@
 {
   "project_info": {
     "project_number": "100000000001",
-    "project_id": "synthetic-fcm-proof-project",
-    "storage_bucket": "synthetic-fcm-proof-project.example.invalid"
+    "project_id": "synthetic-fcm-project",
+    "storage_bucket": "synthetic-fcm-project.example.invalid"
   },
   "client": [
     {

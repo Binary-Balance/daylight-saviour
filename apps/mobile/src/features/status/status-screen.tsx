@@ -16,11 +16,6 @@ import DaylightSavingStatusHero from './daylight-saving-status-hero';
 import SettingsSheet from './settings-sheet';
 import ChangeReminderSection from '../change-reminders/change-reminder-section';
 import { productionChangeReminderAdapters } from '../change-reminders/change-reminder-production-adapters';
-import { fcmTransportProofBuild } from '../change-reminders/fcm-transport-proof-build';
-import {
-  FcmTransportProofDiagnosticStage,
-  recordFcmTransportProofDiagnostic,
-} from '../change-reminders/fcm-transport-proof-diagnostics';
 import { createStatusViewModel } from './status-view-model';
 import type { TimeZoneDataPackSnapshot } from '../time-zone-data/time-zone-data-manager';
 import type { ReviewedNotificationTap } from '../change-reminders/change-reminder-notification-runtime';
@@ -115,8 +110,6 @@ export default function StatusScreen({
     viewModel.availability === 'ready' && viewModel.phase === 'aftermath'
       ? (viewModel.event?.instant ?? null)
       : null;
-  const proofReportApplied =
-    viewModel.notificationContext?.kind === 'transport-proof';
 
   useEffect(() => {
     if (
@@ -127,15 +120,6 @@ export default function StatusScreen({
       onAcknowledgeAftermath?.(aftermathEventAt);
     }
   }, [aftermathEventAt, onAcknowledgeAftermath]);
-
-  useEffect(() => {
-    if (proofReportApplied) {
-      recordFcmTransportProofDiagnostic(
-        fcmTransportProofBuild,
-        FcmTransportProofDiagnosticStage.CivilTimeReportApplied,
-      );
-    }
-  }, [notificationTap, proofReportApplied]);
 
   return (
     <SafeAreaView

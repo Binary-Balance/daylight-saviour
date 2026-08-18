@@ -75,7 +75,7 @@ describe('minimal Functions platform Bicep module', () => {
     );
   });
 
-  it('keeps FCM proof disabled while injecting only caller-supplied federation settings', () => {
+  it('keeps the retired proof setting inert while injecting only caller-supplied federation settings', () => {
     const fcm = compiledTemplate.definitions.FcmSettings.properties;
     const appSettings = oneResource('Microsoft.Web/sites/config').properties;
 

@@ -7,19 +7,12 @@ import {
   createChangeReminderTapVisit,
   type ReviewedNotificationTap,
 } from './change-reminder-notification-runtime';
-import { fcmTransportProofBuild } from './fcm-transport-proof-build';
-import { recordFcmTransportProofDiagnostic } from './fcm-transport-proof-diagnostics';
 
 /** Android Expo binding kept separate from portable notification activation. */
 export function useProductionChangeReminderTap() {
   const [tap, setTap] = useState<ReviewedNotificationTap | null>(null);
   const visit = useMemo(
-    () =>
-      createChangeReminderTapVisit({
-        onChange: setTap,
-        onProofDiagnosticStage: (stage) =>
-          recordFcmTransportProofDiagnostic(fcmTransportProofBuild, stage),
-      }),
+    () => createChangeReminderTapVisit({ onChange: setTap }),
     [],
   );
   const runtime = useMemo(
@@ -39,9 +32,6 @@ export function useProductionChangeReminderTap() {
             Notifications.setNotificationHandler(handler),
         },
         onTap: visit.receive,
-        onProofDiagnosticStage: (stage) =>
-          recordFcmTransportProofDiagnostic(fcmTransportProofBuild, stage),
-        transportProofBuild: fcmTransportProofBuild,
       }),
     [visit],
   );

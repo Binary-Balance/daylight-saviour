@@ -6,12 +6,6 @@ import type { ChangeReminderTapContext } from '../src/features/status/status-vie
 
 function contentFor(context: ChangeReminderTapContext) {
   switch (context.kind) {
-    case 'transport-proof':
-      return copy.changeReminders.transportProof.opened;
-    case 'transport-proof-report-unavailable':
-      return copy.changeReminders.transportProof.reportUnavailable;
-    case 'transport-proof-zone-mismatch':
-      return copy.changeReminders.transportProof.zoneMismatch;
     case 'matched':
       return {
         body: copy.changeReminders.notificationContext.opened[context.relation],

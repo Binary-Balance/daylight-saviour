@@ -109,9 +109,8 @@ NODE_ENV=development apps/mobile/android/gradlew \
   -PreactNativeArchitectures=arm64-v8a
 ```
 
-`npm run android:build:fcm-proof` runs the existing FCM proof build and supplies
-the same `-PreactNativeArchitectures=arm64-v8a` property. Any future or approved
-release command must also supply that property.
+Any future or approved release command must also supply the
+`-PreactNativeArchitectures=arm64-v8a` property.
 
 Do not omit the architecture property. Build another architecture only when the
 current work has an explicit, documented need for it, such as an `x86_64`
