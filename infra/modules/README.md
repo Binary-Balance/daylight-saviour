@@ -17,7 +17,8 @@ Inputs:
 - `buildVersion` — non-secret build identifier exposed by `/health`.
 - `fcm` — optional caller-supplied keyless federation settings: Entra assertion
   audience, Google workload identity provider resource, exact service-account
-  email, and FCM project ID. Disabled by default; no Google key is accepted.
+  email, FCM project ID, and the explicit `testSendEnabled` gate. Both FCM
+  runtime and test sends are disabled by default; no Google key is accepted.
 
 The module returns one `platform` object containing resource IDs, runtime identity identifiers, Function App host name, Key Vault URI, and deployment-container URI.
 
@@ -45,7 +46,9 @@ Global names remain caller responsibility. Module never generates names or embed
   `FCM_RUNTIME_ENABLED` maps `fcm.enabled` to canonical lowercase `true` or
   `false`. The unused `FCM_PROOF_ENABLED=false` app setting remains temporarily
   to avoid changing existing deployment lifecycle state; no runtime code reads
-  it.
+  it. `FCM_TEST_SEND_ENABLED` maps the optional `fcm.testSendEnabled` to a
+  separate default-off gate for the owner-controlled Change Reminder test
+  endpoint.
 - Function App logs, Key Vault audit events, and supported platform metrics route to Log Analytics. Application Insights local authentication is disabled.
 
 Public endpoints remain enabled for this minimal stack. Private networking requires a separate module or deliberate extension because it changes Flex Consumption routing and deployment-storage requirements.

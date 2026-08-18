@@ -14,7 +14,10 @@ import {
 } from '@daylight-saviour/contracts/reminder-subscription-runtime';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
-import type { FcmSubscriptionRemover } from './fcm-change-reminder-sender.js';
+import type {
+  FcmChangeReminderSubscription,
+  FcmSubscriptionRemover,
+} from './fcm-change-reminder-sender.js';
 
 const maxRequestBytes = 8 * 1024;
 const throttleWindowMs = 10 * 60 * 1000;
@@ -110,6 +113,9 @@ interface AzureReminderSubscriptionStoreDependencies {
 }
 
 export interface ReminderSubscriptionStore extends FcmSubscriptionRemover {
+  readonly getSubscription: (
+    installationId: string,
+  ) => Promise<FcmChangeReminderSubscription | null>;
   readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
   readonly createSubscription: (
     record: ReminderSubscriptionRecord,
@@ -432,6 +438,20 @@ export function createTableReminderSubscriptionStore(
   throttles: ThrottleTable,
 ): ReminderSubscriptionStore {
   return {
+    async getSubscription(installationId) {
+      try {
+        const existing = await subscriptions.get(
+          subscriptionPartitionKey,
+          installationId,
+        );
+        return existing.platform === 'android'
+          ? { deviceToken: existing.deviceToken, installationId }
+          : null;
+      } catch (error) {
+        if (statusCode(error) === 404) return null;
+        throw error;
+      }
+    },
     async removeIfDeviceTokenMatches(subscription) {
       for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
         let existing: SubscriptionEntity;

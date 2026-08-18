@@ -100,6 +100,8 @@ export interface ChangeReminderAdapters {
   readonly enable: (
     homeTimeZone: string,
   ) => Promise<ChangeReminderEnableResult>;
+  /** Returns only the saved installation identifier for the test-build diagnostic. */
+  readonly readInstallationId?: () => Promise<string | null>;
   readonly openSettings: () => Promise<void>;
   readonly restore: () => Promise<ChangeReminderRestoreResult>;
   /** Starts one native token listener; callers must remove it on unmount. */

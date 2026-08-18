@@ -66,6 +66,8 @@ type SecuritySettings = {
 type FcmSettings = {
   enabled: bool
 
+  testSendEnabled: bool?
+
   entraAssertionAudience: string
 
   projectId: string
@@ -106,6 +108,7 @@ param security SecuritySettings = {
 @description('Optional caller-supplied Google workload-federation settings. No service-account key is accepted.')
 param fcm FcmSettings = {
   enabled: false
+  testSendEnabled: false
   entraAssertionAudience: ''
   projectId: ''
   serviceAccountEmail: ''
@@ -189,6 +192,7 @@ module compute './internal/compute.bicep' = {
     functionAppName: resourceNames.functionApp
     functionPlanName: resourceNames.functionPlan
     fcmEnabled: fcm.enabled
+    fcmTestSendEnabled: fcm.?testSendEnabled ?? false
     fcmEntraAssertionAudience: fcm.entraAssertionAudience
     fcmProjectId: fcm.projectId
     fcmServiceAccountEmail: fcm.serviceAccountEmail

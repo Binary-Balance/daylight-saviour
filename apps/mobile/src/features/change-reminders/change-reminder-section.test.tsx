@@ -23,12 +23,13 @@ function adapters(
   };
 }
 
-function renderSection(boundary: ChangeReminderAdapters) {
+function renderSection(boundary: ChangeReminderAdapters, testBuild = false) {
   return render(
     <ChangeReminderSection
       adapters={boundary}
       homeTimeZone="Australia/Sydney"
       palette={daylightSaviourPalettes.light}
+      testBuild={testBuild}
     />,
   );
 }
@@ -63,6 +64,7 @@ it('renders restored registration truthfully without another enable action', asy
       registration: {
         attemptGeneration: 1,
         credential: 'c'.repeat(43),
+        deviceToken: 'fcm-token:with_valid.characters-123',
         homeTimeZone: 'Australia/Sydney',
         installationId: 'i'.repeat(43),
         oneDayEnabled: true,
@@ -85,6 +87,63 @@ it('renders restored registration truthfully without another enable action', asy
     }),
   ).toBeNull();
   expect(boundary.enable).not.toHaveBeenCalled();
+});
+
+it('shows only a selectable installation ID in an external test build', async () => {
+  const savedInstallationId = 'i'.repeat(43);
+  const boundary = adapters({
+    readInstallationId: jest.fn(async () => savedInstallationId),
+    restore: jest.fn(async () => ({
+      kind: 'registered' as const,
+      notificationPermissionGranted: true,
+      registration: {
+        attemptGeneration: 1,
+        credential: 'c'.repeat(43),
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        installationId: savedInstallationId,
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered' as const,
+        version: 4 as const,
+      },
+    })),
+  });
+  renderSection(boundary, true);
+
+  const diagnostic = await screen.findByText(
+    `Test installation ID: ${savedInstallationId}`,
+  );
+  expect(diagnostic.props.selectable).toBe(true);
+  expect(screen.queryByText('c'.repeat(43))).toBeNull();
+});
+
+it('omits the installation diagnostic from ordinary builds', async () => {
+  const boundary = adapters({
+    readInstallationId: jest.fn(async () => 'i'.repeat(43)),
+    restore: jest.fn(async () => ({
+      kind: 'registered' as const,
+      notificationPermissionGranted: true,
+      registration: {
+        attemptGeneration: 1,
+        credential: 'c'.repeat(43),
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        installationId: 'i'.repeat(43),
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered' as const,
+        version: 4 as const,
+      },
+    })),
+  });
+  renderSection(boundary);
+
+  await screen.findByText(/reminders are enabled/i);
+  expect(screen.queryByText(/Test installation ID:/)).toBeNull();
+  expect(boundary.readInstallationId).not.toHaveBeenCalled();
 });
 
 it('shows accessible load and registration failures with recovery actions', async () => {
