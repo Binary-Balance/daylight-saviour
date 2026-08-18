@@ -22,8 +22,6 @@ const throttleRetentionMs = 30 * 24 * 60 * 60 * 1000;
 const throttleLimit = 5;
 const tableMutationRetryLimit = 12;
 const subscriptionPartitionKey = 'subscriptions-v1';
-const installationIdPattern = /^[A-Za-z0-9_-]{32,128}$/;
-const fcmDeviceTokenPattern = /^[A-Za-z0-9_:.-]{20,4096}$/;
 
 interface ReminderSubscriptionRegistration {
   readonly attemptGeneration: number;
@@ -112,13 +110,6 @@ interface AzureReminderSubscriptionStoreDependencies {
 }
 
 export interface ReminderSubscriptionStore extends FcmSubscriptionRemover {
-  readonly getFcmProofSubscription: (installationId: string) => Promise<{
-    readonly deviceToken: string;
-    readonly homeTimeZone: string;
-    readonly installationId: string;
-    readonly oneDayEnabled: boolean;
-    readonly oneWeekEnabled: boolean;
-  } | null>;
   readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
   readonly createSubscription: (
     record: ReminderSubscriptionRecord,
@@ -441,35 +432,6 @@ export function createTableReminderSubscriptionStore(
   throttles: ThrottleTable,
 ): ReminderSubscriptionStore {
   return {
-    async getFcmProofSubscription(installationId) {
-      if (!installationIdPattern.test(installationId)) return null;
-      let existing: SubscriptionEntity;
-      try {
-        existing = await subscriptions.get(
-          subscriptionPartitionKey,
-          installationId,
-        );
-      } catch (error) {
-        if (statusCode(error) === 404) return null;
-        throw error;
-      }
-      if (
-        existing.platform !== 'android' ||
-        !fcmDeviceTokenPattern.test(existing.deviceToken) ||
-        typeof existing.homeTimeZone !== 'string' ||
-        typeof existing.oneDayEnabled !== 'boolean' ||
-        typeof existing.oneWeekEnabled !== 'boolean'
-      ) {
-        return null;
-      }
-      return {
-        deviceToken: existing.deviceToken,
-        homeTimeZone: existing.homeTimeZone,
-        installationId,
-        oneDayEnabled: existing.oneDayEnabled,
-        oneWeekEnabled: existing.oneWeekEnabled,
-      };
-    },
     async removeIfDeviceTokenMatches(subscription) {
       for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
         let existing: SubscriptionEntity;

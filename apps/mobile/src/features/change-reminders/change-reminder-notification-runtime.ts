@@ -1,20 +1,15 @@
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 import {
   parseChangeReminderNotification,
-  parseFcmTransportProofPresentation,
   type ChangeReminderNotification,
-  type FcmTransportProofNotification,
 } from '@daylight-saviour/contracts';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
-
-import { FcmTransportProofDiagnosticStage } from './fcm-transport-proof-diagnostics';
 
 export type ChangeReminderTap = Omit<
   ChangeReminderNotification,
   'reminderKind'
 >;
-export type FcmTransportProofTap = FcmTransportProofNotification;
-export type ReviewedNotificationTap = ChangeReminderTap | FcmTransportProofTap;
+export type ReviewedNotificationTap = ChangeReminderTap;
 
 export interface ChangeReminderNotificationContent {
   readonly body: string | null;
@@ -75,23 +70,6 @@ export function parseChangeReminderTap(
   }
 }
 
-export function parseFcmTransportProofTap(
-  value: unknown,
-): FcmTransportProofTap | null {
-  try {
-    const notification = parseFcmTransportProofPresentation(value);
-    return canonicalAustralianZoneId(notification.homeTimeZone) ===
-      notification.homeTimeZone
-      ? {
-          homeTimeZone: notification.homeTimeZone,
-          notificationKind: notification.notificationKind,
-        }
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 export function isReviewedChangeReminderReceipt(
   content: ChangeReminderNotificationContent,
 ) {
@@ -104,7 +82,6 @@ export function isReviewedChangeReminderReceipt(
 
 function reviewedTap(
   content: ChangeReminderNotificationContent,
-  transportProofBuild: boolean,
 ): ReviewedNotificationTap | null {
   const reminderTap = parseChangeReminderTap(content.data);
   if (
@@ -114,27 +91,15 @@ function reviewedTap(
   ) {
     return reminderTap;
   }
-  if (!transportProofBuild) return null;
-  const proofTap = parseFcmTransportProofTap(content.data);
-  return proofTap !== null &&
-    content.title === copy.changeReminders.transportProof.notification.title &&
-    content.body === copy.changeReminders.transportProof.notification.body
-    ? proofTap
-    : null;
+  return null;
 }
 
 export function createChangeReminderNotificationRuntime({
   notifications,
   onTap,
-  onProofDiagnosticStage,
-  transportProofBuild = false,
 }: {
   readonly notifications: ChangeReminderNotifications;
   readonly onTap: (tap: ReviewedNotificationTap) => void;
-  readonly onProofDiagnosticStage?: (
-    stage: FcmTransportProofDiagnosticStage,
-  ) => void;
-  readonly transportProofBuild?: boolean;
 }) {
   const failClosed = {
     shouldPlaySound: false,
@@ -153,25 +118,15 @@ export function createChangeReminderNotificationRuntime({
   function receive(
     content: ChangeReminderNotificationContent,
   ): typeof failClosed | typeof showReviewedReminder {
-    return reviewedTap(content, transportProofBuild) !== null
-      ? showReviewedReminder
-      : failClosed;
+    return reviewedTap(content) !== null ? showReviewedReminder : failClosed;
   }
 
   function respond(response: ChangeReminderNotificationResponse) {
-    if (transportProofBuild)
-      onProofDiagnosticStage?.(
-        FcmTransportProofDiagnosticStage.ExpoResponseReceived,
-      );
     if (response.actionIdentifier !== notifications.defaultActionIdentifier)
       return;
     const content = response.notification.request.content;
-    const tap = reviewedTap(content, transportProofBuild);
+    const tap = reviewedTap(content);
     if (tap !== null) {
-      if (transportProofBuild)
-        onProofDiagnosticStage?.(
-          FcmTransportProofDiagnosticStage.ReviewedDataAccepted,
-        );
       onTap(tap);
     }
   }
@@ -211,12 +166,8 @@ export function createChangeReminderNotificationRuntime({
 
 export function createChangeReminderTapVisit({
   onChange,
-  onProofDiagnosticStage,
 }: {
   readonly onChange: (tap: ReviewedNotificationTap | null) => void;
-  readonly onProofDiagnosticStage?: (
-    stage: FcmTransportProofDiagnosticStage,
-  ) => void;
 }) {
   let active = true;
   let pending: ReviewedNotificationTap | null = null;
@@ -224,10 +175,6 @@ export function createChangeReminderTapVisit({
     receive(tap: ReviewedNotificationTap) {
       if (active) {
         onChange(tap);
-        if ('notificationKind' in tap)
-          onProofDiagnosticStage?.(
-            FcmTransportProofDiagnosticStage.TapDeliveredToReact,
-          );
       } else {
         pending = tap;
       }
@@ -242,10 +189,6 @@ export function createChangeReminderTapVisit({
         const tap = pending;
         pending = null;
         onChange(tap);
-        if ('notificationKind' in tap)
-          onProofDiagnosticStage?.(
-            FcmTransportProofDiagnosticStage.TapDeliveredToReact,
-          );
       }
     },
   };

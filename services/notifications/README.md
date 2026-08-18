@@ -1,30 +1,34 @@
 # Notification service
 
 Azure Functions hosts installation-scoped Change Reminder registration and
-provider delivery. FCM delivery uses Azure managed identity, Google Workload
-Identity Federation, and exact service-account impersonation. No Google
-service-account key or long-lived FCM credential is accepted.
+throttle cleanup. This package also provides reusable FCM sender and keyless
+access-token primitives, but no scheduled runtime currently composes or invokes
+them for Change Reminder delivery. No Google service-account key or long-lived
+FCM credential is accepted.
 
-## FCM runtime settings
+## Deployment settings
 
-Portable composition reads these environment settings:
+The deployed registration functions read the reminder settings below. Generic
+infrastructure also reserves the FCM settings for a future scheduled runtime;
+no current notification-service source reads them.
 
-| Setting                               | Purpose                                                                                                                    |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `REMINDER_MANAGED_IDENTITY_CLIENT_ID` | User-assigned Azure managed identity used for Entra and Table authorization.                                               |
-| `REMINDER_STORAGE_ACCOUNT_NAME`       | Azure Table account containing reminder registrations.                                                                     |
-| `FCM_ENTRA_ASSERTION_AUDIENCE`        | Microsoft Entra Application ID URI configured as Google provider allowed audience. Runtime requests its `/.default` scope. |
-| `FCM_WORKLOAD_IDENTITY_PROVIDER`      | Full Google workload identity provider resource beginning `//iam.googleapis.com/projects/…`.                               |
-| `FCM_SERVICE_ACCOUNT_EMAIL`           | Exact Google service account impersonated for FCM.                                                                         |
-| `FCM_PROJECT_ID`                      | Exact Firebase/Google project used in FCM HTTP v1 send URLs.                                                               |
-| `FCM_RUNTIME_ENABLED`                 | Must be exactly `true` before FCM runtime or proof composition is available.                                               |
+| Setting                               | Purpose                                                                                               |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `REMINDER_MANAGED_IDENTITY_CLIENT_ID` | User-assigned Azure managed identity used by deployed registration and throttle-cleanup functions.    |
+| `REMINDER_STORAGE_ACCOUNT_NAME`       | Azure Table account used by deployed registration and throttle-cleanup functions.                     |
+| `FCM_ENTRA_ASSERTION_AUDIENCE`        | Reserved Entra Application ID URI for the reusable keyless access-token provider.                     |
+| `FCM_WORKLOAD_IDENTITY_PROVIDER`      | Reserved Google workload identity provider resource beginning `//iam.googleapis.com/projects/…`.      |
+| `FCM_SERVICE_ACCOUNT_EMAIL`           | Reserved exact Google service account to impersonate for FCM.                                         |
+| `FCM_PROJECT_ID`                      | Reserved exact Firebase/Google project for FCM HTTP v1 send URLs.                                     |
+| `FCM_RUNTIME_ENABLED`                 | Reserved deployment flag; it does not enable a hosted sender without a scheduled runtime composition. |
 
-Runtime accepts only short-lived credentials: managed-identity assertions must
-have a valid future expiry, while Google STS tokens and impersonated FCM access
-tokens are each bounded to one hour. Exchange denials, transport failures,
-parsing, expiry, delivery, and failed invalid-token cleanup produce distinct
-fixed event names. Tokens, assertions, provider bodies, and transport errors
-never enter those events.
+When composed, the keyless access-token provider accepts only short-lived
+credentials: managed-identity assertions must have a valid future expiry, while
+Google STS tokens and impersonated FCM access tokens are each bounded to one
+hour. The reusable provider and sender produce fixed events for exchange
+denials, transport failures, parsing, expiry, delivery, and failed invalid-token
+cleanup. Tokens, assertions, provider bodies, and transport errors never enter
+those events.
 
 ## Least privilege
 
@@ -48,49 +52,8 @@ References:
 [service-account impersonation roles](https://cloud.google.com/iam/docs/service-account-permissions),
 and [FCM IAM permissions](https://cloud.google.com/iam/docs/roles-permissions/firebasecloudmessaging).
 
-## Controlled FCM transport proof
-
-`/internal/fcm-proof` is a deployment proof, not a product endpoint. Delivery
-`POST` is disabled unless both `FCM_RUNTIME_ENABLED` and `FCM_PROOF_ENABLED`
-are exactly `true`, and requires Azure Functions `function` authorization after
-deployment. Function-key-gated `HEAD` remains available while those flags are
-false for non-production verification. It sends nothing: caller provides
-`x-fcm-proof-configuration-generation` and receives `204` only when the worker
-holds that environment-owned generation; missing or stale values receive `409`.
-`POST` accepts the same header when supplied and rejects stale workers before
-storage lookup or provider delivery; headerless `POST` remains supported during
-rollout. Local Functions execution does not enforce access keys.
-
-Beyond standing runtime and federation settings, proof has two
-environment-owned inputs:
-
-| Setting                              | Accepted value                                                     |
-| ------------------------------------ | ------------------------------------------------------------------ |
-| `FCM_PROOF_CONFIGURATION_GENERATION` | Non-secret deployment generation used only for readiness checks.   |
-| `FCM_PROOF_INSTALLATION_ID`          | Existing installation ID resolving to stored Android registration. |
-
-Request body is ignored. Caller cannot supply calendar facts, device token,
-project, service account, payload, or copy. Runtime resolves an existing
-registration and immediately sends a high-priority data-only FCM message. Exact
-provider data contains only `notificationKind: fcm-transport-proof` and stored
-canonical `homeTimeZone`; title, body, Change Event instant, direction, and
-reminder timing are absent. Provider
-acceptance, rejection classification, and conditional invalid-token removal use
-the same implementation as Change Reminder delivery.
-
-Only an exact Android proof build may turn accepted proof data into the fixed
-local `FCM transport test` notification stating that no Change Reminder is due.
-Ordinary Android installs cannot present proof data, including after replacing
-a proof build whose background-task registration persisted.
-
-This path proves keyless authentication and FCM transport only. Calendar
-eligibility and scheduled dispatch require separate deterministic evidence; no
-real-world Change Event wait participates.
-
-Before enabling proof, private operations must add stronger ingress
-authorization such as private access or identity-aware proxy, keep function key
-in approved secret storage, set the installation ID, and record reviewed evidence.
-Disable proof immediately afterward. Generic Bicep defaults `fcm.enabled` to
-`false`, maps it to lowercase `true` or `false` in `FCM_RUNTIME_ENABLED`, and always forces
-`FCM_PROOF_ENABLED=false`. Environment-specific runtime enablement, proof
-override, and evidence remain private.
+Generic Bicep defaults `fcm.enabled` to `false` and maps it to lowercase `true`
+or `false` in the currently reserved `FCM_RUNTIME_ENABLED` setting. It
+temporarily retains the unused `FCM_PROOF_ENABLED=false` app setting to avoid
+changing existing deployment lifecycle state; no runtime code reads either
+setting.

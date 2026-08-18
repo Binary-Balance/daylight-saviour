@@ -94,6 +94,7 @@ resource appSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     FCM_ENTRA_ASSERTION_AUDIENCE: fcmEntraAssertionAudience
     FUNCTIONS_EXTENSION_VERSION: '~4'
     FCM_PROJECT_ID: fcmProjectId
+    // ponytail: keep the inert legacy setting until a coordinated deployment migration can absorb the lifecycle change.
     FCM_PROOF_ENABLED: 'false'
     FCM_RUNTIME_ENABLED: fcmEnabled ? 'true' : 'false'
     FCM_SERVICE_ACCOUNT_EMAIL: fcmServiceAccountEmail

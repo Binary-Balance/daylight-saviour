@@ -27,7 +27,6 @@
   },
   "scripts": {
     "android": "npm run android --workspace @daylight-saviour/mobile",
-    "android:build:fcm-proof": "DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD=1 NODE_ENV=production npm run native:generate:android && DAYLIGHT_SAVIOUR_FCM_PROOF_BUILD=1 NODE_ENV=production apps/mobile/android/gradlew -p apps/mobile/android assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a",
     "audit": "node scripts/audit.mjs",
     "dependencies:check": "npm ls react react-dom react-test-renderer uuid && npm run doctor",
     "doctor": "npm exec --workspace=@daylight-saviour/mobile -- expo-doctor",

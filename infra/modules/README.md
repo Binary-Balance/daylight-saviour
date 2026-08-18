@@ -43,9 +43,9 @@ Global names remain caller responsibility. Module never generates names or embed
 - Function App requires HTTPS/TLS 1.2, disables FTP and remote debugging, and denies FTP and SCM basic publishing credentials.
 - FCM workload federation values remain caller-supplied and
   `FCM_RUNTIME_ENABLED` maps `fcm.enabled` to canonical lowercase `true` or
-  `false`. Controlled FCM proof remains hard-disabled in generic infrastructure;
-  private operations owns stronger ingress authorization, the environment-owned
-  installation ID, temporary enablement, and evidence.
+  `false`. The unused `FCM_PROOF_ENABLED=false` app setting remains temporarily
+  to avoid changing existing deployment lifecycle state; no runtime code reads
+  it.
 - Function App logs, Key Vault audit events, and supported platform metrics route to Log Analytics. Application Insights local authentication is disabled.
 
 Public endpoints remain enabled for this minimal stack. Private networking requires a separate module or deliberate extension because it changes Flex Consumption routing and deployment-storage requirements.

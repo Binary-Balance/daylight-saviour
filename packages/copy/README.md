@@ -22,10 +22,8 @@ structured facts and returning one complete plain string. There is no mutable
 locale, generic message dispatcher, runtime localization framework, AI, network,
 storage, React, React Native, Expo, or Azure dependency. The implemented
 ordinary Change Reminder journey owns its fixed FCM notification title and body
-here. `changeReminders.transportProof` separately owns source-controlled,
-test-only Android local-presentation and diagnostic wording; it is not a Change
-Reminder and makes no scheduler or eligibility claim. Other notification copy
-will be added only with implemented notification journeys.
+here. Other notification copy will be added only with implemented notification
+journeys.
 
 ### Node runtime bridge
 
@@ -36,11 +34,9 @@ declaration to ignored `dist/`, and the public subpath resolves only to that
 compiled output. `pretest` builds it before copy tests. Notification
 `pretypecheck`, `pretest`, and `prebuild` build it first, so a clean checkout
 resolves the same runtime artifact during local checks and production builds.
-Tests assert source and public runtime wording plus immutability. The transport
-proof has no Node bridge: Android proof builds use the
-`australianEnglish.changeReminders.transportProof` facade to present fixed local
-test copy only after exact proof data arrives. Mobile code continues through the
-`australianEnglish` facade; no other copy may bypass these boundaries.
+Tests assert source and public runtime wording plus immutability. Mobile code
+continues through the `australianEnglish` facade; no other copy may bypass these
+boundaries.
 
 ## Ownership boundaries
 
