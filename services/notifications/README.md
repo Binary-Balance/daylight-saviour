@@ -56,6 +56,4 @@ and [FCM IAM permissions](https://cloud.google.com/iam/docs/roles-permissions/fi
 
 Generic Bicep defaults `fcm.enabled` to `false` and maps it to lowercase `true`
 or `false` in `FCM_RUNTIME_ENABLED`. `FCM_TEST_SEND_ENABLED` remains `false`
-until a private owner enables it for controlled testing. Generic Bicep also
-temporarily retains the unused `FCM_PROOF_ENABLED=false` app setting to avoid
-changing existing deployment lifecycle state; no runtime code reads it.
+until a private owner enables it for controlled testing.
