@@ -75,7 +75,7 @@ describe('minimal Functions platform Bicep module', () => {
     );
   });
 
-  it('keeps the retired proof setting inert while injecting only caller-supplied federation settings', () => {
+  it('injects only caller-supplied FCM federation settings', () => {
     const fcm = compiledTemplate.definitions.FcmSettings.properties;
     const appSettings = oneResource('Microsoft.Web/sites/config').properties;
 
@@ -92,7 +92,6 @@ describe('minimal Functions platform Bicep module', () => {
       compiledTemplate.parameters.fcm.defaultValue.testSendEnabled,
       false,
     );
-    assert.equal(appSettings.FCM_PROOF_ENABLED, 'false');
     assert.equal(
       appSettings.FCM_TEST_SEND_ENABLED,
       "[if(parameters('fcmTestSendEnabled'), 'true', 'false')]",

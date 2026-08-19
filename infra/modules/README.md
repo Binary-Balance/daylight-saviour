@@ -44,9 +44,7 @@ Global names remain caller responsibility. Module never generates names or embed
 - Function App requires HTTPS/TLS 1.2, disables FTP and remote debugging, and denies FTP and SCM basic publishing credentials.
 - FCM workload federation values remain caller-supplied and
   `FCM_RUNTIME_ENABLED` maps `fcm.enabled` to canonical lowercase `true` or
-  `false`. The unused `FCM_PROOF_ENABLED=false` app setting remains temporarily
-  to avoid changing existing deployment lifecycle state; no runtime code reads
-  it. `FCM_TEST_SEND_ENABLED` maps the optional `fcm.testSendEnabled` to a
+  `false`. `FCM_TEST_SEND_ENABLED` maps the optional `fcm.testSendEnabled` to a
   separate default-off gate for the owner-controlled Change Reminder test
   endpoint.
 - Function App logs, Key Vault audit events, and supported platform metrics route to Log Analytics. Application Insights local authentication is disabled.
