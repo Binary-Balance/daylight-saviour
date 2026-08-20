@@ -470,9 +470,10 @@ export function createProductionChangeReminderAdapters({
         return { kind: 'failed' };
       }
       const token = await notifications.getDevicePushTokenAsync();
+      const saved = await loadStoredState();
       return synchronize(homeTimeZone, token.data, false, {
-        oneDayEnabled: true,
-        oneWeekEnabled: true,
+        oneDayEnabled: saved?.oneDayEnabled ?? true,
+        oneWeekEnabled: saved?.oneWeekEnabled ?? true,
       });
     } catch {
       return { kind: 'failed' };
@@ -685,7 +686,7 @@ export function createProductionChangeReminderAdapters({
             },
             timeoutMs,
           );
-          if (!response.ok) return { kind: 'failed' as const };
+          if (response.status !== 204) return { kind: 'failed' as const };
           await secureStore.deleteItemAsync(registrationKey);
           return { kind: 'disabled' as const };
         } catch {

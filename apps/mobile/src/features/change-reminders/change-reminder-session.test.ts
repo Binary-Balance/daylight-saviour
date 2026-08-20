@@ -447,4 +447,105 @@ describe('Change Reminder session', () => {
     expect(session.getSnapshot()).toMatchObject({ kind: 'enabled' });
     stop();
   });
+
+  it('retries initial OS-blocked enablement after notification settings return', async () => {
+    const boundary = adapters({
+      enable: jest
+        .fn()
+        .mockResolvedValueOnce({ kind: 'os-blocked' as const })
+        .mockResolvedValueOnce({ kind: 'enabled' as const }),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+    session.dispatch({ type: 'show-explainer' });
+    session.dispatch({ type: 'enable' });
+    await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'os-blocked',
+    );
+
+    session.dispatch({ type: 'foreground' });
+    expect(session.getSnapshot()).toEqual({ kind: 'saving' });
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
+    ).toMatchObject({ kind: 'enabled' });
+    expect(boundary.enable).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it('does not let stale foreground restores overwrite newer saved or disabled state', async () => {
+    let resolvePreferenceRestore!: (value: {
+      readonly kind: 'registered';
+      readonly notificationPermissionGranted: true;
+      readonly registration: typeof registration;
+    }) => void;
+    let resolveDisableRestore!: typeof resolvePreferenceRestore;
+    const boundary = adapters({
+      restore: jest
+        .fn()
+        .mockResolvedValueOnce({
+          kind: 'registered' as const,
+          notificationPermissionGranted: true,
+          registration,
+        })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolvePreferenceRestore = resolve;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveDisableRestore = resolve;
+            }),
+        ),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+
+    session.dispatch({ type: 'foreground' });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    await waitForSnapshot(
+      session,
+      (snapshot) =>
+        snapshot.kind === 'enabled' && !snapshot.preferences.oneDayEnabled,
+    );
+    resolvePreferenceRestore({
+      kind: 'registered',
+      notificationPermissionGranted: true,
+      registration,
+    });
+    await Promise.resolve();
+    expect(session.getSnapshot()).toMatchObject({
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+
+    session.dispatch({ type: 'foreground' });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+    session.dispatch({ type: 'confirm-disable' });
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'disabled');
+    resolveDisableRestore({
+      kind: 'registered',
+      notificationPermissionGranted: true,
+      registration,
+    });
+    await Promise.resolve();
+    expect(session.getSnapshot()).toEqual({ kind: 'disabled' });
+    stop();
+  });
 });

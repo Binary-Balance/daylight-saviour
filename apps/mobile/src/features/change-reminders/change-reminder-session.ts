@@ -120,6 +120,11 @@ export function createChangeReminderSession({
     return active && generation === expectedGeneration;
   }
 
+  function beginOperation() {
+    generation += 1;
+    return generation;
+  }
+
   async function restore(expectedGeneration: number) {
     try {
       const result = await adapters.restore();
@@ -155,11 +160,12 @@ export function createChangeReminderSession({
     if (
       snapshot.kind !== 'explainer' &&
       snapshot.kind !== 'failed' &&
+      snapshot.kind !== 'os-blocked' &&
       snapshot.kind !== 'permission-denied' &&
       snapshot.kind !== 'retry-pending'
     )
       return;
-    const expectedGeneration = generation;
+    const expectedGeneration = beginOperation();
     publish({ kind: 'saving' });
     void adapters
       .enable(homeTimeZone)
@@ -185,7 +191,7 @@ export function createChangeReminderSession({
       preferences.oneWeekEnabled === confirmed.oneWeekEnabled
     )
       return;
-    const expectedGeneration = generation;
+    const expectedGeneration = beginOperation();
     publish({
       kind: 'saving-preferences',
       preferences: confirmed,
@@ -216,7 +222,7 @@ export function createChangeReminderSession({
   }
 
   function disable(preferences: ChangeReminderPreferences) {
-    const expectedGeneration = generation;
+    const expectedGeneration = beginOperation();
     publish({ kind: 'disabling', preferences });
     void adapters.disable().then(
       (result) => {
@@ -254,6 +260,10 @@ export function createChangeReminderSession({
         snapshot.kind === 'disabling'
       )
         return;
+      if (snapshot.kind === 'os-blocked') {
+        enable();
+        return;
+      }
       requestRestore(generation);
       return;
     }

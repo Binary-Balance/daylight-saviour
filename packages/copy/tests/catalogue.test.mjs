@@ -88,11 +88,11 @@ describe('Australian-English copy catalogue', () => {
   it('states saved reminder timings and failed changes literally', () => {
     const reminders = australianEnglish.changeReminders;
     assert.equal(
-      reminders.enabled({ oneDayEnabled: false, oneWeekEnabled: true }).body,
+      reminders.enabled.body({ oneDayEnabled: false, oneWeekEnabled: true }),
       'One-week Change Reminders are enabled for your Home Time Zone.',
     );
     assert.equal(
-      reminders.enabled({ oneDayEnabled: true, oneWeekEnabled: false }).body,
+      reminders.enabled.body({ oneDayEnabled: true, oneWeekEnabled: false }),
       'One-day Change Reminders are enabled for your Home Time Zone.',
     );
     assert.equal(
@@ -101,7 +101,7 @@ describe('Australian-English copy catalogue', () => {
     );
     assert.equal(
       reminders.disableFailed.body,
-      'Change Reminders are still enabled because deletion did not finish. Check your connection and try again.',
+      'Deletion could not be confirmed on this device. Check your connection and try again.',
     );
   });
 

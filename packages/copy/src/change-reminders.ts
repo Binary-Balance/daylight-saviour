@@ -5,8 +5,8 @@ export const changeReminders = Object.freeze({
     enableHint:
       'Explains reminder timing before asking for notification permission',
     openSettingsHint: 'Opens device notification settings',
-    oneDayEnabled: 'One-day Change Reminder enabled',
-    oneWeekEnabled: 'One-week Change Reminder enabled',
+    oneDay: 'One-day Change Reminder',
+    oneWeek: 'One-week Change Reminder',
   }),
   disabled: Object.freeze({
     action: 'Enable Change Reminders',
@@ -20,17 +20,17 @@ export const changeReminders = Object.freeze({
     heading: 'DISABLE CHANGE REMINDERS?',
   }),
   disableFailed: Object.freeze({
-    body: 'Change Reminders are still enabled because deletion did not finish. Check your connection and try again.',
+    body: 'Deletion could not be confirmed on this device. Check your connection and try again.',
     cancel: 'Keep reminders',
     confirm: 'Try deletion again',
     heading: 'REMINDER DELETION NOT CONFIRMED',
   }),
   disabling: 'Deleting Change Reminder registration…',
-  enabled: (preferences: {
-    readonly oneDayEnabled: boolean;
-    readonly oneWeekEnabled: boolean;
-  }) => ({
-    body:
+  enabled: Object.freeze({
+    body: (preferences: {
+      readonly oneDayEnabled: boolean;
+      readonly oneWeekEnabled: boolean;
+    }) =>
       preferences.oneWeekEnabled && preferences.oneDayEnabled
         ? 'One-week and one-day Change Reminders are enabled for your Home Time Zone.'
         : preferences.oneWeekEnabled

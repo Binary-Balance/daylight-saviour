@@ -19,9 +19,11 @@ import { createChangeReminderSession } from './change-reminder-session';
 function TimingControls({
   preferences,
   onChange,
+  disabled = false,
 }: {
   readonly preferences: ChangeReminderPreferences;
   readonly onChange: (preferences: ChangeReminderPreferences) => void;
+  readonly disabled?: boolean;
 }) {
   return (
     <View style={styles.timings}>
@@ -30,8 +32,9 @@ function TimingControls({
           {copy.changeReminders.timing.oneWeek}
         </Text>
         <Switch
-          accessibilityLabel={copy.changeReminders.accessibility.oneWeekEnabled}
+          accessibilityLabel={copy.changeReminders.accessibility.oneWeek}
           accessibilityRole="switch"
+          disabled={disabled}
           onValueChange={(oneWeekEnabled) =>
             onChange({ ...preferences, oneWeekEnabled })
           }
@@ -43,8 +46,9 @@ function TimingControls({
           {copy.changeReminders.timing.oneDay}
         </Text>
         <Switch
-          accessibilityLabel={copy.changeReminders.accessibility.oneDayEnabled}
+          accessibilityLabel={copy.changeReminders.accessibility.oneDay}
           accessibilityRole="switch"
+          disabled={disabled}
           onValueChange={(oneDayEnabled) =>
             onChange({ ...preferences, oneDayEnabled })
           }
@@ -117,7 +121,10 @@ export default function ChangeReminderSection({
       : snapshot.kind === 'explainer'
         ? copy.changeReminders.explainer
         : snapshot.kind === 'enabled'
-          ? copy.changeReminders.enabled(snapshot.preferences)
+          ? {
+              body: copy.changeReminders.enabled.body(snapshot.preferences),
+              heading: copy.changeReminders.enabled.heading,
+            }
           : snapshot.kind === 'disabled'
             ? copy.changeReminders.disabled
             : snapshot.kind === 'confirm-disable'
@@ -202,8 +209,11 @@ export default function ChangeReminderSection({
           </Text>
         </>
       )}
-      {snapshot.kind === 'enabled' || snapshot.kind === 'preferences-failed' ? (
+      {snapshot.kind === 'enabled' ||
+      snapshot.kind === 'preferences-failed' ||
+      snapshot.kind === 'disable-failed' ? (
         <TimingControls
+          disabled={snapshot.kind === 'disable-failed'}
           onChange={(preferences) =>
             session.dispatch({ type: 'change-preferences', preferences })
           }

@@ -399,7 +399,8 @@ it('saves one timing at a time and asks before deleting both', async () => {
   });
   const rendered = renderSection(boundary);
   const week = await screen.findByRole('switch', {
-    name: 'One-week Change Reminder enabled',
+    checked: true,
+    name: 'One-week Change Reminder',
   });
   fireEvent(week, 'valueChange', false);
   await waitFor(() =>
@@ -408,8 +409,15 @@ it('saves one timing at a time and asks before deleting both', async () => {
       oneWeekEnabled: false,
     }),
   );
+  expect(
+    screen.getByRole('switch', {
+      checked: false,
+      name: 'One-week Change Reminder',
+    }),
+  ).toBeTruthy();
   const day = await screen.findByRole('switch', {
-    name: 'One-day Change Reminder enabled',
+    checked: true,
+    name: 'One-day Change Reminder',
   });
   fireEvent(day, 'valueChange', false);
   expect(
@@ -419,9 +427,151 @@ it('saves one timing at a time and asks before deleting both', async () => {
   fireEvent.press(screen.getByRole('button', { name: 'Keep reminders' }));
   expect(
     await screen.findByRole('switch', {
-      name: 'One-day Change Reminder enabled',
+      name: 'One-day Change Reminder',
     }),
   ).toBeTruthy();
+  rendered.unmount();
+  appStateSpy.mockRestore();
+});
+
+it('retries initial OS-blocked enablement after settings return', async () => {
+  let onAppStateChange: ((state: string) => void) | undefined;
+  const appStateSpy = jest
+    .spyOn(AppState, 'addEventListener')
+    .mockImplementation((_event, listener) => {
+      onAppStateChange = listener as (state: string) => void;
+      return { remove: jest.fn() };
+    });
+  const openSettings = jest.fn(async () => undefined);
+  let resolveEnable!: (result: { readonly kind: 'enabled' }) => void;
+  const boundary = adapters({
+    enable: jest
+      .fn()
+      .mockResolvedValueOnce({ kind: 'os-blocked' as const })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveEnable = resolve;
+          }),
+      ),
+    openSettings,
+  });
+  const rendered = renderSection(boundary);
+  fireEvent.press(
+    await screen.findByRole('button', {
+      name: 'Warn me before time misbehaves',
+    }),
+  );
+  fireEvent.press(screen.getByRole('button', { name: 'Enable reminders' }));
+  expect(await screen.findByText(/Notifications are blocked/i)).toBeTruthy();
+  fireEvent.press(
+    screen.getByRole('button', { name: 'Open notification settings' }),
+  );
+  expect(openSettings).toHaveBeenCalledTimes(1);
+  act(() => onAppStateChange?.('active'));
+  expect(screen.getByText('Registering reminders…')).toBeTruthy();
+  await act(async () => resolveEnable({ kind: 'enabled' }));
+  expect(
+    await screen.findByText(
+      /one-week and one-day Change Reminders are enabled/i,
+    ),
+  ).toBeTruthy();
+  expect(boundary.enable).toHaveBeenCalledTimes(2);
+  rendered.unmount();
+  appStateSpy.mockRestore();
+});
+
+it('shows disabling, disabled, and recoverable deletion uncertainty', async () => {
+  const appStateSpy = jest
+    .spyOn(AppState, 'addEventListener')
+    .mockImplementation(() => ({ remove: jest.fn() }));
+  let resolveDelete!: (value: { readonly kind: 'disabled' }) => void;
+  const registered = {
+    attemptGeneration: 1,
+    credential: 'c'.repeat(43),
+    deviceToken: 'fcm-token:with_valid.characters-123',
+    homeTimeZone: 'Australia/Sydney',
+    installationId: 'i'.repeat(43),
+    oneDayEnabled: false,
+    oneWeekEnabled: true,
+    registrationRequestId: 'a'.repeat(64),
+    state: 'registered' as const,
+    version: 4 as const,
+  };
+  const boundary = adapters({
+    disable: jest.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveDelete = resolve;
+        }),
+    ),
+    restore: jest.fn(async () => ({
+      kind: 'registered' as const,
+      notificationPermissionGranted: true,
+      registration: registered,
+    })),
+  });
+  const rendered = renderSection(boundary);
+  fireEvent(
+    await screen.findByRole('switch', { name: 'One-week Change Reminder' }),
+    'valueChange',
+    false,
+  );
+  fireEvent.press(
+    screen.getByRole('button', { name: 'Disable and delete reminders' }),
+  );
+  expect(
+    screen.getByText('Deleting Change Reminder registration…'),
+  ).toBeTruthy();
+  await act(async () => resolveDelete({ kind: 'disabled' }));
+  expect(
+    await screen.findByText(/registration has been deleted/i),
+  ).toBeTruthy();
+  rendered.unmount();
+  appStateSpy.mockRestore();
+});
+
+it('keeps deletion uncertainty factual and recoverable', async () => {
+  const appStateSpy = jest
+    .spyOn(AppState, 'addEventListener')
+    .mockImplementation(() => ({ remove: jest.fn() }));
+  const registered = {
+    attemptGeneration: 1,
+    credential: 'c'.repeat(43),
+    deviceToken: 'fcm-token:with_valid.characters-123',
+    homeTimeZone: 'Australia/Sydney',
+    installationId: 'i'.repeat(43),
+    oneDayEnabled: false,
+    oneWeekEnabled: true,
+    registrationRequestId: 'a'.repeat(64),
+    state: 'registered' as const,
+    version: 4 as const,
+  };
+  const rendered = renderSection(
+    adapters({
+      disable: jest.fn(async () => ({ kind: 'failed' as const })),
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration: registered,
+      })),
+    }),
+  );
+  fireEvent(
+    await screen.findByRole('switch', { name: 'One-week Change Reminder' }),
+    'valueChange',
+    false,
+  );
+  fireEvent.press(
+    screen.getByRole('button', { name: 'Disable and delete reminders' }),
+  );
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    /Deletion could not be confirmed on this device/i,
+  );
+  expect(
+    screen.getByRole('button', { name: 'Try deletion again' }),
+  ).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Keep reminders' })).toBeTruthy();
   rendered.unmount();
   appStateSpy.mockRestore();
 });
