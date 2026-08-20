@@ -1,9 +1,31 @@
 import {
   assertActivatedTimeZoneDataPack,
   type ActivatedTimeZoneDataPack,
-  type TimeZoneState,
   type TimeZoneTransition,
 } from '@daylight-saviour/contracts';
+
+import {
+  civilTimeInputAt,
+  localDateTimeAt,
+  nextTransition,
+  stateAt,
+  type ChangeDirection,
+  type LocalDateTime,
+} from './civil-time-helpers.ts';
+
+export {
+  CivilTimeDecisionUnavailableError,
+  type CivilTimeDecisionUnavailableReason,
+  type ChangeDirection,
+  type LocalDateTime,
+} from './civil-time-helpers.ts';
+
+export {
+  planChangeReminderDeliveries,
+  type ChangeReminderDeliveryPlan,
+  type ChangeReminderPreferences,
+  type ChangeReminderTiming,
+} from './change-reminder-delivery-plan.ts';
 
 export {
   activateAustralianTimeZoneDataPack,
@@ -20,16 +42,6 @@ export {
 export type DaylightSavingStatus =
   | 'Daylight saving time applies'
   | 'Standard time applies';
-
-export type ChangeDirection = 'Forward Change' | 'Backward Change';
-
-export interface LocalDateTime {
-  readonly day: number;
-  readonly hour: number;
-  readonly minute: number;
-  readonly month: number;
-  readonly year: number;
-}
 
 export interface ChangeEvent {
   readonly abbreviationAfter: string;
@@ -111,63 +123,6 @@ export interface CivilTimeDecision {
   readonly zoneId: string;
 }
 
-export class CivilTimeDecisionUnavailableError extends Error {
-  readonly reason: CivilTimeDecisionUnavailableReason;
-
-  constructor(reason: CivilTimeDecisionUnavailableReason, problem: string) {
-    super(`Civil-time decision unavailable: ${problem}`);
-    this.name = 'CivilTimeDecisionUnavailableError';
-    this.reason = reason;
-  }
-}
-
-export type CivilTimeDecisionUnavailableReason =
-  | 'invalid-instant'
-  | 'before-coverage'
-  | 'validity-expired'
-  | 'unsupported-zone';
-
-function localDateTimeAt(
-  instantMilliseconds: number,
-  utcOffsetSeconds: number,
-): LocalDateTime {
-  const local = new Date(instantMilliseconds + utcOffsetSeconds * 1_000);
-
-  return {
-    day: local.getUTCDate(),
-    hour: local.getUTCHours(),
-    minute: local.getUTCMinutes(),
-    month: local.getUTCMonth() + 1,
-    year: local.getUTCFullYear(),
-  };
-}
-
-function activeState(
-  initial: TimeZoneState,
-  transitions: readonly TimeZoneTransition[],
-  instantMilliseconds: number,
-) {
-  let state = initial;
-
-  for (const transition of transitions) {
-    if (Date.parse(transition.at) > instantMilliseconds) {
-      break;
-    }
-    state = transition;
-  }
-
-  return state;
-}
-
-function nextTransition(
-  transitions: readonly TimeZoneTransition[],
-  instantMilliseconds: number,
-) {
-  return transitions.find(
-    (transition) => Date.parse(transition.at) > instantMilliseconds,
-  );
-}
-
 function changeEventFromTransition(
   transition: TimeZoneTransition,
   instantMilliseconds: number,
@@ -200,44 +155,8 @@ export function decideCivilTime(
   zoneId: string,
   now: Date,
 ): CivilTimeDecision {
-  assertActivatedTimeZoneDataPack(pack);
-
-  const instantMilliseconds = now.getTime();
-  if (!Number.isFinite(instantMilliseconds)) {
-    throw new CivilTimeDecisionUnavailableError(
-      'invalid-instant',
-      'current instant is invalid',
-    );
-  }
-
-  const coverageStartMilliseconds = Date.parse(pack.coverage.startsAt);
-  const validityHorizonMilliseconds = Date.parse(pack.coverage.validUntil);
-  if (instantMilliseconds < coverageStartMilliseconds) {
-    throw new CivilTimeDecisionUnavailableError(
-      'before-coverage',
-      'instant falls before pack coverage',
-    );
-  }
-  if (instantMilliseconds > validityHorizonMilliseconds) {
-    throw new CivilTimeDecisionUnavailableError(
-      'validity-expired',
-      'instant falls after the Validity Horizon',
-    );
-  }
-
-  const zone = pack.zones.find((candidate) => candidate.id === zoneId);
-  if (zone === undefined) {
-    throw new CivilTimeDecisionUnavailableError(
-      'unsupported-zone',
-      `unsupported zone ${zoneId}`,
-    );
-  }
-
-  const state = activeState(
-    zone.initial,
-    zone.transitions,
-    instantMilliseconds,
-  );
+  const { instantMilliseconds, zone } = civilTimeInputAt(pack, zoneId, now);
+  const state = stateAt(zone.initial, zone.transitions, instantMilliseconds);
   const transition = nextTransition(zone.transitions, instantMilliseconds);
   const nextChangeEvent =
     transition === undefined
