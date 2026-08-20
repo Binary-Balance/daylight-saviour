@@ -5,9 +5,37 @@ export const changeReminders = Object.freeze({
     enableHint:
       'Explains reminder timing before asking for notification permission',
     openSettingsHint: 'Opens device notification settings',
+    oneDay: 'One-day Change Reminder',
+    oneWeek: 'One-week Change Reminder',
   }),
+  disabled: Object.freeze({
+    action: 'Enable Change Reminders',
+    body: 'Change Reminders are disabled and this installation’s reminder registration has been deleted.',
+    heading: 'CHANGE REMINDERS DISABLED',
+  }),
+  disableConfirmation: Object.freeze({
+    body: 'Turning off both timings deletes this installation’s Change Reminder registration. This cannot be undone, but you can enable reminders again later.',
+    cancel: 'Keep reminders',
+    confirm: 'Disable and delete reminders',
+    heading: 'DISABLE CHANGE REMINDERS?',
+  }),
+  disableFailed: Object.freeze({
+    body: 'Deletion could not be confirmed on this device. Check your connection and try again.',
+    cancel: 'Keep reminders',
+    confirm: 'Try deletion again',
+    heading: 'REMINDER DELETION NOT CONFIRMED',
+  }),
+  disabling: 'Deleting Change Reminder registration…',
   enabled: Object.freeze({
-    body: 'One-week and one-day Change Reminders are enabled for your Home Time Zone.',
+    body: (preferences: {
+      readonly oneDayEnabled: boolean;
+      readonly oneWeekEnabled: boolean;
+    }) =>
+      preferences.oneWeekEnabled && preferences.oneDayEnabled
+        ? 'One-week and one-day Change Reminders are enabled for your Home Time Zone.'
+        : preferences.oneWeekEnabled
+          ? 'One-week Change Reminders are enabled for your Home Time Zone.'
+          : 'One-day Change Reminders are enabled for your Home Time Zone.',
     heading: 'CHANGE REMINDERS ENABLED',
   }),
   explainer: Object.freeze({
@@ -71,12 +99,23 @@ export const changeReminders = Object.freeze({
     heading: 'REGISTERED, NOT DELIVERABLE',
     openSettings: 'Open notification settings',
   }),
+  preferencesFailed: Object.freeze({
+    body: 'Your saved reminder timings are unchanged. Check your connection and try the timing change again.',
+    cancel: 'Keep saved timings',
+    heading: 'TIMING CHANGE NOT SAVED',
+    retry: 'Try timing change again',
+  }),
   retryPending: Object.freeze({
     body: 'Registration did not finish on this device. Reminders are not enabled until retry succeeds.',
     heading: 'REMINDER REGISTRATION UNCONFIRMED',
     retry: 'Retry registration',
   }),
   saving: 'Registering reminders…',
+  savingPreferences: 'Saving reminder timings…',
+  timing: Object.freeze({
+    oneDay: 'One day before',
+    oneWeek: 'One week before',
+  }),
   untouched: Object.freeze({
     action: 'Warn me before time misbehaves',
     body: 'Get one-week and one-day warnings before your Home Time Zone changes.',

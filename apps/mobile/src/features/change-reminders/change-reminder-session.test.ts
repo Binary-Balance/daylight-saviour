@@ -35,10 +35,15 @@ function adapters(
   overrides: Partial<ChangeReminderAdapters> = {},
 ): ChangeReminderAdapters {
   return {
+    disable: jest.fn(async () => ({ kind: 'disabled' as const })),
     enable: jest.fn(async () => ({ kind: 'enabled' as const })),
     openSettings: jest.fn(async () => undefined),
     restore: jest.fn(async () => ({ kind: 'unregistered' as const })),
     startTokenRefresh: jest.fn(() => () => undefined),
+    updatePreferences: jest.fn(async (preferences) => ({
+      kind: 'enabled' as const,
+      preferences,
+    })),
     ...overrides,
   };
 }
@@ -60,7 +65,10 @@ describe('Change Reminder session', () => {
 
     expect(
       await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
-    ).toEqual({ kind: 'enabled' });
+    ).toEqual({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
     expect(boundary.restore).toHaveBeenCalledTimes(1);
     expect(boundary.enable).not.toHaveBeenCalled();
     stop();
@@ -83,7 +91,10 @@ describe('Change Reminder session', () => {
     expect(session.getSnapshot()).toEqual({ kind: 'saving' });
     expect(
       await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
-    ).toEqual({ kind: 'enabled' });
+    ).toEqual({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
     expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
     stop();
   });
@@ -110,7 +121,10 @@ describe('Change Reminder session', () => {
     session.dispatch({ type: 'enable' });
     expect(
       await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
-    ).toEqual({ kind: 'enabled' });
+    ).toEqual({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
     expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
     stop();
   });
@@ -234,7 +248,10 @@ describe('Change Reminder session', () => {
     });
     expect(session.getSnapshot()).toEqual({ kind: 'retry-pending' });
     session.dispatch({ result: { kind: 'succeeded' }, type: 'token-refresh' });
-    expect(session.getSnapshot()).toEqual({ kind: 'enabled' });
+    expect(session.getSnapshot()).toEqual({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
     stop();
   });
 
@@ -304,6 +321,336 @@ describe('Change Reminder session', () => {
 
     session.dispatch({ type: 'foreground' });
     await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+    stop();
+  });
+
+  it('saves either timing independently and keeps confirmed timings after failure', async () => {
+    let resolve!: (result: { readonly kind: 'failed' }) => void;
+    const boundary = adapters({
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration,
+      })),
+      updatePreferences: jest.fn(
+        () =>
+          new Promise((done) => {
+            resolve = done;
+          }),
+      ),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    expect(session.getSnapshot()).toMatchObject({
+      kind: 'saving-preferences',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
+    await Promise.resolve();
+    expect(boundary.updatePreferences).toHaveBeenCalledWith({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    });
+    resolve({ kind: 'failed' });
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'preferences-failed',
+      ),
+    ).toMatchObject({
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
+    session.dispatch({ type: 'cancel-preferences' });
+    expect(session.getSnapshot()).toMatchObject({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
+    stop();
+  });
+
+  it('confirms final disable before deleting and re-enables through ordinary opt-in', async () => {
+    const boundary = adapters({
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration,
+      })),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+    expect(session.getSnapshot()).toMatchObject({ kind: 'confirm-disable' });
+    expect(boundary.disable).not.toHaveBeenCalled();
+    session.dispatch({ type: 'cancel-disable' });
+    expect(session.getSnapshot()).toMatchObject({ kind: 'enabled' });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+    session.dispatch({ type: 'confirm-disable' });
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'disabled',
+      ),
+    ).toEqual({ kind: 'disabled' });
+    session.dispatch({ type: 'show-explainer' });
+    expect(session.getSnapshot()).toEqual({ kind: 'explainer' });
+    stop();
+  });
+
+  it('keeps confirmed reminders recoverable when deletion fails', async () => {
+    const boundary = adapters({
+      disable: jest.fn(async () => ({ kind: 'failed' as const })),
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration,
+      })),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+    session.dispatch({ type: 'confirm-disable' });
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'disable-failed',
+      ),
+    ).toMatchObject({
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
+    session.dispatch({ type: 'cancel-disable' });
+    expect(session.getSnapshot()).toMatchObject({ kind: 'enabled' });
+    stop();
+  });
+
+  it('retries initial OS-blocked enablement after notification settings return', async () => {
+    const boundary = adapters({
+      enable: jest
+        .fn()
+        .mockResolvedValueOnce({ kind: 'os-blocked' as const })
+        .mockResolvedValueOnce({ kind: 'enabled' as const }),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+    session.dispatch({ type: 'show-explainer' });
+    session.dispatch({ type: 'enable' });
+    await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'os-blocked',
+    );
+
+    session.dispatch({ type: 'foreground' });
+    expect(session.getSnapshot()).toEqual({ kind: 'saving' });
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
+    ).toMatchObject({ kind: 'enabled' });
+    expect(boundary.enable).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it('does not let stale foreground restores overwrite newer saved or disabled state', async () => {
+    let resolvePreferenceRestore!: (value: {
+      readonly kind: 'registered';
+      readonly notificationPermissionGranted: true;
+      readonly registration: typeof registration;
+    }) => void;
+    let resolveDisableRestore!: typeof resolvePreferenceRestore;
+    const boundary = adapters({
+      restore: jest
+        .fn()
+        .mockResolvedValueOnce({
+          kind: 'registered' as const,
+          notificationPermissionGranted: true,
+          registration,
+        })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolvePreferenceRestore = resolve;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveDisableRestore = resolve;
+            }),
+        ),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+
+    session.dispatch({ type: 'foreground' });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    await waitForSnapshot(
+      session,
+      (snapshot) =>
+        snapshot.kind === 'enabled' && !snapshot.preferences.oneDayEnabled,
+    );
+    resolvePreferenceRestore({
+      kind: 'registered',
+      notificationPermissionGranted: true,
+      registration,
+    });
+    await Promise.resolve();
+    expect(session.getSnapshot()).toMatchObject({
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+
+    session.dispatch({ type: 'foreground' });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+    session.dispatch({ type: 'confirm-disable' });
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'disabled');
+    resolveDisableRestore({
+      kind: 'registered',
+      notificationPermissionGranted: true,
+      registration,
+    });
+    await Promise.resolve();
+    expect(session.getSnapshot()).toEqual({ kind: 'disabled' });
+    stop();
+  });
+
+  it('does not let a stale restore replace final-disable confirmation', async () => {
+    let resolveRestore!: (value: {
+      readonly kind: 'registered';
+      readonly notificationPermissionGranted: true;
+      readonly registration: typeof registration;
+    }) => void;
+    const boundary = adapters({
+      restore: jest
+        .fn()
+        .mockResolvedValueOnce({
+          kind: 'registered' as const,
+          notificationPermissionGranted: true,
+          registration,
+        })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveRestore = resolve;
+            }),
+        ),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+    session.dispatch({ type: 'foreground' });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+    expect(session.getSnapshot()).toMatchObject({ kind: 'confirm-disable' });
+    resolveRestore({
+      kind: 'registered',
+      notificationPermissionGranted: true,
+      registration,
+    });
+    await Promise.resolve();
+    expect(session.getSnapshot()).toMatchObject({ kind: 'confirm-disable' });
+    stop();
+  });
+
+  it('keeps confirmed one-timing state after a failed refresh retry', async () => {
+    const oneTimingRegistration = {
+      ...registration,
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    };
+    const boundary = adapters({
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration: oneTimingRegistration,
+      })),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+    session.dispatch({
+      result: { kind: 'failed', retryable: true },
+      type: 'token-refresh',
+    });
+    session.dispatch({ type: 'enable' });
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
+    ).toMatchObject({
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    stop();
+  });
+
+  it('returns to both default timings after confirmed deletion and fresh opt-in', async () => {
+    const boundary = adapters({
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration: { ...registration, oneDayEnabled: false },
+      })),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+    session.dispatch({ type: 'confirm-disable' });
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'disabled');
+    session.dispatch({ type: 'show-explainer' });
+    session.dispatch({ type: 'enable' });
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
+    ).toMatchObject({
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
     stop();
   });
 });

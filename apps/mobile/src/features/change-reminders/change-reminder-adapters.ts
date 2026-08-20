@@ -1,5 +1,13 @@
+export interface ChangeReminderPreferences {
+  readonly oneDayEnabled: boolean;
+  readonly oneWeekEnabled: boolean;
+}
+
 export type ChangeReminderEnableResult =
-  | { readonly kind: 'enabled' }
+  | {
+      readonly kind: 'enabled';
+      readonly preferences?: ChangeReminderPreferences;
+    }
   | { readonly kind: 'permission-denied' }
   | { readonly kind: 'os-blocked' }
   | { readonly kind: 'unavailable' }
@@ -100,6 +108,14 @@ export interface ChangeReminderAdapters {
   readonly enable: (
     homeTimeZone: string,
   ) => Promise<ChangeReminderEnableResult>;
+  /** Saves a non-empty timing selection only after the service accepts it. */
+  readonly updatePreferences: (
+    preferences: ChangeReminderPreferences,
+  ) => Promise<ChangeReminderEnableResult>;
+  /** Deletes the authenticated subscription before clearing local credentials. */
+  readonly disable: () => Promise<
+    { readonly kind: 'disabled' } | { readonly kind: 'failed' }
+  >;
   /** Returns only the saved installation identifier for the test-build diagnostic. */
   readonly readInstallationId?: () => Promise<string | null>;
   readonly openSettings: () => Promise<void>;

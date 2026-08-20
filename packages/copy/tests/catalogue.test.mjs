@@ -85,6 +85,26 @@ describe('Australian-English copy catalogue', () => {
     });
   });
 
+  it('states saved reminder timings and failed changes literally', () => {
+    const reminders = australianEnglish.changeReminders;
+    assert.equal(
+      reminders.enabled.body({ oneDayEnabled: false, oneWeekEnabled: true }),
+      'One-week Change Reminders are enabled for your Home Time Zone.',
+    );
+    assert.equal(
+      reminders.enabled.body({ oneDayEnabled: true, oneWeekEnabled: false }),
+      'One-day Change Reminders are enabled for your Home Time Zone.',
+    );
+    assert.equal(
+      reminders.preferencesFailed.body,
+      'Your saved reminder timings are unchanged. Check your connection and try the timing change again.',
+    );
+    assert.equal(
+      reminders.disableFailed.body,
+      'Deletion could not be confirmed on this device. Check your connection and try again.',
+    );
+  });
+
   it('owns exact safe Change Reminder report-context wording', () => {
     assert.deepEqual(australianEnglish.changeReminders.notificationContext, {
       opened: {

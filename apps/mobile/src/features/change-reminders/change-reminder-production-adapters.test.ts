@@ -10,6 +10,7 @@ const responseBody = {
 function harness({
   createRegistrationRequestId = async () => 'a'.repeat(64),
   currentToken = 'fcm-token:with_valid.characters-123',
+  deleteItemImplementation = async () => undefined,
   endpoint = 'https://reminders.example.test/reminder-subscriptions',
   existingPermission = { canAskAgain: true, granted: true },
   fetchImplementation = async () => Response.json(responseBody),
@@ -21,6 +22,7 @@ function harness({
 }: {
   readonly createRegistrationRequestId?: () => Promise<string>;
   readonly currentToken?: string;
+  readonly deleteItemImplementation?: () => Promise<void>;
   readonly endpoint?: string;
   readonly existingPermission?: {
     readonly canAskAgain: boolean;
@@ -79,6 +81,11 @@ function harness({
     openSettings: jest.fn(async () => undefined),
     platform,
     secureStore: {
+      deleteItemAsync: jest.fn(async () => {
+        calls.push('delete:change-reminder-registration-v2');
+        await deleteItemImplementation();
+        storage.value = null;
+      }),
       getItemAsync: jest.fn(async () => storage.value),
       setItemAsync: secureSet,
     },
@@ -770,6 +777,203 @@ describe('production Change Reminder adapters', () => {
       test.dependencies.notifications.setNotificationChannelAsync,
     ).not.toHaveBeenCalled();
     expect(test.dependencies.fetch).not.toHaveBeenCalled();
+  });
+
+  it('updates one timing only after PUT success and preserves confirmed storage on failure', async () => {
+    const test = harness({
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 4,
+        }),
+      },
+    });
+    const before = test.stored();
+    jest
+      .mocked(test.dependencies.fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    await expect(
+      test.adapters.updatePreferences({
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+      }),
+    ).resolves.toEqual({ kind: 'failed' });
+    expect(test.stored()).toBe(before);
+
+    jest
+      .mocked(test.dependencies.fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await expect(
+      test.adapters.updatePreferences({
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+      }),
+    ).resolves.toEqual({ kind: 'enabled' });
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+      state: 'registered',
+    });
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[1]?.[1]?.body)),
+    ).toMatchObject({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    });
+  });
+
+  it('deletes credentials only after an authenticated DELETE succeeds', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: false,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    const test = harness({
+      fetchImplementation: jest
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 202 }))
+        .mockResolvedValueOnce(
+          new Response(null, { status: 204 }),
+        ) as jest.MockedFunction<typeof fetch>,
+      storage,
+    });
+    const before = storage.value;
+    await expect(test.adapters.disable()).resolves.toEqual({ kind: 'failed' });
+    expect(storage.value).toBe(before);
+    await expect(test.adapters.disable()).resolves.toEqual({
+      kind: 'disabled',
+    });
+    expect(storage.value).toBeNull();
+    expect(
+      test.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
+    ).toEqual(['DELETE', 'DELETE']);
+    expect(test.dependencies.fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
+      authorization: `Bearer ${responseBody.credential}`,
+    });
+  });
+
+  it('keeps the registration when local deletion cannot finish after remote 204', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: false,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    const test = harness({
+      deleteItemImplementation: async () => {
+        throw new Error('SecureStore delete failed');
+      },
+      fetchImplementation: jest.fn(
+        async (_input: URL | RequestInfo) =>
+          new Response(null, { status: 204 }),
+      ) as jest.MockedFunction<typeof fetch>,
+      storage,
+    });
+    const before = storage.value;
+    await expect(test.adapters.disable()).resolves.toEqual({ kind: 'failed' });
+    expect(storage.value).toBe(before);
+  });
+
+  it('keeps confirmed timing choices when a token refresh updates the registration', async () => {
+    const test = harness({
+      currentToken: 'fcm-token:replacement_valid.characters-456',
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 4,
+        }),
+      },
+    });
+    await expect(test.adapters.restore()).resolves.toMatchObject({
+      kind: 'registered',
+    });
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    });
+  });
+
+  it('retries a failed token refresh with its saved timing choices', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    const test = harness({
+      fetchImplementation: jest
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 503 }))
+        .mockResolvedValueOnce(
+          new Response(null, { status: 204 }),
+        ) as jest.MockedFunction<typeof fetch>,
+      storage,
+    });
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove: jest.fn() };
+      });
+    const outcomes: unknown[] = [];
+    test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
+    listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(outcomes).toEqual([{ kind: 'failed', retryable: true }]);
+
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'enabled',
+    });
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[1]?.[1]?.body)),
+    ).toMatchObject({ oneDayEnabled: false, oneWeekEnabled: true });
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+      state: 'registered',
+    });
   });
 
   it('reports write, read, fetch, and response validation failures', async () => {
