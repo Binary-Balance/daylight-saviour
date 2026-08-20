@@ -34,6 +34,7 @@ function TimingControls({
         <Switch
           accessibilityLabel={copy.changeReminders.accessibility.oneWeek}
           accessibilityRole="switch"
+          accessibilityState={{ disabled }}
           disabled={disabled}
           onValueChange={(oneWeekEnabled) =>
             onChange({ ...preferences, oneWeekEnabled })
@@ -48,6 +49,7 @@ function TimingControls({
         <Switch
           accessibilityLabel={copy.changeReminders.accessibility.oneDay}
           accessibilityRole="switch"
+          accessibilityState={{ disabled }}
           disabled={disabled}
           onValueChange={(oneDayEnabled) =>
             onChange({ ...preferences, oneDayEnabled })
@@ -213,7 +215,10 @@ export default function ChangeReminderSection({
       snapshot.kind === 'preferences-failed' ||
       snapshot.kind === 'disable-failed' ? (
         <TimingControls
-          disabled={snapshot.kind === 'disable-failed'}
+          disabled={
+            snapshot.kind === 'disable-failed' ||
+            snapshot.kind === 'preferences-failed'
+          }
           onChange={(preferences) =>
             session.dispatch({ type: 'change-preferences', preferences })
           }

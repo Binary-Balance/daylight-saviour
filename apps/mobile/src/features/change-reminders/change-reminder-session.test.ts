@@ -548,4 +548,79 @@ describe('Change Reminder session', () => {
     expect(session.getSnapshot()).toEqual({ kind: 'disabled' });
     stop();
   });
+
+  it('does not let a stale restore replace final-disable confirmation', async () => {
+    let resolveRestore!: (value: {
+      readonly kind: 'registered';
+      readonly notificationPermissionGranted: true;
+      readonly registration: typeof registration;
+    }) => void;
+    const boundary = adapters({
+      restore: jest
+        .fn()
+        .mockResolvedValueOnce({
+          kind: 'registered' as const,
+          notificationPermissionGranted: true,
+          registration,
+        })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveRestore = resolve;
+            }),
+        ),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+    session.dispatch({ type: 'foreground' });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+    expect(session.getSnapshot()).toMatchObject({ kind: 'confirm-disable' });
+    resolveRestore({
+      kind: 'registered',
+      notificationPermissionGranted: true,
+      registration,
+    });
+    await Promise.resolve();
+    expect(session.getSnapshot()).toMatchObject({ kind: 'confirm-disable' });
+    stop();
+  });
+
+  it('keeps confirmed one-timing state after a failed refresh retry', async () => {
+    const oneTimingRegistration = {
+      ...registration,
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    };
+    const boundary = adapters({
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration: oneTimingRegistration,
+      })),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+    session.dispatch({
+      result: { kind: 'failed', retryable: true },
+      type: 'token-refresh',
+    });
+    session.dispatch({ type: 'enable' });
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
+    ).toMatchObject({
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    stop();
+  });
 });

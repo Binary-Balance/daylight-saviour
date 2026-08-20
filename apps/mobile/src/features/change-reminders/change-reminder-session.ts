@@ -171,7 +171,17 @@ export function createChangeReminderSession({
       .enable(homeTimeZone)
       .then((result) => {
         if (current(expectedGeneration))
-          publish(result.kind === 'enabled' ? enabledSnapshot(result) : result);
+          publish(
+            result.kind === 'enabled'
+              ? enabledSnapshot(
+                  result,
+                  lastConfirmedPreferences ?? {
+                    oneDayEnabled: true,
+                    oneWeekEnabled: true,
+                  },
+                )
+              : result,
+          );
       })
       .catch(() => {
         if (current(expectedGeneration)) publish({ kind: 'failed' });
@@ -183,6 +193,7 @@ export function createChangeReminderSession({
     confirmed: ChangeReminderPreferences,
   ) {
     if (!preferences.oneDayEnabled && !preferences.oneWeekEnabled) {
+      beginOperation();
       publish({ kind: 'confirm-disable', preferences: confirmed });
       return;
     }

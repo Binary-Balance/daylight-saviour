@@ -575,3 +575,44 @@ it('keeps deletion uncertainty factual and recoverable', async () => {
   rendered.unmount();
   appStateSpy.mockRestore();
 });
+
+it('disables timing switches while a failed save is awaiting retry or cancellation', async () => {
+  const appStateSpy = jest
+    .spyOn(AppState, 'addEventListener')
+    .mockImplementation(() => ({ remove: jest.fn() }));
+  const rendered = renderSection(
+    adapters({
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration: {
+          attemptGeneration: 1,
+          credential: 'c'.repeat(43),
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          installationId: 'i'.repeat(43),
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered' as const,
+          version: 4 as const,
+        },
+      })),
+      updatePreferences: jest.fn(async () => ({ kind: 'failed' as const })),
+    }),
+  );
+  fireEvent(
+    await screen.findByRole('switch', { name: 'One-week Change Reminder' }),
+    'valueChange',
+    false,
+  );
+  await screen.findByRole('alert');
+  expect(
+    screen.getByRole('switch', {
+      disabled: true,
+      name: 'One-week Change Reminder',
+    }),
+  ).toBeTruthy();
+  rendered.unmount();
+  appStateSpy.mockRestore();
+});
