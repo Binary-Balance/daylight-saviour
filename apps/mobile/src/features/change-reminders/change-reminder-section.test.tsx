@@ -15,10 +15,15 @@ function adapters(
   overrides: Partial<ChangeReminderAdapters> = {},
 ): ChangeReminderAdapters {
   return {
+    disable: jest.fn(async () => ({ kind: 'disabled' as const })),
     enable: jest.fn(async () => ({ kind: 'enabled' as const })),
     openSettings: jest.fn(async () => undefined),
     restore: jest.fn(async () => ({ kind: 'unregistered' as const })),
     startTokenRefresh: jest.fn(() => () => undefined),
+    updatePreferences: jest.fn(async (preferences) => ({
+      kind: 'enabled' as const,
+      preferences,
+    })),
     ...overrides,
   };
 }
@@ -359,6 +364,62 @@ it('restores permission truth when Android returns to foreground', async () => {
   expect(
     await screen.findByRole('button', {
       name: 'Warn me before time misbehaves',
+    }),
+  ).toBeTruthy();
+  rendered.unmount();
+  appStateSpy.mockRestore();
+});
+
+it('saves one timing at a time and asks before deleting both', async () => {
+  const appStateSpy = jest
+    .spyOn(AppState, 'addEventListener')
+    .mockImplementation(() => ({ remove: jest.fn() }));
+  const updatePreferences = jest.fn(async (preferences) => ({
+    kind: 'enabled' as const,
+    preferences,
+  }));
+  const boundary = adapters({
+    restore: jest.fn(async () => ({
+      kind: 'registered' as const,
+      notificationPermissionGranted: true,
+      registration: {
+        attemptGeneration: 1,
+        credential: 'c'.repeat(43),
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        installationId: 'i'.repeat(43),
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered' as const,
+        version: 4 as const,
+      },
+    })),
+    updatePreferences,
+  });
+  const rendered = renderSection(boundary);
+  const week = await screen.findByRole('switch', {
+    name: 'One-week Change Reminder enabled',
+  });
+  fireEvent(week, 'valueChange', false);
+  await waitFor(() =>
+    expect(updatePreferences).toHaveBeenCalledWith({
+      oneDayEnabled: true,
+      oneWeekEnabled: false,
+    }),
+  );
+  const day = await screen.findByRole('switch', {
+    name: 'One-day Change Reminder enabled',
+  });
+  fireEvent(day, 'valueChange', false);
+  expect(
+    await screen.findByText(/Turning off both timings deletes/i),
+  ).toBeTruthy();
+  expect(boundary.disable).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByRole('button', { name: 'Keep reminders' }));
+  expect(
+    await screen.findByRole('switch', {
+      name: 'One-day Change Reminder enabled',
     }),
   ).toBeTruthy();
   rendered.unmount();

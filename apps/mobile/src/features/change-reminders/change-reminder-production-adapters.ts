@@ -9,6 +9,7 @@ import { parseReminderRegistrationEndpoint } from './reminder-registration-endpo
 import type {
   ChangeReminderAdapters,
   ChangeReminderEnableResult,
+  ChangeReminderPreferences,
   ChangeReminderTokenRefreshResult,
   StoredLegacyChangeReminderPending,
   StoredLegacyChangeReminderRegistration,
@@ -51,6 +52,7 @@ interface ProductionAdapterDependencies {
   readonly openSettings: () => Promise<void>;
   readonly platform: string;
   readonly secureStore: {
+    readonly deleteItemAsync: (key: string) => Promise<void>;
     readonly getItemAsync: (key: string) => Promise<string | null>;
     readonly setItemAsync: (key: string, value: string) => Promise<void>;
   };
@@ -69,8 +71,9 @@ function validStoredBase(candidate: Record<string, unknown>) {
     typeof candidate.homeTimeZone === 'string' &&
     canonicalAustralianZoneId(candidate.homeTimeZone) ===
       candidate.homeTimeZone &&
-    candidate.oneDayEnabled === true &&
-    candidate.oneWeekEnabled === true
+    typeof candidate.oneDayEnabled === 'boolean' &&
+    typeof candidate.oneWeekEnabled === 'boolean' &&
+    (candidate.oneDayEnabled || candidate.oneWeekEnabled)
   );
 }
 
@@ -168,8 +171,8 @@ function parseStoredState(value: string): StoredChangeReminderState {
     attemptGeneration: Number(candidate.attemptGeneration),
     deviceToken: String(candidate.deviceToken),
     homeTimeZone: String(candidate.homeTimeZone),
-    oneDayEnabled: true,
-    oneWeekEnabled: true,
+    oneDayEnabled: Boolean(candidate.oneDayEnabled),
+    oneWeekEnabled: Boolean(candidate.oneWeekEnabled),
     registrationRequestId: String(candidate.registrationRequestId),
     version: candidate.version as 3 | 4,
   };
@@ -301,6 +304,8 @@ export function createProductionChangeReminderAdapters({
     homeTimeZone: string,
     deviceToken: string,
     forceTokenReplacement: boolean,
+    preferences: ChangeReminderPreferences,
+    preserveConfirmedRecord = false,
   ): Promise<ChangeReminderEnableResult> {
     const registrationEndpoint = parseReminderRegistrationEndpoint(endpoint);
     if (registrationEndpoint === null || !validDeviceToken(deviceToken)) {
@@ -311,11 +316,12 @@ export function createProductionChangeReminderAdapters({
       saved?.state === 'registered' &&
       saved.version !== 2 &&
       saved.deviceToken === deviceToken &&
-      !forceTokenReplacement
+      !forceTokenReplacement &&
+      saved.oneDayEnabled === preferences.oneDayEnabled &&
+      saved.oneWeekEnabled === preferences.oneWeekEnabled
     ) {
-      return {
-        kind: saved.homeTimeZone === homeTimeZone ? 'enabled' : 'failed',
-      };
+      if (saved.homeTimeZone !== homeTimeZone) return { kind: 'failed' };
+      return { kind: 'enabled' };
     }
     const nextGeneration = (saved?.attemptGeneration ?? 0) + 1;
     try {
@@ -332,8 +338,12 @@ export function createProductionChangeReminderAdapters({
         homeTimeZone: replayingInitialRegistration
           ? saved.homeTimeZone
           : homeTimeZone,
-        oneDayEnabled: true,
-        oneWeekEnabled: true,
+        oneDayEnabled: replayingInitialRegistration
+          ? saved.oneDayEnabled
+          : preferences.oneDayEnabled,
+        oneWeekEnabled: replayingInitialRegistration
+          ? saved.oneWeekEnabled
+          : preferences.oneWeekEnabled,
         registrationRequestId:
           saved?.registrationRequestId ?? (await createRegistrationRequestId()),
         version: 4 as const,
@@ -357,7 +367,7 @@ export function createProductionChangeReminderAdapters({
         replayingInitialRegistration &&
         (pending.deviceToken !== deviceToken ||
           pending.homeTimeZone !== homeTimeZone);
-      await saveStoredState(pending);
+      if (!preserveConfirmedRecord) await saveStoredState(pending);
 
       const response = await fetchWithTimeout(
         request,
@@ -369,8 +379,8 @@ export function createProductionChangeReminderAdapters({
             attemptGeneration: pending.attemptGeneration,
             deviceToken: pending.deviceToken,
             homeTimeZone: pending.homeTimeZone,
-            oneDayEnabled: true,
-            oneWeekEnabled: true,
+            oneDayEnabled: pending.oneDayEnabled,
+            oneWeekEnabled: pending.oneWeekEnabled,
             platform,
             ...(pending.state === 'pending'
               ? { registrationRequestId: pending.registrationRequestId }
@@ -388,13 +398,17 @@ export function createProductionChangeReminderAdapters({
         timeoutMs,
       );
       if (!response.ok) {
-        if (pending.state === 'pending-update' && response.status === 404) {
+        if (
+          pending.state === 'pending-update' &&
+          response.status === 404 &&
+          !preserveConfirmedRecord
+        ) {
           const replacement = {
             attemptGeneration: 1,
             deviceToken,
             homeTimeZone,
-            oneDayEnabled: true,
-            oneWeekEnabled: true,
+            oneDayEnabled: preferences.oneDayEnabled,
+            oneWeekEnabled: preferences.oneWeekEnabled,
             registrationRequestId: await createRegistrationRequestId(),
             state: 'pending' as const,
             version: 4 as const,
@@ -403,7 +417,7 @@ export function createProductionChangeReminderAdapters({
             return { kind: 'failed' };
           }
           await saveStoredState(replacement);
-          return synchronize(homeTimeZone, deviceToken, true);
+          return synchronize(homeTimeZone, deviceToken, true, preferences);
         }
         return { kind: 'failed' };
       }
@@ -421,7 +435,7 @@ export function createProductionChangeReminderAdapters({
         version: 4,
       });
       if (replayNeedsAuthenticatedUpdate) {
-        return synchronize(homeTimeZone, deviceToken, true);
+        return synchronize(homeTimeZone, deviceToken, true, preferences);
       }
       return { kind: 'enabled' };
     } catch {
@@ -456,7 +470,10 @@ export function createProductionChangeReminderAdapters({
         return { kind: 'failed' };
       }
       const token = await notifications.getDevicePushTokenAsync();
-      return synchronize(homeTimeZone, token.data, false);
+      return synchronize(homeTimeZone, token.data, false, {
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+      });
     } catch {
       return { kind: 'failed' };
     }
@@ -479,7 +496,14 @@ export function createProductionChangeReminderAdapters({
       ) {
         return null;
       }
-      if ((await synchronize(homeTimeZone, token, true)).kind === 'enabled') {
+      if (
+        (
+          await synchronize(homeTimeZone, token, true, {
+            oneDayEnabled: saved.oneDayEnabled,
+            oneWeekEnabled: saved.oneWeekEnabled,
+          })
+        ).kind === 'enabled'
+      ) {
         return { kind: 'succeeded' };
       }
     } catch {
@@ -502,6 +526,9 @@ export function createProductionChangeReminderAdapters({
     readonly homeTimeZone: string;
     readonly promise: Promise<ChangeReminderEnableResult>;
   } | null = null;
+  let disableInFlight: Promise<
+    { readonly kind: 'disabled' } | { readonly kind: 'failed' }
+  > | null = null;
   let registrationQueue = Promise.resolve();
   let queuedRefreshToken: unknown = null;
   let refreshInFlight: Promise<void> | null = null;
@@ -586,7 +613,10 @@ export function createProductionChangeReminderAdapters({
       }
       if (saved.version !== 4 || saved.deviceToken !== currentToken) {
         const result = await enqueue(() =>
-          synchronize(saved.homeTimeZone, currentToken, true),
+          synchronize(saved.homeTimeZone, currentToken, true, {
+            oneDayEnabled: saved.oneDayEnabled,
+            oneWeekEnabled: saved.oneWeekEnabled,
+          }),
         );
         if (result.kind !== 'enabled') {
           return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
@@ -617,6 +647,54 @@ export function createProductionChangeReminderAdapters({
         if (enableInFlight?.promise === promise) enableInFlight = null;
       });
       enableInFlight = { homeTimeZone, promise };
+      return promise;
+    },
+    async updatePreferences(preferences) {
+      if (!preferences.oneDayEnabled && !preferences.oneWeekEnabled) {
+        return { kind: 'failed' };
+      }
+      return enqueue(async () => {
+        const saved = await loadStoredState();
+        if (saved?.state !== 'registered' || saved.version === 2)
+          return { kind: 'failed' };
+        return synchronize(
+          saved.homeTimeZone,
+          saved.deviceToken,
+          true,
+          preferences,
+          true,
+        );
+      });
+    },
+    disable() {
+      if (disableInFlight !== null) return disableInFlight;
+      const promise = enqueue(async () => {
+        try {
+          const registrationEndpoint =
+            parseReminderRegistrationEndpoint(endpoint);
+          const saved = await loadStoredState();
+          if (registrationEndpoint === null || saved?.state !== 'registered') {
+            return { kind: 'failed' as const };
+          }
+          const response = await fetchWithTimeout(
+            request,
+            updateEndpoint(registrationEndpoint, saved.installationId),
+            {
+              headers: { authorization: `Bearer ${saved.credential}` },
+              method: 'DELETE',
+            },
+            timeoutMs,
+          );
+          if (!response.ok) return { kind: 'failed' as const };
+          await secureStore.deleteItemAsync(registrationKey);
+          return { kind: 'disabled' as const };
+        } catch {
+          return { kind: 'failed' as const };
+        }
+      }).finally(() => {
+        if (disableInFlight === promise) disableInFlight = null;
+      });
+      disableInFlight = promise;
       return promise;
     },
     async readInstallationId() {

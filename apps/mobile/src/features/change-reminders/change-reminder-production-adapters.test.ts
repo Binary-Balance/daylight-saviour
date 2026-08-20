@@ -79,6 +79,10 @@ function harness({
     openSettings: jest.fn(async () => undefined),
     platform,
     secureStore: {
+      deleteItemAsync: jest.fn(async () => {
+        calls.push('delete:change-reminder-registration-v2');
+        storage.value = null;
+      }),
       getItemAsync: jest.fn(async () => storage.value),
       setItemAsync: secureSet,
     },
@@ -770,6 +774,122 @@ describe('production Change Reminder adapters', () => {
       test.dependencies.notifications.setNotificationChannelAsync,
     ).not.toHaveBeenCalled();
     expect(test.dependencies.fetch).not.toHaveBeenCalled();
+  });
+
+  it('updates one timing only after PUT success and preserves confirmed storage on failure', async () => {
+    const test = harness({
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 4,
+        }),
+      },
+    });
+    const before = test.stored();
+    jest
+      .mocked(test.dependencies.fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    await expect(
+      test.adapters.updatePreferences({
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+      }),
+    ).resolves.toEqual({ kind: 'failed' });
+    expect(test.stored()).toBe(before);
+
+    jest
+      .mocked(test.dependencies.fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await expect(
+      test.adapters.updatePreferences({
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+      }),
+    ).resolves.toEqual({ kind: 'enabled' });
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+      state: 'registered',
+    });
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[1]?.[1]?.body)),
+    ).toMatchObject({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    });
+  });
+
+  it('deletes credentials only after an authenticated DELETE succeeds', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: false,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    const test = harness({
+      fetchImplementation: jest
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 503 }))
+        .mockResolvedValueOnce(
+          new Response(null, { status: 204 }),
+        ) as jest.MockedFunction<typeof fetch>,
+      storage,
+    });
+    const before = storage.value;
+    await expect(test.adapters.disable()).resolves.toEqual({ kind: 'failed' });
+    expect(storage.value).toBe(before);
+    await expect(test.adapters.disable()).resolves.toEqual({
+      kind: 'disabled',
+    });
+    expect(storage.value).toBeNull();
+    expect(
+      test.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
+    ).toEqual(['DELETE', 'DELETE']);
+    expect(test.dependencies.fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
+      authorization: `Bearer ${responseBody.credential}`,
+    });
+  });
+
+  it('keeps confirmed timing choices when a token refresh updates the registration', async () => {
+    const test = harness({
+      currentToken: 'fcm-token:replacement_valid.characters-456',
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 4,
+        }),
+      },
+    });
+    await expect(test.adapters.restore()).resolves.toMatchObject({
+      kind: 'registered',
+    });
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    });
   });
 
   it('reports write, read, fetch, and response validation failures', async () => {
