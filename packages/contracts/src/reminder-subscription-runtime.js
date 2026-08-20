@@ -40,7 +40,10 @@ function validateSubscriptionFields(input) {
   const validToken =
     typeof input.deviceToken === 'string' &&
     (input.platform === 'ios'
-      ? /^[A-Fa-f0-9]{64}$/.test(input.deviceToken)
+      ? input.deviceToken.length > 0 &&
+        input.deviceToken.length <= 4096 &&
+        input.deviceToken.length % 2 === 0 &&
+        /^[A-Fa-f0-9]+$/.test(input.deviceToken)
       : /^[A-Za-z0-9_:.-]{20,4096}$/.test(input.deviceToken));
   if (!validToken)
     throw new ReminderSubscriptionValidationError('Invalid device token');
