@@ -112,6 +112,7 @@ export function createChangeReminderSession({
 
   function publish(next: ChangeReminderSessionSnapshot) {
     if (next.kind === 'enabled') lastConfirmedPreferences = next.preferences;
+    if (next.kind === 'disabled') lastConfirmedPreferences = null;
     snapshot = next;
     for (const listener of [...listeners]) listener();
   }

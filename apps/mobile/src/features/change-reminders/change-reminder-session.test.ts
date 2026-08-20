@@ -623,4 +623,34 @@ describe('Change Reminder session', () => {
     });
     stop();
   });
+
+  it('returns to both default timings after confirmed deletion and fresh opt-in', async () => {
+    const boundary = adapters({
+      restore: jest.fn(async () => ({
+        kind: 'registered' as const,
+        notificationPermissionGranted: true,
+        registration: { ...registration, oneDayEnabled: false },
+      })),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+    session.dispatch({ type: 'confirm-disable' });
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'disabled');
+    session.dispatch({ type: 'show-explainer' });
+    session.dispatch({ type: 'enable' });
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
+    ).toMatchObject({
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
+    stop();
+  });
 });
