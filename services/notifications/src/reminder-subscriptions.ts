@@ -16,6 +16,7 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 
 import type {
   FcmChangeReminderSubscription,
+  FcmSubscriptionRemovalResult,
   FcmSubscriptionRemover,
 } from './fcm-change-reminder-sender.js';
 
@@ -60,6 +61,7 @@ interface SubscriptionEntity {
   readonly oneWeekEnabled?: boolean | undefined;
   readonly platform?: 'android' | 'ios' | undefined;
   readonly partitionKey: string;
+  readonly registeredAt?: Date | undefined;
   readonly rowKey: string;
 }
 
@@ -113,6 +115,10 @@ interface AzureReminderSubscriptionStoreDependencies {
 }
 
 export interface ReminderSubscriptionStore extends FcmSubscriptionRemover {
+  readonly removeIfDeviceTokenMatches: (
+    subscription: FcmChangeReminderSubscription,
+    invalidatedAt?: Date,
+  ) => Promise<FcmSubscriptionRemovalResult>;
   readonly getSubscription: (
     installationId: string,
   ) => Promise<FcmChangeReminderSubscription | null>;
@@ -433,6 +439,21 @@ function statusCode(error: unknown) {
   return undefined;
 }
 
+function preservesPostInvalidationRegistration(
+  registeredAt: Date | undefined,
+  invalidatedAt: Date | undefined,
+) {
+  if (invalidatedAt === undefined) return false;
+  const invalidation = invalidatedAt.getTime();
+  const registration = registeredAt?.getTime();
+  return (
+    !Number.isFinite(invalidation) ||
+    registration === undefined ||
+    !Number.isFinite(registration) ||
+    registration > invalidation
+  );
+}
+
 export function createTableReminderSubscriptionStore(
   subscriptions: SubscriptionTable,
   throttles: ThrottleTable,
@@ -452,7 +473,7 @@ export function createTableReminderSubscriptionStore(
         throw error;
       }
     },
-    async removeIfDeviceTokenMatches(subscription) {
+    async removeIfDeviceTokenMatches(subscription, invalidatedAt) {
       for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
         let existing: SubscriptionEntity;
         try {
@@ -465,6 +486,14 @@ export function createTableReminderSubscriptionStore(
           throw error;
         }
         if (existing.deviceToken !== subscription.deviceToken) {
+          return 'token-replaced';
+        }
+        if (
+          preservesPostInvalidationRegistration(
+            existing.registeredAt,
+            invalidatedAt,
+          )
+        ) {
           return 'token-replaced';
         }
         try {
@@ -702,6 +731,7 @@ export function createAzureReminderSubscriptionStore(
           oneDayEnabled: boolean;
           oneWeekEnabled: boolean;
           platform: 'android' | 'ios';
+          registeredAt?: unknown;
         }>(partitionKey, rowKey);
         if (typeof entity.deviceToken !== 'string') {
           throw new Error('Stored subscription record is invalid');
@@ -730,6 +760,10 @@ export function createAzureReminderSubscriptionStore(
           platform:
             entity.platform === 'android' || entity.platform === 'ios'
               ? entity.platform
+              : undefined,
+          registeredAt:
+            entity.registeredAt instanceof Date
+              ? entity.registeredAt
               : undefined,
           rowKey,
         };

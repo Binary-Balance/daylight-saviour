@@ -96,6 +96,7 @@ function subscriptionTable(
       readonly etag: string;
       readonly partitionKey: string;
       readonly platform?: 'android' | 'ios';
+      readonly registeredAt?: Date;
       readonly rowKey: string;
     }>;
     readonly replace: (
@@ -667,7 +668,7 @@ describe('Azure Table mapping', () => {
     );
   });
 
-  it('maps exact-token conditional deletion to the subscriptions table', async () => {
+  it('uses Azure registeredAt to preserve a newer APNs registration', async () => {
     const deletions: {
       readonly etag: string | undefined;
       readonly partitionKey: string;
@@ -690,6 +691,7 @@ describe('Azure Table mapping', () => {
           attemptGeneration: 1,
           deviceToken: validRegistration.deviceToken,
           etag: 'matching-etag',
+          registeredAt: new Date('2026-07-24T05:00:02.000Z'),
         }) as never,
     };
     const tableStore = createAzureReminderSubscriptionStore(
@@ -709,19 +711,16 @@ describe('Azure Table mapping', () => {
     );
 
     assert.equal(
-      await tableStore.removeIfDeviceTokenMatches({
-        deviceToken: validRegistration.deviceToken,
-        installationId: 'installation-id',
-      }),
-      'removed',
+      await tableStore.removeIfDeviceTokenMatches(
+        {
+          deviceToken: validRegistration.deviceToken,
+          installationId: 'installation-id',
+        },
+        new Date('2026-07-24T05:00:01.000Z'),
+      ),
+      'token-replaced',
     );
-    assert.deepEqual(deletions, [
-      {
-        etag: 'matching-etag',
-        partitionKey: 'subscriptions-v1',
-        rowKey: 'installation-id',
-      },
-    ]);
+    assert.deepEqual(deletions, []);
   });
 });
 
@@ -807,6 +806,8 @@ describe('generation-ordered subscription persistence', () => {
           oneWeekEnabled: Boolean(row.oneWeekEnabled),
           partitionKey,
           platform: row.platform as 'android' | 'ios',
+          registeredAt:
+            row.registeredAt instanceof Date ? row.registeredAt : undefined,
           rowKey,
         };
       },
@@ -955,7 +956,7 @@ describe('generation-ordered subscription persistence', () => {
     assert.equal(onlyRow(subscriptions.rows).credentialHash, 'credential-1');
   });
 
-  it('removes only an exact matching subscription token', async () => {
+  it('keeps FCM one-argument cleanup unchanged', async () => {
     const subscriptions = concurrentSubscriptionTable();
     const registrationStore = createTableReminderSubscriptionStore(
       subscriptions,
@@ -973,6 +974,92 @@ describe('generation-ordered subscription persistence', () => {
     );
     assert.equal(subscriptions.rows.size, 0);
   });
+
+  it('removes an older matching registration after APNs invalidation', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const current = record(1);
+    await registrationStore.createSubscription(current);
+
+    assert.equal(
+      await registrationStore.removeIfDeviceTokenMatches(
+        {
+          deviceToken: current.deviceToken,
+          installationId: current.installationId,
+        },
+        new Date('2026-07-24T05:00:02.000Z'),
+      ),
+      'removed',
+    );
+    assert.equal(subscriptions.rows.size, 0);
+  });
+
+  it('preserves a newer same-token registration after APNs invalidation', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const original = record(1);
+    await registrationStore.createSubscription(original);
+    await updateSubscription(
+      registrationStore,
+      { ...record(2), deviceToken: original.deviceToken },
+      'credential-1',
+    );
+
+    assert.equal(
+      await registrationStore.removeIfDeviceTokenMatches(
+        {
+          deviceToken: original.deviceToken,
+          installationId: original.installationId,
+        },
+        new Date('2026-07-24T05:00:01.500Z'),
+      ),
+      'token-replaced',
+    );
+    assert.equal(onlyRow(subscriptions.rows).deviceToken, original.deviceToken);
+  });
+
+  for (const [name, registeredAt] of [
+    ['missing', undefined],
+    ['invalid', new Date('invalid')],
+  ] as const) {
+    it(`preserves a ${name} APNs registration timestamp`, async () => {
+      let deletions = 0;
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptionTable({
+          delete: async () => {
+            deletions += 1;
+          },
+          get: async () => ({
+            attemptGeneration: 1,
+            deviceToken: validRegistration.deviceToken,
+            etag: 'etag',
+            partitionKey: 'subscriptions-v1',
+            ...(registeredAt === undefined ? {} : { registeredAt }),
+            rowKey: 'installation-id',
+          }),
+        }),
+        unusedThrottleTable(),
+      );
+
+      assert.equal(
+        await registrationStore.removeIfDeviceTokenMatches(
+          {
+            deviceToken: validRegistration.deviceToken,
+            installationId: 'installation-id',
+          },
+          new Date('2026-07-24T05:00:02.000Z'),
+        ),
+        'token-replaced',
+      );
+      assert.equal(deletions, 0);
+    });
+  }
 
   it('reports missing and rotated subscriptions without deleting them', async () => {
     const subscriptions = concurrentSubscriptionTable();
