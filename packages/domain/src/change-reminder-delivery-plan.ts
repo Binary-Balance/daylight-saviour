@@ -1,15 +1,15 @@
 import {
   assertActivatedTimeZoneDataPack,
   type ActivatedTimeZoneDataPack,
-  type TimeZoneState,
-  type TimeZoneTransition,
 } from '@daylight-saviour/contracts';
 
 import {
-  decideCivilTime,
+  civilTimeInputAt,
+  localDateTimeAt,
+  stateAt,
   type ChangeDirection,
   type LocalDateTime,
-} from './index.ts';
+} from './civil-time-helpers.ts';
 import { normalizeAustralianZoneId } from './australian-zones.ts';
 
 const dayMilliseconds = 24 * 60 * 60 * 1_000;
@@ -30,34 +30,6 @@ export interface ChangeReminderDeliveryPlan {
   };
   readonly homeTimeZone: string;
   readonly timing: ChangeReminderTiming;
-}
-
-function localDateTimeAt(
-  instantMilliseconds: number,
-  utcOffsetSeconds: number,
-): LocalDateTime {
-  const local = new Date(instantMilliseconds + utcOffsetSeconds * 1_000);
-
-  return {
-    day: local.getUTCDate(),
-    hour: local.getUTCHours(),
-    minute: local.getUTCMinutes(),
-    month: local.getUTCMonth() + 1,
-    year: local.getUTCFullYear(),
-  };
-}
-
-function stateAt(
-  initial: TimeZoneState,
-  transitions: readonly TimeZoneTransition[],
-  instantMilliseconds: number,
-): TimeZoneState {
-  let state = initial;
-  for (const transition of transitions) {
-    if (Date.parse(transition.at) > instantMilliseconds) break;
-    state = transition;
-  }
-  return state;
 }
 
 function sameLocalDateTime(left: LocalDateTime, right: LocalDateTime): boolean {
@@ -144,56 +116,57 @@ export function planChangeReminderDeliveries(
     return Object.freeze([]);
   }
 
-  const civilTime = decideCivilTime(pack, zoneId, now);
-  const event = civilTime.nextChangeEvent;
-  if (event === null) return Object.freeze([]);
-
-  const zone = pack.zones.find((candidate) => candidate.id === zoneId)!;
-  const nowMilliseconds = now.getTime();
-  const validityHorizonMilliseconds = Date.parse(pack.coverage.validUntil);
+  const { instantMilliseconds: nowMilliseconds, zone } = civilTimeInputAt(
+    pack,
+    zoneId,
+    now,
+  );
   const timings: readonly [ChangeReminderTiming, boolean, number][] = [
     ['one-week', preferences.oneWeekEnabled, 7],
     ['one-day', preferences.oneDayEnabled, 1],
   ];
   const plans: ChangeReminderDeliveryPlan[] = [];
 
-  for (const [timing, enabled, daysBefore] of timings) {
-    if (!enabled) continue;
-
-    const startsAtMilliseconds = instantAtLocalTime(
-      zone,
-      reminderLocalDate(event.localBefore, daysBefore, 9),
-    );
-    const localEndsAtMilliseconds = instantAtLocalTime(
-      zone,
-      reminderLocalDate(event.localBefore, daysBefore, 21),
-    );
-    // A pack may end inside an otherwise valid window; never expose an
-    // attempt after its Validity Horizon.
-    const endsAtMilliseconds = Math.min(
-      localEndsAtMilliseconds,
-      validityHorizonMilliseconds,
+  for (const event of zone.transitions) {
+    const eventLocalDate = localDateTimeAt(
+      Date.parse(event.at),
+      event.offsetBeforeSeconds,
     );
 
-    if (
-      nowMilliseconds < startsAtMilliseconds ||
-      nowMilliseconds > endsAtMilliseconds
-    ) {
-      continue;
-    }
+    for (const [timing, enabled, daysBefore] of timings) {
+      if (!enabled) continue;
 
-    plans.push(
-      Object.freeze({
-        changeDirection: event.direction,
-        changeEventAt: event.at,
-        deliveryWindow: Object.freeze({
-          endsAt: new Date(endsAtMilliseconds).toISOString(),
-          startsAt: new Date(startsAtMilliseconds).toISOString(),
+      const startsAtMilliseconds = instantAtLocalTime(
+        zone,
+        reminderLocalDate(eventLocalDate, daysBefore, 9),
+      );
+      const endsAtMilliseconds = instantAtLocalTime(
+        zone,
+        reminderLocalDate(eventLocalDate, daysBefore, 21),
+      );
+      if (
+        nowMilliseconds < startsAtMilliseconds ||
+        nowMilliseconds > endsAtMilliseconds
+      ) {
+        continue;
+      }
+
+      plans.push(
+        Object.freeze({
+          changeDirection:
+            event.utcOffsetSeconds > event.offsetBeforeSeconds
+              ? 'Forward Change'
+              : 'Backward Change',
+          changeEventAt: event.at,
+          deliveryWindow: Object.freeze({
+            endsAt: new Date(endsAtMilliseconds).toISOString(),
+            startsAt: new Date(startsAtMilliseconds).toISOString(),
+          }),
+          homeTimeZone: zoneId,
+          timing,
         }),
-        homeTimeZone: zoneId,
-        timing,
-      }),
-    );
+      );
+    }
   }
 
   return Object.freeze(plans);

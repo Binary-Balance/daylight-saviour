@@ -6,6 +6,7 @@ import {
   activateAustralianTimeZoneDataPack,
   australianZones,
   CivilTimeDecisionUnavailableError,
+  normalizeAustralianZoneId,
   planChangeReminderDeliveries,
 } from '../src/index.ts';
 
@@ -20,6 +21,7 @@ const packJson = JSON.parse(
 );
 const pack = activateAustralianTimeZoneDataPack(packJson);
 const enabled = { oneDayEnabled: true, oneWeekEnabled: true };
+const dayMilliseconds = 24 * 60 * 60 * 1_000;
 
 function plan(homeTimeZone, now, preferences = enabled, dataPack = pack) {
   return planChangeReminderDeliveries(
@@ -30,27 +32,67 @@ function plan(homeTimeZone, now, preferences = enabled, dataPack = pack) {
   );
 }
 
+function reminderFor(reminders, eventAt, timing) {
+  return reminders.find(
+    (reminder) =>
+      reminder.changeEventAt === eventAt && reminder.timing === timing,
+  );
+}
+
 describe('planChangeReminderDeliveries', () => {
-  it('uses every Australian Coverage zone and its existing alias catalogue', () => {
+  it('conforms every pack Change Event and proves aliases through the catalogue', () => {
     for (const zone of australianZones) {
-      const canonical = plan(zone.id, '2026-02-01T00:00:00.000Z');
-      assert.deepEqual(canonical, []);
       for (const alias of zone.aliases) {
-        assert.deepEqual(plan(alias, '2026-02-01T00:00:00.000Z'), canonical);
+        assert.equal(normalizeAustralianZoneId(alias), zone.id);
       }
-    }
 
-    for (const zone of pack.zones) {
-      const event = zone.transitions.find((transition) =>
-        transition.at.startsWith('2026-'),
+      const packedZone = pack.zones.find(
+        (candidate) => candidate.id === zone.id,
       );
-      if (event === undefined) continue;
+      assert.ok(packedZone);
+      const firstEvent = packedZone.transitions[0];
+      if (firstEvent === undefined) {
+        assert.deepEqual(plan(zone.id, '2026-02-01T00:00:00.000Z'), []);
+        for (const alias of zone.aliases) {
+          assert.deepEqual(plan(alias, '2026-02-01T00:00:00.000Z'), []);
+        }
+        continue;
+      }
 
-      const reminders = plan(zone.id, Date.parse(event.at) - 8 * 3_600_000);
-      assert.deepEqual(
-        reminders.map((reminder) => [reminder.timing, reminder.changeEventAt]),
-        [['one-day', event.at]],
-      );
+      const aliasInstant = Date.parse(firstEvent.at) - 8 * 3_600_000;
+      const canonical = plan(zone.id, aliasInstant);
+      assert.ok(reminderFor(canonical, firstEvent.at, 'one-day'));
+      for (const alias of zone.aliases) {
+        assert.deepEqual(plan(alias, aliasInstant), canonical);
+      }
+
+      for (const event of packedZone.transitions) {
+        for (const [timing, probeOffsetMilliseconds] of [
+          ['one-week', 6 * dayMilliseconds + 8 * 3_600_000],
+          ['one-day', 8 * 3_600_000],
+        ]) {
+          const probe = plan(
+            zone.id,
+            Date.parse(event.at) - probeOffsetMilliseconds,
+          );
+          const reminder = reminderFor(probe, event.at, timing);
+          assert.ok(reminder, `${zone.id} ${event.at} ${timing}`);
+
+          const startsAt = Date.parse(reminder.deliveryWindow.startsAt);
+          const endsAt = Date.parse(reminder.deliveryWindow.endsAt);
+          assert.ok(endsAt <= Date.parse(pack.coverage.validUntil));
+          assert.equal(
+            reminderFor(plan(zone.id, startsAt - 1), event.at, timing),
+            undefined,
+          );
+          assert.ok(reminderFor(plan(zone.id, startsAt), event.at, timing));
+          assert.ok(reminderFor(plan(zone.id, endsAt), event.at, timing));
+          assert.equal(
+            reminderFor(plan(zone.id, endsAt + 1), event.at, timing),
+            undefined,
+          );
+        }
+      }
     }
   });
 
@@ -154,7 +196,44 @@ describe('planChangeReminderDeliveries', () => {
     assert.equal(reminders[0].homeTimeZone, 'Australia/Brisbane');
   });
 
+  it('plans a later close Change Event while an earlier event is still next', () => {
+    const closeEventsPackJson = structuredClone(packJson);
+    const brisbane = closeEventsPackJson.zones.find(
+      (zone) => zone.id === 'Australia/Brisbane',
+    );
+    brisbane.transitions.push(
+      {
+        abbreviation: 'AEDT',
+        at: '2026-10-03T16:00:00.000Z',
+        daylightSaving: true,
+        offsetBeforeSeconds: 36_000,
+        utcOffsetSeconds: 39_600,
+      },
+      {
+        abbreviation: 'AEST',
+        at: '2026-10-06T16:00:00.000Z',
+        daylightSaving: false,
+        offsetBeforeSeconds: 39_600,
+        utcOffsetSeconds: 36_000,
+      },
+    );
+    const closeEventsPack =
+      activateAustralianTimeZoneDataPack(closeEventsPackJson);
+    const reminders = plan(
+      'Australia/Brisbane',
+      '2026-09-29T23:00:00.000Z',
+      enabled,
+      closeEventsPack,
+    );
+
+    assert.ok(reminderFor(reminders, '2026-10-06T16:00:00.000Z', 'one-week'));
+  });
+
   it('fails closed before and after coverage, including invalid instants', () => {
+    assert.doesNotThrow(() =>
+      plan('Australia/Sydney', pack.coverage.validUntil),
+    );
+
     for (const [now, reason] of [
       ['2024-12-31T23:59:59.000Z', 'before-coverage'],
       ['2031-01-01T00:00:00.000Z', 'validity-expired'],
