@@ -14,6 +14,7 @@ import {
 const deviceToken = 'a'.repeat(64);
 const providerToken = 'header.payload.signature';
 const sensitiveProviderResponse = 'provider detail that must not log';
+const invalidatedAt = 1_728_000_000_000;
 const subscription = {
   deviceToken,
   installationId: 'a'.repeat(43),
@@ -25,21 +26,37 @@ const facts = {
   timing: 'one-week' as const,
 };
 
-function response(status: number, reason: string): ApnsHttpResponse {
-  return { body: JSON.stringify({ reason }), status };
+function response(
+  status: number,
+  reason: string,
+  timestamp?: number,
+): ApnsHttpResponse {
+  return {
+    body: JSON.stringify({
+      reason,
+      ...(timestamp === undefined ? {} : { timestamp }),
+    }),
+    status,
+  };
 }
 
 function sender(
   providerResponse: ApnsHttpResponse = { body: '', status: 200 },
   options: {
     readonly getProviderToken?: () => Promise<string>;
-    readonly removeIfDeviceTokenMatches?: () => Promise<ApnsSubscriptionRemovalResult>;
+    readonly removeIfDeviceTokenMatches?: (
+      subscription: ApnsChangeReminderSubscription,
+      invalidatedAt: Date,
+    ) => Promise<ApnsSubscriptionRemovalResult>;
     readonly post?: (request: ApnsHttpRequest) => Promise<ApnsHttpResponse>;
   } = {},
 ) {
   const logs: ApnsChangeReminderLogEvent[] = [];
   const requests: ApnsHttpRequest[] = [];
-  const removalRequests: ApnsChangeReminderSubscription[] = [];
+  const removalRequests: {
+    readonly invalidatedAt: Date;
+    readonly subscription: ApnsChangeReminderSubscription;
+  }[] = [];
   const instance = createApnsChangeReminderSender(
     'sandbox',
     'com.example.app',
@@ -50,9 +67,20 @@ function sender(
           options.getProviderToken ?? (async () => providerToken),
       },
       subscriptionRemover: {
-        removeIfDeviceTokenMatches: async (matchingSubscription) => {
-          removalRequests.push(matchingSubscription);
-          return (await options.removeIfDeviceTokenMatches?.()) ?? 'removed';
+        removeIfDeviceTokenMatches: async (
+          matchingSubscription,
+          matchingInvalidatedAt,
+        ) => {
+          removalRequests.push({
+            invalidatedAt: matchingInvalidatedAt,
+            subscription: matchingSubscription,
+          });
+          return (
+            (await options.removeIfDeviceTokenMatches?.(
+              matchingSubscription,
+              matchingInvalidatedAt,
+            )) ?? 'removed'
+          );
         },
       },
       transport: {
@@ -81,6 +109,7 @@ describe('APNs Change Reminder sender', () => {
           `https://api.sandbox.push.apple.com/3/device/${deviceToken}`,
         ),
         headers: {
+          'apns-expiration': '0',
           'apns-priority': '10',
           'apns-push-type': 'alert',
           'apns-topic': 'com.example.app',
@@ -132,6 +161,9 @@ describe('APNs Change Reminder sender', () => {
   });
 
   for (const [status, reason] of [
+    [400, 'IdleTimeout'],
+    [403, 'ExpiredProviderToken'],
+    [403, 'UnrelatedKeyIdInToken'],
     [429, 'TooManyProviderTokenUpdates'],
     [429, 'TooManyRequests'],
     [500, 'InternalServerError'],
@@ -149,18 +181,19 @@ describe('APNs Change Reminder sender', () => {
   }
 
   for (const [status, reason] of [
-    [400, 'BadDeviceToken'],
     [410, 'ExpiredToken'],
     [410, 'Unregistered'],
   ] as const) {
     it(`conditionally removes the exact subscription after ${status}/${reason}`, async () => {
-      const test = sender(response(status, reason));
+      const test = sender(response(status, reason, invalidatedAt));
 
       assert.deepEqual(await test.instance.send(subscription, facts), {
         cleanupStatus: 'removed',
         kind: 'permanent-invalid-token',
       });
-      assert.deepEqual(test.removalRequests, [subscription]);
+      assert.deepEqual(test.removalRequests, [
+        { invalidatedAt: new Date(invalidatedAt), subscription },
+      ]);
     });
   }
 
@@ -168,10 +201,14 @@ describe('APNs Change Reminder sender', () => {
     for (const providerResponse of [
       { body: sensitiveProviderResponse, status: 200 },
       response(410, 'BadDeviceToken'),
+      response(410, 'Unregistered'),
       {
         body: JSON.stringify({ reason: 'Unregistered', timestamp: -1 }),
         status: 410,
       },
+      response(410, 'Unregistered', 1.5),
+      response(410, 'Unregistered', 8_640_000_000_000_001),
+      response(400, 'BadDeviceToken', invalidatedAt),
       response(418, 'Unregistered'),
     ]) {
       const test = sender(providerResponse);
@@ -183,16 +220,38 @@ describe('APNs Change Reminder sender', () => {
   });
 
   it('keeps permanent rejection separate from malformed and token outcomes', async () => {
-    const test = sender(response(403, 'Forbidden'));
+    for (const providerResponse of [
+      response(400, 'BadDeviceToken'),
+      response(403, 'Forbidden'),
+    ]) {
+      const test = sender(providerResponse);
+      assert.deepEqual(await test.instance.send(subscription, facts), {
+        kind: 'permanent-rejection',
+      });
+      assert.deepEqual(test.removalRequests, []);
+    }
+  });
+
+  it('preserves a matching registration updated after APNs invalidation', async () => {
+    const test = sender(response(410, 'Unregistered', invalidatedAt), {
+      removeIfDeviceTokenMatches: async (
+        matchingSubscription,
+        matchingInvalidatedAt,
+      ) => {
+        assert.deepEqual(matchingSubscription, subscription);
+        assert.deepEqual(matchingInvalidatedAt, new Date(invalidatedAt));
+        return 'token-replaced';
+      },
+    });
 
     assert.deepEqual(await test.instance.send(subscription, facts), {
-      kind: 'permanent-rejection',
+      cleanupStatus: 'token-replaced',
+      kind: 'permanent-invalid-token',
     });
-    assert.deepEqual(test.removalRequests, []);
   });
 
   it('does not expose tokens, provider tokens, or response bodies through logs', async () => {
-    const test = sender(response(410, 'Unregistered'), {
+    const test = sender(response(410, 'Unregistered', invalidatedAt), {
       removeIfDeviceTokenMatches: async () => {
         throw new Error(sensitiveProviderResponse);
       },

@@ -10,6 +10,7 @@ const apnsOrigins = {
 } as const;
 const maxApnsResponseCharacters = 64 * 1024;
 const maxDeviceTokenCharacters = 4096;
+const maximumDateTimestamp = 8_640_000_000_000_000;
 const installationIdPattern = /^[A-Za-z0-9_-]{32,128}$/;
 const deviceTokenPattern = /^[A-Fa-f0-9]+$/;
 const providerTokenPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
@@ -20,14 +21,14 @@ const supportedApnsErrorPairs = new Map<
   'permanent' | 'permanent-invalid-token' | 'transient'
 >([
   ['400/BadCollapseId', 'permanent'],
-  ['400/BadDeviceToken', 'permanent-invalid-token'],
+  ['400/BadDeviceToken', 'permanent'],
   ['400/BadExpirationDate', 'permanent'],
   ['400/BadMessageId', 'permanent'],
   ['400/BadPriority', 'permanent'],
   ['400/BadTopic', 'permanent'],
   ['400/DeviceTokenNotForTopic', 'permanent'],
   ['400/DuplicateHeaders', 'permanent'],
-  ['400/IdleTimeout', 'permanent'],
+  ['400/IdleTimeout', 'transient'],
   ['400/InvalidPushType', 'permanent'],
   ['400/MissingDeviceToken', 'permanent'],
   ['400/MissingTopic', 'permanent'],
@@ -35,11 +36,11 @@ const supportedApnsErrorPairs = new Map<
   ['400/TopicDisallowed', 'permanent'],
   ['403/BadCertificate', 'permanent'],
   ['403/BadCertificateEnvironment', 'permanent'],
-  ['403/ExpiredProviderToken', 'permanent'],
+  ['403/ExpiredProviderToken', 'transient'],
   ['403/Forbidden', 'permanent'],
   ['403/InvalidProviderToken', 'permanent'],
   ['403/MissingProviderToken', 'permanent'],
-  ['403/UnrelatedKeyIdInToken', 'permanent'],
+  ['403/UnrelatedKeyIdInToken', 'transient'],
   ['403/BadEnvironmentKeyIdInToken', 'permanent'],
   ['404/BadPath', 'permanent'],
   ['405/MethodNotAllowed', 'permanent'],
@@ -108,9 +109,13 @@ export type ApnsSubscriptionCleanupStatus =
   | 'failed';
 
 export interface ApnsSubscriptionRemover {
-  /** Deletes only when the persisted installation ID and iOS token still match. */
+  /**
+   * Deletes only when the persisted installation ID and iOS token still match,
+   * and preserves a matching registration updated after APNs invalidated it.
+   */
   readonly removeIfDeviceTokenMatches: (
     subscription: ApnsChangeReminderSubscription,
+    invalidatedAt: Date,
   ) => Promise<ApnsSubscriptionRemovalResult>;
 }
 
@@ -155,6 +160,7 @@ interface ParsedProviderError {
     | 'permanent'
     | 'permanent-invalid-token'
     | 'transient';
+  readonly invalidatedAt?: Date;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -196,23 +202,37 @@ function parseProviderError(
   ) {
     return undefined;
   }
-  const hasTimestamp = Object.hasOwn(body, 'timestamp');
+  let invalidatedAt: Date | undefined;
   if (
-    !hasOnlyKeys(body, hasTimestamp ? ['reason', 'timestamp'] : ['reason']) ||
+    !hasOnlyKeys(
+      body,
+      statusCode === 410 ? ['reason', 'timestamp'] : ['reason'],
+    ) ||
     typeof body.reason !== 'string' ||
-    body.reason.length === 0 ||
-    (hasTimestamp &&
-      (statusCode !== 410 ||
-        typeof body.timestamp !== 'number' ||
-        !Number.isSafeInteger(body.timestamp) ||
-        body.timestamp < 0))
+    body.reason.length === 0
   ) {
     return undefined;
+  }
+  if (statusCode === 410) {
+    if (
+      typeof body.timestamp !== 'number' ||
+      !Number.isSafeInteger(body.timestamp) ||
+      body.timestamp < 0 ||
+      body.timestamp > maximumDateTimestamp
+    ) {
+      return undefined;
+    }
+    invalidatedAt = new Date(body.timestamp);
   }
   const classification = supportedApnsErrorPairs.get(
     `${statusCode}/${body.reason}`,
   );
-  return classification === undefined ? undefined : { classification };
+  return classification === undefined
+    ? undefined
+    : {
+        classification,
+        ...(invalidatedAt === undefined ? {} : { invalidatedAt }),
+      };
 }
 
 function cleanupStatus(result: unknown): ApnsSubscriptionCleanupStatus {
@@ -345,6 +365,7 @@ export function createApnsChangeReminderSender(
         response = await dependencies.transport.post({
           endpoint: apnsSendEndpoint(environment, subscription.deviceToken),
           headers: {
+            'apns-expiration': '0',
             'apns-priority': '10',
             'apns-push-type': 'alert',
             'apns-topic': topic,
@@ -369,7 +390,10 @@ export function createApnsChangeReminderSender(
       if (error === undefined) {
         return report(dependencies.logger, { kind: 'malformed-response' });
       }
-      if (error.classification !== 'permanent-invalid-token') {
+      if (
+        error.classification !== 'permanent-invalid-token' ||
+        error.invalidatedAt === undefined
+      ) {
         return report(dependencies.logger, {
           kind:
             error.classification === 'transient'
@@ -383,6 +407,7 @@ export function createApnsChangeReminderSender(
         cleanup = cleanupStatus(
           await dependencies.subscriptionRemover.removeIfDeviceTokenMatches(
             subscription,
+            error.invalidatedAt,
           ),
         );
       } catch {

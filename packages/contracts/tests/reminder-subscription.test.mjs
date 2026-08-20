@@ -65,7 +65,7 @@ describe('reminder subscription registration contract', () => {
     );
     const iosRegistration = {
       ...androidRegistration,
-      deviceToken: 'a'.repeat(64),
+      deviceToken: 'a'.repeat(66),
       platform: 'ios',
     };
     assert.deepEqual(
@@ -118,8 +118,20 @@ describe('reminder subscription registration contract', () => {
       { ...androidRegistration, deviceToken: 'g'.repeat(64), platform: 'ios' },
     ],
     [
-      'short APNs token',
+      'odd-length APNs token',
       { ...androidRegistration, deviceToken: 'a'.repeat(63), platform: 'ios' },
+    ],
+    [
+      'empty APNs token',
+      { ...androidRegistration, deviceToken: '', platform: 'ios' },
+    ],
+    [
+      'oversized APNs token',
+      {
+        ...androidRegistration,
+        deviceToken: 'a'.repeat(4098),
+        platform: 'ios',
+      },
     ],
     ['malformed zone', { ...androidRegistration, homeTimeZone: 'Sydney' }],
     ['non-boolean timing', { ...androidRegistration, oneDayEnabled: 'true' }],
