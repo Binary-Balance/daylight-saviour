@@ -26,3 +26,11 @@ repeat openings resume the normal next-event decision. Aftermath eligibility
 also ends at exactly 48 hours. Change Events are atomic, so no underway phase
 exists. Zones without either a recent or upcoming transition receive the
 intentional no-event phase.
+
+`planChangeReminderDeliveries` is the provider-independent dispatch seam. It
+accepts an activated pack, a canonical zone or supported alias, independent
+one-week/one-day preferences, and a supplied evaluation instant. It returns
+only currently eligible immutable facts: a reminder window includes exactly
+09:00 through 21:00 local time and is capped at the Validity Horizon. No event,
+disabled timing, stale window, unsupported zone, or expired pack produces an
+attempt.

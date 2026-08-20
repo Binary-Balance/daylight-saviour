@@ -6,6 +6,13 @@ import {
 } from '@daylight-saviour/contracts';
 
 export {
+  planChangeReminderDeliveries,
+  type ChangeReminderDeliveryPlan,
+  type ChangeReminderPreferences,
+  type ChangeReminderTiming,
+} from './change-reminder-delivery-plan.ts';
+
+export {
   activateAustralianTimeZoneDataPack,
   AustralianCoverageValidationError,
   australianZoneGroups,
