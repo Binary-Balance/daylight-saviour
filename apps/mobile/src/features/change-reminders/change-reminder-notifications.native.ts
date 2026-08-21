@@ -48,16 +48,16 @@ export function useProductionChangeReminderTap() {
 
   useEffect(() => {
     let stop: (() => void) | undefined;
-    let active = true;
+    let mounted = true;
     void runtime
       .start()
       .then((nextStop) => {
-        if (active) stop = nextStop;
+        if (mounted) stop = nextStop;
         else nextStop();
       })
       .catch(() => undefined);
     return () => {
-      active = false;
+      mounted = false;
       stop?.();
     };
   }, [runtime]);
