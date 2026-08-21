@@ -48,7 +48,9 @@ it('does not request a reminder before explicit confirmation', async () => {
   fireEvent.press(initialAction);
   expect(boundary.enable).not.toHaveBeenCalled();
   expect(boundary.startTokenRefresh).not.toHaveBeenCalled();
-  fireEvent.press(screen.getByRole('button', { name: 'Enable reminders' }));
+  await act(async () => {
+    fireEvent.press(screen.getByRole('button', { name: 'Enable reminders' }));
+  });
   expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
   expect(
     await screen.findByText(
