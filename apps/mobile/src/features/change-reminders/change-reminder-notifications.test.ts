@@ -4,6 +4,8 @@ import {
   parseChangeReminderTap,
   type ChangeReminderNotificationContent,
 } from './change-reminder-notification-runtime';
+import { useProductionChangeReminderTap as useIosChangeReminderTap } from './change-reminder-notifications.ios';
+import { useProductionChangeReminderTap as useNativeChangeReminderTap } from './change-reminder-notifications.native';
 
 const payload = {
   changeDirection: 'forward',
@@ -72,6 +74,10 @@ function harness({
 }
 
 describe('Change Reminder notification runtime', () => {
+  it('binds iOS to the reviewed native notification hook', () => {
+    expect(useIosChangeReminderTap).toBe(useNativeChangeReminderTap);
+  });
+
   it('accepts only exact fixed reminder fields', () => {
     expect(parseChangeReminderTap(payload)).toEqual({
       changeDirection: 'forward',
