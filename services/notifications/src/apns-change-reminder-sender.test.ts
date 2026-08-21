@@ -126,11 +126,13 @@ describe('APNs Change Reminder sender', () => {
             },
             sound: 'default',
           },
-          changeDirection: 'forward',
-          changeEventAt: '2026-10-04T16:00:00.000Z',
-          homeTimeZone: 'Australia/Sydney',
-          reminderKind: 'change-reminder',
-          reminderTiming: 'one-week',
+          body: {
+            changeDirection: 'forward',
+            changeEventAt: '2026-10-04T16:00:00.000Z',
+            homeTimeZone: 'Australia/Sydney',
+            reminderKind: 'change-reminder',
+            reminderTiming: 'one-week',
+          },
         },
       },
     ]);
