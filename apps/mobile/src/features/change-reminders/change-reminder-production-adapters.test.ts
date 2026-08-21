@@ -6,6 +6,8 @@ const responseBody = {
   credential: 'c'.repeat(43),
   installationId: 'i'.repeat(43),
 };
+const iosDeviceToken = 'a'.repeat(64);
+const refreshedIosDeviceToken = 'b'.repeat(64);
 
 function harness({
   createRegistrationRequestId = async () => 'a'.repeat(64),
@@ -136,6 +138,32 @@ describe('production Change Reminder adapters', () => {
       platform: 'android',
       registrationRequestId: 'a'.repeat(64),
     });
+  });
+
+  it('requests iOS permission before registering its device token', async () => {
+    const test = harness({
+      currentToken: iosDeviceToken,
+      existingPermission: { canAskAgain: true, granted: false },
+      platform: 'ios',
+    });
+
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'enabled',
+    });
+    expect(test.calls).toEqual([
+      'permission:get',
+      'permission:request',
+      'token',
+      'store:change-reminder-registration-v2',
+      'fetch',
+      'store:change-reminder-registration-v2',
+    ]);
+    expect(
+      test.dependencies.notifications.setNotificationChannelAsync,
+    ).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({ deviceToken: iosDeviceToken, platform: 'ios' });
   });
 
   it('uses returned canAskAgain for first denial', async () => {
@@ -591,11 +619,11 @@ describe('production Change Reminder adapters', () => {
     });
   });
 
-  it('refreshes a registered token once with the same request ID and next generation', async () => {
+  it('refreshes an iOS registered token once with the same request ID and next generation', async () => {
     let listener: ((token: { readonly data: unknown }) => void) | undefined;
     const remove = jest.fn();
     const outcomes: unknown[] = [];
-    const test = harness();
+    const test = harness({ currentToken: iosDeviceToken, platform: 'ios' });
     jest
       .mocked(test.dependencies.notifications.addPushTokenListener)
       .mockImplementation((nextListener) => {
@@ -606,8 +634,8 @@ describe('production Change Reminder adapters', () => {
     const stop = test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
       outcomes.push(result),
     );
-    listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
-    listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
+    listener?.({ data: refreshedIosDeviceToken });
+    listener?.({ data: refreshedIosDeviceToken });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -617,13 +645,15 @@ describe('production Change Reminder adapters', () => {
     expect(requests).toEqual([
       expect.objectContaining({
         attemptGeneration: 1,
-        deviceToken: 'fcm-token:with_valid.characters-123',
+        deviceToken: iosDeviceToken,
+        platform: 'ios',
         registrationRequestId: 'a'.repeat(64),
       }),
       expect.objectContaining({
         attemptGeneration: 2,
-        deviceToken: 'fcm-token:replacement_valid.characters-456',
+        deviceToken: refreshedIosDeviceToken,
         homeTimeZone: 'Australia/Sydney',
+        platform: 'ios',
       }),
     ]);
     expect(JSON.parse(test.stored() ?? '')).toMatchObject({

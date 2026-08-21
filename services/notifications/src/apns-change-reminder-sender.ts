@@ -74,11 +74,8 @@ export interface ApnsChangeReminderPayload {
     };
     readonly sound: 'default';
   };
-  readonly changeDirection: ChangeReminderNotification['changeDirection'];
-  readonly changeEventAt: string;
-  readonly homeTimeZone: string;
-  readonly reminderKind: ChangeReminderNotification['reminderKind'];
-  readonly reminderTiming: ChangeReminderNotification['reminderTiming'];
+  // Expo Notifications exposes remote userInfo.body as notification content.data.
+  readonly body: ChangeReminderNotification;
 }
 
 /** The injected transport owns the HTTP/2 TLS connection to APNs. */
@@ -285,11 +282,13 @@ function buildPayload(
       },
       sound: 'default',
     },
-    changeDirection: facts.changeDirection,
-    changeEventAt: facts.changeEventAt.toISOString(),
-    homeTimeZone: facts.homeTimeZone,
-    reminderKind: 'change-reminder',
-    reminderTiming: facts.timing,
+    body: {
+      changeDirection: facts.changeDirection,
+      changeEventAt: facts.changeEventAt.toISOString(),
+      homeTimeZone: facts.homeTimeZone,
+      reminderKind: 'change-reminder',
+      reminderTiming: facts.timing,
+    },
   };
 }
 
