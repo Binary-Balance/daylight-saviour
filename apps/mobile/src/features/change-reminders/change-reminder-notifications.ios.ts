@@ -1,9 +1,1 @@
-import type { ReviewedNotificationTap } from './change-reminder-notification-runtime';
-
-/** iOS push-tap activation is deferred until the reviewed PUB-60 scope. */
-export function useProductionChangeReminderTap() {
-  return {
-    onAppStateChange: (_nextState: 'active' | 'background' | 'inactive') => {},
-    tap: null as ReviewedNotificationTap | null,
-  };
-}
+export { useProductionChangeReminderTap } from './change-reminder-notifications.native';

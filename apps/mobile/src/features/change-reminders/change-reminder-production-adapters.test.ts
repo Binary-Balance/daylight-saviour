@@ -138,6 +138,28 @@ describe('production Change Reminder adapters', () => {
     });
   });
 
+  it('requests iOS permission before registering its device token', async () => {
+    const test = harness({
+      existingPermission: { canAskAgain: true, granted: false },
+      platform: 'ios',
+    });
+
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'enabled',
+    });
+    expect(test.calls).toEqual([
+      'permission:get',
+      'permission:request',
+      'token',
+      'store:change-reminder-registration-v2',
+      'fetch',
+      'store:change-reminder-registration-v2',
+    ]);
+    expect(
+      test.dependencies.notifications.setNotificationChannelAsync,
+    ).not.toHaveBeenCalled();
+  });
+
   it('uses returned canAskAgain for first denial', async () => {
     const test = harness({
       existingPermission: { canAskAgain: true, granted: false },
@@ -591,11 +613,11 @@ describe('production Change Reminder adapters', () => {
     });
   });
 
-  it('refreshes a registered token once with the same request ID and next generation', async () => {
+  it('refreshes an iOS registered token once with the same request ID and next generation', async () => {
     let listener: ((token: { readonly data: unknown }) => void) | undefined;
     const remove = jest.fn();
     const outcomes: unknown[] = [];
-    const test = harness();
+    const test = harness({ platform: 'ios' });
     jest
       .mocked(test.dependencies.notifications.addPushTokenListener)
       .mockImplementation((nextListener) => {
