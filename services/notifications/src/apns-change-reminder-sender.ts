@@ -88,6 +88,7 @@ export interface ApnsHttpRequest {
 }
 
 export interface ApnsHttpResponse {
+  readonly apnsId?: string;
   readonly body: string;
   readonly status: number;
 }

@@ -604,7 +604,7 @@ describe('Azure Table mapping', () => {
     assert.equal(entity?.rowKey, 'installation-id');
   });
 
-  it('returns only the exact stored Android subscription', async () => {
+  it('returns the exact stored Android subscription with its platform', async () => {
     const tableStore = createTableReminderSubscriptionStore(
       subscriptionTable({
         get: async () => ({
@@ -622,10 +622,11 @@ describe('Azure Table mapping', () => {
     assert.deepEqual(await tableStore.getSubscription('installation-id'), {
       deviceToken: validRegistration.deviceToken,
       installationId: 'installation-id',
+      platform: 'android',
     });
   });
 
-  it('does not return a non-Android subscription', async () => {
+  it('returns the exact stored iOS subscription with its platform', async () => {
     const tableStore = createTableReminderSubscriptionStore(
       subscriptionTable({
         get: async () => ({
@@ -640,7 +641,11 @@ describe('Azure Table mapping', () => {
       unusedThrottleTable(),
     );
 
-    assert.equal(await tableStore.getSubscription('installation-id'), null);
+    assert.deepEqual(await tableStore.getSubscription('installation-id'), {
+      deviceToken: validRegistration.deviceToken,
+      installationId: 'installation-id',
+      platform: 'ios',
+    });
   });
 
   it('maps a missing subscription to null', async () => {

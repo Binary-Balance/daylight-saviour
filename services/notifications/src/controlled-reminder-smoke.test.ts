@@ -6,6 +6,10 @@ import {
   createControlledReminderSmokeHandler,
 } from './controlled-reminder-smoke.js';
 import type {
+  ApnsChangeReminderResult,
+  ApnsChangeReminderSubscription,
+} from './apns-change-reminder-sender.js';
+import type {
   FcmChangeReminderResult,
   FcmChangeReminderSubscription,
   ReviewedChangeReminderFacts,
@@ -48,11 +52,17 @@ function request(
 
 function runtime(
   overrides: {
+    readonly apnsRuntimeEnabled?: boolean;
+    readonly apnsSend?: (
+      subscription: ApnsChangeReminderSubscription,
+      facts: ReviewedChangeReminderFacts,
+    ) => Promise<ApnsChangeReminderResult>;
     readonly runtimeEnabled?: boolean;
     readonly testSendEnabled?: boolean;
     readonly getSubscription?: (id: string) => Promise<{
       readonly deviceToken: string;
       readonly installationId: string;
+      readonly platform: 'android' | 'ios';
     } | null>;
     readonly send?: (
       subscription: FcmChangeReminderSubscription,
@@ -61,6 +71,10 @@ function runtime(
   } = {},
 ) {
   return () => ({
+    apnsRuntimeEnabled: overrides.apnsRuntimeEnabled ?? false,
+    ...(overrides.apnsSend === undefined
+      ? {}
+      : { apnsSender: { send: overrides.apnsSend } }),
     runtimeEnabled: overrides.runtimeEnabled ?? true,
     sender: {
       send: overrides.send ?? (async () => ({ kind: 'accepted' as const })),
@@ -68,7 +82,7 @@ function runtime(
     store: {
       getSubscription:
         overrides.getSubscription ??
-        (async () => ({ deviceToken, installationId })),
+        (async () => ({ deviceToken, installationId, platform: 'android' })),
     },
     testSendEnabled: overrides.testSendEnabled ?? true,
   });
@@ -121,6 +135,25 @@ describe('controlled Change Reminder smoke handler', () => {
       jsonBody: { outcome: 'unavailable' },
       status: 503,
     });
+    assert.equal(lookups, 0);
+  });
+
+  it('does not activate APNs when the existing test-send gate is disabled', async () => {
+    let lookups = 0;
+    const result = await createControlledReminderSmokeHandler(
+      runtime({
+        apnsRuntimeEnabled: true,
+        apnsSend: async () => ({ kind: 'accepted' }),
+        getSubscription: async () => {
+          lookups += 1;
+          return null;
+        },
+        runtimeEnabled: false,
+        testSendEnabled: false,
+      }),
+    )(request(facts));
+
+    assert.equal(result.status, 503);
     assert.equal(lookups, 0);
   });
 
@@ -211,6 +244,27 @@ describe('controlled Change Reminder smoke handler', () => {
       jsonBody: { outcome: 'unavailable' },
       status: 503,
     });
+  });
+
+  it('routes a stored iOS subscription through the explicitly enabled APNs sender', async () => {
+    let sent: unknown;
+    const result = await createControlledReminderSmokeHandler(
+      runtime({
+        apnsRuntimeEnabled: true,
+        apnsSend: async (subscription) => {
+          sent = subscription;
+          return { kind: 'accepted' };
+        },
+        getSubscription: async () => ({
+          deviceToken: 'b'.repeat(64),
+          installationId,
+          platform: 'ios',
+        }),
+      }),
+    )(request(facts));
+
+    assert.equal(result.status, 202);
+    assert.deepEqual(sent, { deviceToken: 'b'.repeat(64), installationId });
   });
 
   it('does not expose provider details when delivery fails', async () => {

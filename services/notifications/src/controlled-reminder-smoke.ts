@@ -6,6 +6,14 @@ import type {
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
 import {
+  createApnsChangeReminderSender,
+  type ApnsChangeReminderSender,
+} from './apns-change-reminder-sender.js';
+import {
+  createApnsProviderTokenProvider,
+  createNodeApnsHttpTransport,
+} from './apns-runtime.js';
+import {
   createFcmChangeReminderSender,
   createFetchFcmHttpTransport,
   type FcmChangeReminderSender,
@@ -25,6 +33,8 @@ interface ControlledReminderSmokeRequest extends ReviewedChangeReminderFacts {
 }
 
 interface ControlledReminderSmokeRuntime {
+  readonly apnsRuntimeEnabled?: boolean;
+  readonly apnsSender?: ApnsChangeReminderSender;
   readonly runtimeEnabled: boolean;
   readonly testSendEnabled: boolean;
   readonly sender?: FcmChangeReminderSender;
@@ -164,44 +174,81 @@ export function createControlledReminderSmokeRuntime(
 ): ControlledReminderSmokeRuntime {
   const runtimeEnabled = environment.FCM_RUNTIME_ENABLED === 'true';
   const testSendEnabled = environment.FCM_TEST_SEND_ENABLED === 'true';
-  if (!runtimeEnabled || !testSendEnabled) {
-    return { runtimeEnabled, testSendEnabled };
+  const apnsRuntimeEnabled = environment.APNS_RUNTIME_ENABLED === 'true';
+  const fcmActive = runtimeEnabled && testSendEnabled;
+  const apnsActive = apnsRuntimeEnabled && testSendEnabled;
+  if (!fcmActive && !apnsActive) {
+    return {
+      apnsRuntimeEnabled,
+      runtimeEnabled,
+      testSendEnabled,
+    };
   }
 
   const store = createAzureReminderSubscriptionStore(environment);
-  const accessTokenProvider = createKeylessFcmAccessTokenProvider(
-    {
-      entraAssertionAudience: required(
-        environment,
-        'FCM_ENTRA_ASSERTION_AUDIENCE',
-      ),
-      managedIdentityClientId: required(
-        environment,
-        'REMINDER_MANAGED_IDENTITY_CLIENT_ID',
-      ),
-      serviceAccountEmail: required(environment, 'FCM_SERVICE_ACCOUNT_EMAIL'),
-      workloadIdentityProvider: required(
-        environment,
-        'FCM_WORKLOAD_IDENTITY_PROVIDER',
-      ),
-    },
-    { logger: { write: () => undefined } },
-  );
 
   return {
+    ...(apnsActive
+      ? {
+          apnsSender: createApnsChangeReminderSender(
+            apnsEnvironment(required(environment, 'APNS_ENVIRONMENT')),
+            required(environment, 'APNS_TOPIC'),
+            {
+              logger: { write: () => undefined },
+              providerTokenProvider: createApnsProviderTokenProvider({
+                keyId: required(environment, 'APNS_KEY_ID'),
+                privateKey: required(environment, 'APNS_PRIVATE_KEY'),
+                teamId: required(environment, 'APNS_TEAM_ID'),
+              }),
+              subscriptionRemover: store,
+              transport: createNodeApnsHttpTransport(),
+            },
+          ),
+        }
+      : {}),
+    apnsRuntimeEnabled,
     runtimeEnabled,
-    sender: createFcmChangeReminderSender(
-      required(environment, 'FCM_PROJECT_ID'),
-      {
-        accessTokenProvider,
-        logger: { write: () => undefined },
-        subscriptionRemover: store,
-        transport: createFetchFcmHttpTransport(fetch),
-      },
-    ),
+    ...(fcmActive
+      ? {
+          sender: createFcmChangeReminderSender(
+            required(environment, 'FCM_PROJECT_ID'),
+            {
+              accessTokenProvider: createKeylessFcmAccessTokenProvider(
+                {
+                  entraAssertionAudience: required(
+                    environment,
+                    'FCM_ENTRA_ASSERTION_AUDIENCE',
+                  ),
+                  managedIdentityClientId: required(
+                    environment,
+                    'REMINDER_MANAGED_IDENTITY_CLIENT_ID',
+                  ),
+                  serviceAccountEmail: required(
+                    environment,
+                    'FCM_SERVICE_ACCOUNT_EMAIL',
+                  ),
+                  workloadIdentityProvider: required(
+                    environment,
+                    'FCM_WORKLOAD_IDENTITY_PROVIDER',
+                  ),
+                },
+                { logger: { write: () => undefined } },
+              ),
+              logger: { write: () => undefined },
+              subscriptionRemover: store,
+              transport: createFetchFcmHttpTransport(fetch),
+            },
+          ),
+        }
+      : {}),
     store,
     testSendEnabled,
   };
+}
+
+function apnsEnvironment(value: string): 'production' | 'sandbox' {
+  if (value === 'production' || value === 'sandbox') return value;
+  throw new Error('Invalid APNs environment');
 }
 
 /**
@@ -222,10 +269,9 @@ export function createControlledReminderSmokeHandler(
     try {
       const runtime = createRuntime();
       if (
-        !runtime.runtimeEnabled ||
-        !runtime.testSendEnabled ||
         runtime.store === undefined ||
-        runtime.sender === undefined
+        ((!runtime.runtimeEnabled || !runtime.testSendEnabled) &&
+          (!runtime.apnsRuntimeEnabled || !runtime.testSendEnabled))
       ) {
         return outcome(503, 'unavailable');
       }
@@ -239,7 +285,24 @@ export function createControlledReminderSmokeHandler(
         homeTimeZone: input.homeTimeZone,
         timing: input.timing,
       };
-      const result = await runtime.sender.send(subscription, facts);
+      const sender =
+        subscription.platform === 'android' &&
+        runtime.runtimeEnabled &&
+        runtime.testSendEnabled
+          ? runtime.sender
+          : subscription.platform === 'ios' &&
+              runtime.apnsRuntimeEnabled &&
+              runtime.testSendEnabled
+            ? runtime.apnsSender
+            : undefined;
+      if (sender === undefined) return outcome(503, 'unavailable');
+      const result = await sender.send(
+        {
+          deviceToken: subscription.deviceToken,
+          installationId: subscription.installationId,
+        },
+        facts,
+      );
       return result.kind === 'accepted'
         ? outcome(202, 'accepted')
         : outcome(503, 'unavailable');
