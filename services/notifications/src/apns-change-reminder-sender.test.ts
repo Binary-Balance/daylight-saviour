@@ -182,9 +182,9 @@ describe('APNs Change Reminder sender', () => {
     });
   }
 
-  for (const [status, reason] of [
-    [410, 'ExpiredToken'],
-    [410, 'Unregistered'],
+  for (const [status, reason, invalidTokenReason] of [
+    [410, 'ExpiredToken', undefined],
+    [410, 'Unregistered', 'unregistered'],
   ] as const) {
     it(`conditionally removes the exact subscription after ${status}/${reason}`, async () => {
       const test = sender(response(status, reason, invalidatedAt));
@@ -192,6 +192,7 @@ describe('APNs Change Reminder sender', () => {
       assert.deepEqual(await test.instance.send(subscription, facts), {
         cleanupStatus: 'removed',
         kind: 'permanent-invalid-token',
+        ...(invalidTokenReason === undefined ? {} : { invalidTokenReason }),
       });
       assert.deepEqual(test.removalRequests, [
         { invalidatedAt: new Date(invalidatedAt), subscription },
@@ -249,6 +250,7 @@ describe('APNs Change Reminder sender', () => {
     assert.deepEqual(await test.instance.send(subscription, facts), {
       cleanupStatus: 'token-replaced',
       kind: 'permanent-invalid-token',
+      invalidTokenReason: 'unregistered',
     });
   });
 
@@ -262,6 +264,7 @@ describe('APNs Change Reminder sender', () => {
     assert.deepEqual(await test.instance.send(subscription, facts), {
       cleanupStatus: 'failed',
       kind: 'permanent-invalid-token',
+      invalidTokenReason: 'unregistered',
     });
     assert.deepEqual(test.logs, [
       'apns-change-reminder-permanent-invalid-token',

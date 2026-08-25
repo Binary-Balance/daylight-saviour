@@ -67,3 +67,10 @@ or `false` in `FCM_RUNTIME_ENABLED`. `FCM_TEST_SEND_ENABLED` remains `false`
 until a private owner enables controlled testing for either provider. APNs
 provider JWTs use ES256, cache only in memory for 50 minutes, and are never
 logged or persisted. Deployment configuration remains private operations work.
+
+The function-key-protected controlled handler keeps failures coarse. Its sole
+exception is HTTP 410 with the fixed `apns-unregistered-token-removed` outcome:
+that means APNs classified the response as `410/Unregistered` and conditional
+removal of that exact stored registration returned `removed`. It exposes no
+provider response, token, credential, or other failure detail; every other
+sender result remains the fixed unavailable outcome.

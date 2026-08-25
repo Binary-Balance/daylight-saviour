@@ -135,6 +135,11 @@ export type ApnsChangeReminderResult =
   | {
       readonly kind: 'permanent-invalid-token';
       readonly cleanupStatus: ApnsSubscriptionCleanupStatus;
+      /**
+       * A fixed classification for the one APNs response the controlled proof
+       * may report. Never carry an arbitrary provider response reason here.
+       */
+      readonly invalidTokenReason?: 'unregistered';
     }
   | { readonly kind: 'permanent-rejection' }
   | { readonly kind: 'transient-rejection' };
@@ -159,6 +164,7 @@ interface ParsedProviderError {
     | 'permanent-invalid-token'
     | 'transient';
   readonly invalidatedAt?: Date;
+  readonly invalidTokenReason?: 'unregistered';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -230,6 +236,9 @@ function parseProviderError(
     : {
         classification,
         ...(invalidatedAt === undefined ? {} : { invalidatedAt }),
+        ...(statusCode === 410 && body.reason === 'Unregistered'
+          ? { invalidTokenReason: 'unregistered' as const }
+          : {}),
       };
 }
 
@@ -416,6 +425,9 @@ export function createApnsChangeReminderSender(
       const result = report(dependencies.logger, {
         kind: 'permanent-invalid-token',
         cleanupStatus: cleanup,
+        ...(error.invalidTokenReason === undefined
+          ? {}
+          : { invalidTokenReason: error.invalidTokenReason }),
       });
       if (cleanup === 'failed') reportCleanupFailure(dependencies.logger);
       return result;
