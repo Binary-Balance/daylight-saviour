@@ -14,12 +14,6 @@ import {
 } from '@daylight-saviour/contracts/reminder-subscription-runtime';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
-import type {
-  FcmChangeReminderSubscription,
-  FcmSubscriptionRemovalResult,
-  FcmSubscriptionRemover,
-} from './fcm-change-reminder-sender.js';
-
 const maxRequestBytes = 8 * 1024;
 const throttleWindowMs = 10 * 60 * 1000;
 const throttleRetentionMs = 30 * 24 * 60 * 60 * 1000;
@@ -114,14 +108,17 @@ interface AzureReminderSubscriptionStoreDependencies {
   ) => TableClient;
 }
 
-export interface ReminderSubscriptionStore extends FcmSubscriptionRemover {
+export interface ReminderSubscriptionStore {
   readonly removeIfDeviceTokenMatches: (
-    subscription: FcmChangeReminderSubscription,
+    subscription: Pick<
+      StoredReminderSubscription,
+      'deviceToken' | 'installationId'
+    >,
     invalidatedAt?: Date,
-  ) => Promise<FcmSubscriptionRemovalResult>;
+  ) => Promise<'removed' | 'not-found' | 'token-replaced'>;
   readonly getSubscription: (
     installationId: string,
-  ) => Promise<FcmChangeReminderSubscription | null>;
+  ) => Promise<StoredReminderSubscription | null>;
   readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
   readonly createSubscription: (
     record: ReminderSubscriptionRecord,
@@ -138,6 +135,13 @@ export interface ReminderSubscriptionStore extends FcmSubscriptionRemover {
     sourceHash: string,
     now: Date,
   ) => Promise<boolean>;
+}
+
+/** Stored platform is selected only after the owner-gated smoke request arrives. */
+export interface StoredReminderSubscription {
+  readonly deviceToken: string;
+  readonly installationId: string;
+  readonly platform: 'android' | 'ios';
 }
 
 export function hashOpaqueValue(value: string) {
@@ -465,8 +469,12 @@ export function createTableReminderSubscriptionStore(
           subscriptionPartitionKey,
           installationId,
         );
-        return existing.platform === 'android'
-          ? { deviceToken: existing.deviceToken, installationId }
+        return existing.platform === 'android' || existing.platform === 'ios'
+          ? {
+              deviceToken: existing.deviceToken,
+              installationId,
+              platform: existing.platform,
+            }
           : null;
       } catch (error) {
         if (statusCode(error) === 404) return null;

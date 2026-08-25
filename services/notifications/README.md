@@ -5,15 +5,15 @@ throttle cleanup. This package also provides reusable APNs and FCM senders, and
 keyless FCM access-token primitives. The APNs sender accepts an injected signed
 provider token and HTTP/2 transport; it does not persist or log signing
 material. No scheduled runtime currently composes or invokes them for Change
-Reminder delivery; the owner-gated on-demand handler composes FCM only when
-both FCM gates are enabled. No Google service-account key or long-lived FCM
-credential is accepted.
+Reminder delivery; the owner-gated on-demand handler composes FCM or APNs only
+when that provider's two gates are enabled. No Google service-account key or
+long-lived FCM credential is accepted.
 
 ## Deployment settings
 
 The deployed registration functions read the reminder settings below. The
-owner-gated on-demand handler reads the FCM settings only after both gates are
-enabled.
+owner-gated on-demand handler reads provider settings only after both of that
+provider's gates are enabled.
 
 | Setting                               | Purpose                                                                                            |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -23,8 +23,14 @@ enabled.
 | `FCM_WORKLOAD_IDENTITY_PROVIDER`      | Reserved Google workload identity provider resource beginning `//iam.googleapis.com/projects/…`.   |
 | `FCM_SERVICE_ACCOUNT_EMAIL`           | Reserved exact Google service account to impersonate for FCM.                                      |
 | `FCM_PROJECT_ID`                      | Reserved exact Firebase/Google project for FCM HTTP v1 send URLs.                                  |
-| `FCM_RUNTIME_ENABLED`                 | Enables the retained owner-controlled Change Reminder test composition.                            |
-| `FCM_TEST_SEND_ENABLED`               | Explicit second gate for the function-key-protected owner-controlled test endpoint.                |
+| `FCM_RUNTIME_ENABLED`                 | Enables the retained owner-controlled Android Change Reminder test composition.                    |
+| `FCM_TEST_SEND_ENABLED`               | Existing default-disabled owner test-send gate shared by Android and iOS smoke sends.              |
+| `APNS_RUNTIME_ENABLED`                | Enables the retained owner-controlled iOS Change Reminder test composition.                        |
+| `APNS_ENVIRONMENT`                    | Required APNs host selection: exactly `sandbox` or `production`; no default is used.               |
+| `APNS_TOPIC`                          | Required iOS bundle topic sent as the APNs topic header.                                           |
+| `APNS_TEAM_ID`                        | Required ten-character Apple developer team ID for the provider JWT issuer.                        |
+| `APNS_KEY_ID`                         | Required ten-character Apple signing key ID for the provider JWT header.                           |
+| `APNS_PRIVATE_KEY`                    | Required PEM P-256 private key; it signs provider JWTs only in memory.                             |
 
 When composed, the keyless access-token provider accepts only short-lived
 credentials: managed-identity assertions must have a valid future expiry, while
@@ -58,4 +64,6 @@ and [FCM IAM permissions](https://cloud.google.com/iam/docs/roles-permissions/fi
 
 Generic Bicep defaults `fcm.enabled` to `false` and maps it to lowercase `true`
 or `false` in `FCM_RUNTIME_ENABLED`. `FCM_TEST_SEND_ENABLED` remains `false`
-until a private owner enables it for controlled testing.
+until a private owner enables controlled testing for either provider. APNs
+provider JWTs use ES256, cache only in memory for 50 minutes, and are never
+logged or persisted. Deployment configuration remains private operations work.
