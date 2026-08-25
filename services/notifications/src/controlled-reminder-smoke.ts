@@ -41,7 +41,10 @@ interface ControlledReminderSmokeRuntime {
   readonly store?: Pick<ReminderSubscriptionStore, 'getSubscription'>;
 }
 
-function outcome(status: number, value: 'accepted' | 'unavailable') {
+function outcome(
+  status: number,
+  value: 'accepted' | 'apns-unregistered-token-removed' | 'unavailable',
+) {
   return {
     status,
     headers: { 'Cache-Control': 'no-store' },
@@ -289,27 +292,43 @@ export function createControlledReminderSmokeHandler(
         homeTimeZone: input.homeTimeZone,
         timing: input.timing,
       };
-      const sender =
-        subscription.platform === 'android' &&
-        runtime.runtimeEnabled &&
-        runtime.testSendEnabled
-          ? runtime.sender
-          : subscription.platform === 'ios' &&
-              runtime.apnsRuntimeEnabled &&
-              runtime.testSendEnabled
-            ? runtime.apnsSender
-            : undefined;
-      if (sender === undefined) return outcome(503, 'unavailable');
-      const result = await sender.send(
-        {
-          deviceToken: subscription.deviceToken,
-          installationId: subscription.installationId,
-        },
-        facts,
-      );
-      return result.kind === 'accepted'
-        ? outcome(202, 'accepted')
-        : outcome(503, 'unavailable');
+      const target = {
+        deviceToken: subscription.deviceToken,
+        installationId: subscription.installationId,
+      };
+      if (subscription.platform === 'android') {
+        if (
+          !runtime.runtimeEnabled ||
+          !runtime.testSendEnabled ||
+          runtime.sender === undefined
+        ) {
+          return outcome(503, 'unavailable');
+        }
+        const result = await runtime.sender.send(target, facts);
+        return result.kind === 'accepted'
+          ? outcome(202, 'accepted')
+          : outcome(503, 'unavailable');
+      }
+      if (
+        !runtime.apnsRuntimeEnabled ||
+        !runtime.testSendEnabled ||
+        runtime.apnsSender === undefined
+      ) {
+        return outcome(503, 'unavailable');
+      }
+      const result = await runtime.apnsSender.send(target, facts);
+      if (result.kind === 'accepted') return outcome(202, 'accepted');
+      // This fixed outcome is deliberately narrower than the sender result:
+      // only APNs 410/Unregistered plus conditional removal proves the stale
+      // registration was gone without disclosing provider or subscription data.
+      if (
+        result.kind === 'permanent-invalid-token' &&
+        result.invalidTokenReason === 'unregistered' &&
+        result.cleanupStatus === 'removed'
+      ) {
+        return outcome(410, 'apns-unregistered-token-removed');
+      }
+      return outcome(503, 'unavailable');
     } catch {
       return outcome(503, 'unavailable');
     }

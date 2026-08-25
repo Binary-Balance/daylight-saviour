@@ -287,6 +287,70 @@ describe('controlled Change Reminder smoke handler', () => {
     assert.deepEqual(sent, { deviceToken: 'b'.repeat(64), installationId });
   });
 
+  it('reports only a removed APNs Unregistered token with a fixed outcome', async () => {
+    const result = await createControlledReminderSmokeHandler(
+      runtime({
+        apnsRuntimeEnabled: true,
+        apnsSend: async () => ({
+          cleanupStatus: 'removed',
+          invalidTokenReason: 'unregistered',
+          kind: 'permanent-invalid-token',
+        }),
+        getSubscription: async () => ({
+          deviceToken: 'b'.repeat(64),
+          installationId,
+          platform: 'ios',
+        }),
+      }),
+    )(request(facts));
+
+    assert.deepEqual(result, {
+      headers: { 'Cache-Control': 'no-store' },
+      jsonBody: { outcome: 'apns-unregistered-token-removed' },
+      status: 410,
+    });
+  });
+
+  it('keeps every other APNs sender result coarse', async () => {
+    for (const apnsResult of [
+      {
+        cleanupStatus: 'token-replaced' as const,
+        invalidTokenReason: 'unregistered' as const,
+        kind: 'permanent-invalid-token' as const,
+      },
+      {
+        cleanupStatus: 'failed' as const,
+        invalidTokenReason: 'unregistered' as const,
+        kind: 'permanent-invalid-token' as const,
+      },
+      {
+        cleanupStatus: 'removed' as const,
+        kind: 'permanent-invalid-token' as const,
+      },
+      { kind: 'transient-rejection' as const },
+      { kind: 'malformed-response' as const },
+      { kind: 'permanent-rejection' as const },
+    ]) {
+      const result = await createControlledReminderSmokeHandler(
+        runtime({
+          apnsRuntimeEnabled: true,
+          apnsSend: async () => apnsResult,
+          getSubscription: async () => ({
+            deviceToken: 'b'.repeat(64),
+            installationId,
+            platform: 'ios',
+          }),
+        }),
+      )(request(facts));
+
+      assert.deepEqual(result, {
+        headers: { 'Cache-Control': 'no-store' },
+        jsonBody: { outcome: 'unavailable' },
+        status: 503,
+      });
+    }
+  });
+
   it('does not read APNs settings while the APNs gate is disabled', async () => {
     const environment = new Proxy(
       {
