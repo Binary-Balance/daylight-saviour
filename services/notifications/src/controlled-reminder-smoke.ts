@@ -258,6 +258,8 @@ function apnsEnvironment(value: string): 'production' | 'sandbox' {
 export function createControlledReminderSmokeHandler(
   createRuntime: () => ControlledReminderSmokeRuntime = createControlledReminderSmokeRuntime,
 ) {
+  let cachedRuntime: ControlledReminderSmokeRuntime | undefined;
+
   return async (request: HttpRequest): Promise<HttpResponseInit> => {
     let input: ControlledReminderSmokeRequest;
     try {
@@ -267,7 +269,9 @@ export function createControlledReminderSmokeHandler(
     }
 
     try {
-      const runtime = createRuntime();
+      // A successfully composed warm-worker runtime retains the APNs JWT cache.
+      // Do not cache exceptions: transient configuration access may recover.
+      const runtime = cachedRuntime ?? (cachedRuntime = createRuntime());
       if (
         runtime.store === undefined ||
         ((!runtime.runtimeEnabled || !runtime.testSendEnabled) &&
