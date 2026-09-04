@@ -47,9 +47,13 @@ application. Remove this temporary exception immediately when that compatible
 patched release is available.
 
 The shipped `expo-router` 57.0.19 → `query-string` 7.1.3 →
-`decode-uri-component` 0.2.2 chain is temporarily accepted. Externally supplied
-navigation or deep-link query text can trigger CPU exhaustion and make the client
-unresponsive. Remove this exception when Router adopts a compatible patched parser.
+`decode-uri-component` 0.2.2 chain is temporarily accepted but dormant under
+standard routing: its active `getStateFromPath` fork uses `URL` and
+`URLSearchParams`, while `query-string` is used to stringify paths. Externally
+supplied navigation or deep-link query text can cause CPU exhaustion and client
+unresponsiveness only if future app or upstream routing uses the included React
+Navigation core fallback or otherwise calls `query-string.parse`. Remove this
+exception when Router adopts a compatible patched parser.
 
 Portable signed-pack verification pins `@noble/ed25519` 3.1.0 and
 `@noble/hashes` 2.2.0 in `@daylight-saviour/contracts`. Both are MIT,

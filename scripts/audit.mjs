@@ -175,8 +175,9 @@ export function validateAudit(audit, lock) {
       'Temporary image-size exception changed; remove it when a compatible patched release is available',
     );
   }
-  // ponytail: Expo Router uses this CommonJS decoder for client navigation query parsing.
-  // GHSA records CPU availability impact. Remove when Router adopts a compatible patched parser.
+  // ponytail: Standard Router parsing uses URL/URLSearchParams, so this shipped decoder is dormant.
+  // External navigation text risks CPU exhaustion only if core fallback or query-string.parse is used.
+  // Remove when Router adopts a compatible patched parser.
   if (
     !allowedDecoder ||
     !hasExactExpoRouterDecoderPath(audit) ||
