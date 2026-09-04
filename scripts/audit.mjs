@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
-const allowedUrls = new Set([
+const allowedImageSizeUrls = new Set([
   'https://github.com/advisories/GHSA-w3rx-r6r6-pgpr',
   'https://github.com/advisories/GHSA-5p2g-fcmc-qvqq',
 ]);
+const decoderAdvisoryUrl = 'https://github.com/advisories/GHSA-vcc3-ghjq-m6fr';
 const severities = new Set(['moderate', 'high', 'critical']);
 const validSeverities = new Set(['info', 'low', ...severities]);
 
@@ -16,10 +17,55 @@ const isMetroImageSize = (vulnerability, advisory) =>
   advisory.name === 'image-size' &&
   advisory.dependency === 'image-size';
 
+const hasExactValues = (actual, expected) =>
+  Array.isArray(actual) &&
+  actual.length === expected.length &&
+  actual.every((value, index) => value === expected[index]);
+
+const isExpoRouterDecoder = (vulnerability, advisory) =>
+  vulnerability.severity === 'moderate' &&
+  hasExactValues(vulnerability.effects, ['query-string']) &&
+  hasExactValues(vulnerability.nodes, ['node_modules/decode-uri-component']) &&
+  advisory.url === decoderAdvisoryUrl &&
+  advisory.name === 'decode-uri-component' &&
+  advisory.dependency === 'decode-uri-component' &&
+  advisory.severity === 'moderate';
+
 const isAllowedAdvisory = (packageName, vulnerability, advisory) =>
-  packageName === 'image-size' &&
-  allowedUrls.has(advisory.url) &&
-  isMetroImageSize(vulnerability, advisory);
+  (packageName === 'image-size' &&
+    allowedImageSizeUrls.has(advisory.url) &&
+    isMetroImageSize(vulnerability, advisory)) ||
+  (packageName === 'decode-uri-component' &&
+    isExpoRouterDecoder(vulnerability, advisory));
+
+const hasLockedExpoRouterDecoder = (lock) => {
+  const packages = lock?.packages;
+  return (
+    packages?.['node_modules/expo-router']?.version === '57.0.19' &&
+    packages?.['node_modules/expo-router']?.dependencies?.['query-string'] ===
+      '^7.1.3' &&
+    packages['node_modules/query-string']?.version === '7.1.3' &&
+    packages['node_modules/query-string']?.dependencies?.[
+      'decode-uri-component'
+    ] === '^0.2.2' &&
+    packages['node_modules/decode-uri-component']?.version === '0.2.2'
+  );
+};
+
+const hasExactExpoRouterDecoderPath = (audit) => {
+  const queryString = audit.vulnerabilities['query-string'];
+  const expoRouter = audit.vulnerabilities['expo-router'];
+  return (
+    queryString?.severity === 'moderate' &&
+    hasExactValues(queryString.via, ['decode-uri-component']) &&
+    hasExactValues(queryString.effects, ['expo-router']) &&
+    hasExactValues(queryString.nodes, ['node_modules/query-string']) &&
+    expoRouter?.severity === 'moderate' &&
+    hasExactValues(expoRouter.via, ['query-string']) &&
+    hasExactValues(expoRouter.effects, []) &&
+    hasExactValues(expoRouter.nodes, ['node_modules/expo-router'])
+  );
+};
 
 export function validateAudit(audit, lock) {
   if (audit?.error)
@@ -61,6 +107,34 @@ export function validateAudit(audit, lock) {
       `Unresolved npm audit references: ${unresolved.join(', ')}`,
     );
 
+  const unreciprocated = entries.flatMap(([packageName, vulnerability]) =>
+    (vulnerability.via ?? [])
+      .filter(
+        (reference) =>
+          typeof reference === 'string' &&
+          !audit.vulnerabilities[reference].effects?.includes(packageName),
+      )
+      .map((reference) => `${packageName} -> ${reference}`),
+  );
+  if (unreciprocated.length)
+    throw new Error(
+      `Unreciprocated npm audit references: ${unreciprocated.join(', ')}`,
+    );
+
+  const unreciprocatedEffects = entries.flatMap(
+    ([packageName, vulnerability]) =>
+      (vulnerability.effects ?? [])
+        .filter(
+          (effect) =>
+            !audit.vulnerabilities[effect]?.via?.includes(packageName),
+        )
+        .map((effect) => `${packageName} -> ${effect}`),
+  );
+  if (unreciprocatedEffects.length)
+    throw new Error(
+      `Unreciprocated npm audit effects: ${unreciprocatedEffects.join(', ')}`,
+    );
+
   const malformedAdvisories = entries.flatMap(([packageName, vulnerability]) =>
     (vulnerability.via ?? [])
       .filter(
@@ -76,13 +150,17 @@ export function validateAudit(audit, lock) {
     );
 
   // ponytail: temporary image-size exception; remove when a compatible patched image-size release is published.
-  const allowed = new Set();
+  const allowedImageSize = new Set();
+  let allowedDecoder = false;
   const unexpected = entries.flatMap(([packageName, vulnerability]) =>
     (vulnerability.via ?? []).filter((advisory) => {
       if (typeof advisory === 'string' || !severities.has(advisory.severity))
         return false;
       const isAllowed = isAllowedAdvisory(packageName, vulnerability, advisory);
-      if (isAllowed) allowed.add(advisory.url);
+      if (isAllowed && packageName === 'image-size')
+        allowedImageSize.add(advisory.url);
+      if (isAllowed && packageName === 'decode-uri-component')
+        allowedDecoder = true;
       return !isAllowed;
     }),
   );
@@ -92,9 +170,21 @@ export function validateAudit(audit, lock) {
       `Unexpected advisories: ${unexpected.map(({ url, name }) => url ?? name).join(', ')}`,
     );
   }
-  if (!allowed.size) {
+  if (!allowedImageSize.size) {
     throw new Error(
       'Temporary image-size exception changed; remove it when a compatible patched release is available',
+    );
+  }
+  // ponytail: Standard Router parsing uses URL/URLSearchParams, so this shipped decoder is dormant.
+  // External navigation text risks CPU exhaustion only if core fallback or query-string.parse is used.
+  // Remove when Router adopts a compatible patched parser.
+  if (
+    !allowedDecoder ||
+    !hasExactExpoRouterDecoderPath(audit) ||
+    !hasLockedExpoRouterDecoder(lock)
+  ) {
+    throw new Error(
+      'Temporary decode-uri-component exception changed; remove it when Expo Router adopts a compatible patched query parser',
     );
   }
 
