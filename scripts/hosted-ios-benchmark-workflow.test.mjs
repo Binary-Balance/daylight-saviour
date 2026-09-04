@@ -37,6 +37,19 @@ test('uses the pinned unsigned release toolchain', () => {
   assert.match(workflow, /CODE_SIGNING_REQUIRED=NO/);
 });
 
+test('pins every external action to an immutable commit', () => {
+  const actionReferences = [...workflow.matchAll(/^\s*uses:\s+(\S+)$/gm)].map(
+    (match) => match[1],
+  );
+
+  assert.ok(actionReferences.length > 0);
+  for (const actionReference of actionReferences) {
+    if (!actionReference.startsWith('./')) {
+      assert.match(actionReference, /@[0-9a-f]{40}$/);
+    }
+  }
+});
+
 test('keeps cold and warm cache generations source-scoped and repeatable', () => {
   const cacheRevision = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
   const expectedCachePaths = `path: |
