@@ -1,0 +1,152 @@
+name: Hosted iOS Release benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Standard macOS runner to benchmark
+        required: true
+        default: macos-26
+        type: choice
+        options:
+          - macos-26
+          - macos-26-intel
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    if: ${{ inputs.runner == 'macos-26' || inputs.runner == 'macos-26-intel' }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    env:
+      COCOAPODS_VERSION: 1.17.0
+      EXPO_PUBLIC_CHANGE_REMINDER_TEST_BUILD: 'true'
+      EXPO_PUBLIC_REMINDER_REGISTRATION_URL: https://reminders.example.test/reminder-subscriptions
+      XCODE_BUILD: 17F113
+      XCODE_VERSION: '26.6'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Select and verify Xcode
+        run: |
+          sudo xcode-select --switch "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          test "$(xcodebuild -version | awk '/^Xcode / { print $2 }')" = "$XCODE_VERSION"
+          test "$(xcodebuild -version | awk '/^Build version/ { print $3 }')" = "$XCODE_BUILD"
+
+      - name: Install and verify CocoaPods
+        run: |
+          test "$(pod --version)" = "$COCOAPODS_VERSION"
+
+      - name: Install dependencies
+        id: npm-ci
+        run: |
+          started_at=$(date +%s)
+          trap 'status=$?; echo "seconds=$(( $(date +%s) - started_at ))" >> "$GITHUB_OUTPUT"; exit "$status"' EXIT
+          npm ci
+
+      - name: Generate iOS project
+        id: prebuild
+        run: |
+          started_at=$(date +%s)
+          trap 'status=$?; echo "seconds=$(( $(date +%s) - started_at ))" >> "$GITHUB_OUTPUT"; exit "$status"' EXIT
+          npm exec --workspace=@daylight-saviour/mobile -- expo prebuild --platform ios --clean --no-install
+
+      - name: Install iOS dependencies
+        id: pods
+        run: |
+          started_at=$(date +%s)
+          trap 'status=$?; echo "seconds=$(( $(date +%s) - started_at ))" >> "$GITHUB_OUTPUT"; exit "$status"' EXIT
+          pod install --project-directory=apps/mobile/ios
+
+      - name: Derive cache key
+        id: cache-key
+        run: |
+          package_lock_hash=$(shasum -a 256 package-lock.json | awk '{ print $1 }')
+          pod_lock_hash=$(shasum -a 256 apps/mobile/ios/Podfile.lock | awk '{ print $1 }')
+          echo "locks=${package_lock_hash}-${pod_lock_hash}" >> "$GITHUB_OUTPUT"
+          echo "xcode=${XCODE_VERSION}-${XCODE_BUILD}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore dependency module cache
+        id: cache-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ${{ runner.temp }}/ios-derived-data/Build/Intermediates.noindex/Pods.build
+            ${{ runner.temp }}/ios-derived-data/ModuleCache.noindex
+          key: ios-module-${{ runner.arch }}-${{ steps.cache-key.outputs.xcode }}-${{ steps.cache-key.outputs.locks }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ios-module-${{ runner.arch }}-${{ steps.cache-key.outputs.xcode }}-${{ steps.cache-key.outputs.locks }}-
+
+      - name: Compile unsigned Release app
+        id: compile
+        timeout-minutes: 22
+        run: |
+          started_at=$(date +%s)
+          trap 'status=$?; echo "seconds=$(( $(date +%s) - started_at ))" >> "$GITHUB_OUTPUT"; exit "$status"' EXIT
+          xcodebuild \
+            -workspace apps/mobile/ios/DaylightSaviour.xcworkspace \
+            -scheme DaylightSaviour \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ios-derived-data" \
+            build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Check module cache size
+        id: cache-size
+        if: ${{ always() }}
+        run: |
+          cache_kib=0
+          for cache_directory in \
+            "$RUNNER_TEMP/ios-derived-data/Build/Intermediates.noindex/Pods.build" \
+            "$RUNNER_TEMP/ios-derived-data/ModuleCache.noindex"; do
+            directory_kib=$(du -sk "$cache_directory" 2>/dev/null | awk '{ print $1 }')
+            cache_kib=$((cache_kib + ${directory_kib:-0}))
+          done
+          echo "kib=$cache_kib" >> "$GITHUB_OUTPUT"
+          if [ "$cache_kib" -gt 0 ] && [ "$cache_kib" -le 4194304 ]; then
+            echo "cacheable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cacheable=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save dependency module cache
+        if: ${{ always() && steps.cache-size.outputs.cacheable == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ${{ runner.temp }}/ios-derived-data/Build/Intermediates.noindex/Pods.build
+            ${{ runner.temp }}/ios-derived-data/ModuleCache.noindex
+          key: ios-module-${{ runner.arch }}-${{ steps.cache-key.outputs.xcode }}-${{ steps.cache-key.outputs.locks }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Record benchmark summary
+        if: ${{ always() }}
+        run: |
+          if [ -n '${{ steps.cache-restore.outputs.cache-matched-key }}' ]; then
+            cache_state=warm
+          else
+            cache_state=cold
+          fi
+          {
+            echo '## Hosted iOS Release benchmark'
+            echo
+            echo "- Runner: ${{ inputs.runner }} (${{ runner.arch }})"
+            echo "- Cache: $cache_state; module cache size: ${{ steps.cache-size.outputs.kib }} KiB"
+            echo
+            echo '| Phase | Seconds |'
+            echo '| --- | ---: |'
+            echo "| npm ci | ${{ steps.npm-ci.outputs.seconds || 'not completed' }} |"
+            echo "| Expo prebuild | ${{ steps.prebuild.outputs.seconds || 'not completed' }} |"
+            echo "| CocoaPods install | ${{ steps.pods.outputs.seconds || 'not completed' }} |"
+            echo "| Release compilation | ${{ steps.compile.outputs.seconds || 'not completed' }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
