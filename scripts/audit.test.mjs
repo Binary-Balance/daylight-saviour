@@ -11,14 +11,41 @@ const allowedAdvisory = (url) => ({
   url,
 });
 
+const decoderAdvisory = (overrides = {}) => ({
+  source: 2,
+  name: 'decode-uri-component',
+  dependency: 'decode-uri-component',
+  severity: 'moderate',
+  url: 'https://github.com/advisories/GHSA-vcc3-ghjq-m6fr',
+  ...overrides,
+});
+
 const audit = (via, options = {}) => ({
   metadata: { vulnerabilities: { high: 1 } },
   vulnerabilities: {
     'image-size': {
       severity: 'high',
       via,
-      effects: options.effects ?? ['metro'],
-      nodes: options.nodes ?? ['node_modules/image-size'],
+      effects: options.imageEffects ?? ['metro'],
+      nodes: options.imageNodes ?? ['node_modules/image-size'],
+    },
+    'decode-uri-component': {
+      severity: options.decoderSeverity ?? 'moderate',
+      via: [decoderAdvisory(options.decoderAdvisory)],
+      effects: options.decoderEffects ?? ['query-string'],
+      nodes: options.decoderNodes ?? ['node_modules/decode-uri-component'],
+    },
+    'query-string': {
+      severity: options.queryStringSeverity ?? 'moderate',
+      via: options.queryStringVia ?? ['decode-uri-component'],
+      effects: options.queryStringEffects ?? ['expo-router'],
+      nodes: options.queryStringNodes ?? ['node_modules/query-string'],
+    },
+    'expo-router': {
+      severity: options.expoRouterSeverity ?? 'moderate',
+      via: options.expoRouterVia ?? ['query-string'],
+      effects: options.expoRouterEffects ?? [],
+      nodes: options.expoRouterNodes ?? ['node_modules/expo-router'],
     },
   },
 });
@@ -27,6 +54,15 @@ const lock = {
   packages: {
     'node_modules/image-size': { version: '1.2.1' },
     'node_modules/metro': { dependencies: { 'image-size': '^1.0.2' } },
+    'node_modules/expo-router': {
+      version: '57.0.16',
+      dependencies: { 'query-string': '^7.1.3' },
+    },
+    'node_modules/query-string': {
+      version: '7.1.3',
+      dependencies: { 'decode-uri-component': '^0.2.2' },
+    },
+    'node_modules/decode-uri-component': { version: '0.2.2' },
   },
 };
 
@@ -129,10 +165,75 @@ test('rejects the exception outside the installed Metro path', () => {
               'https://github.com/advisories/GHSA-w3rx-r6r6-pgpr',
             ),
           ],
-          { effects: ['other'], nodes: ['node_modules/other/image-size'] },
+          {
+            imageEffects: ['other'],
+            imageNodes: ['node_modules/other/image-size'],
+          },
         ),
         lock,
       ),
     /unexpected advisories/i,
   );
+});
+
+test('allows only the exact temporary Expo Router decoder chain', () => {
+  assert.doesNotThrow(() =>
+    validateAudit(
+      audit([
+        allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
+      ]),
+      lock,
+    ),
+  );
+});
+
+test('rejects a changed decoder advisory, path, node, or lockfile version', () => {
+  for (const [report, selectedLock] of [
+    [
+      audit(
+        [allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr')],
+        {
+          decoderAdvisory: { url: 'https://github.com/advisories/GHSA-other' },
+        },
+      ),
+      lock,
+    ],
+    [
+      audit(
+        [allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr')],
+        {
+          decoderNodes: ['node_modules/other/decode-uri-component'],
+        },
+      ),
+      lock,
+    ],
+    [
+      audit(
+        [allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr')],
+        {
+          queryStringEffects: ['other'],
+        },
+      ),
+      lock,
+    ],
+    [
+      audit([
+        allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
+      ]),
+      {
+        packages: {
+          ...lock.packages,
+          'node_modules/query-string': {
+            ...lock.packages['node_modules/query-string'],
+            version: '7.1.4',
+          },
+        },
+      },
+    ],
+  ]) {
+    assert.throws(
+      () => validateAudit(report, selectedLock),
+      /temporary decode-uri-component exception changed|unexpected advisories/i,
+    );
+  }
 });
