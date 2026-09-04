@@ -29,6 +29,12 @@ const audit = (via, options = {}) => ({
       effects: options.imageEffects ?? ['metro'],
       nodes: options.imageNodes ?? ['node_modules/image-size'],
     },
+    metro: {
+      severity: 'high',
+      via: ['image-size'],
+      effects: [],
+      nodes: ['node_modules/metro'],
+    },
     'decode-uri-component': {
       severity: options.decoderSeverity ?? 'moderate',
       via: [decoderAdvisory(options.decoderAdvisory)],
@@ -131,6 +137,17 @@ test('rejects an audit edge missing its reciprocal effect', () => {
   );
 });
 
+test('rejects an audit effect missing its reciprocal reference', () => {
+  const report = audit([
+    allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
+  ]);
+  report.vulnerabilities['image-size'].effects = ['metro', 'evil'];
+  assert.throws(
+    () => validateAudit(report, lock),
+    /unreciprocated npm audit effects/i,
+  );
+});
+
 test('rejects a moderate-or-higher record without an advisory chain', () => {
   const report = audit([
     allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
@@ -172,24 +189,21 @@ test('requires an active temporary image-size advisory', () => {
 });
 
 test('rejects the exception outside the installed Metro path', () => {
-  assert.throws(
-    () =>
-      validateAudit(
-        audit(
-          [
-            allowedAdvisory(
-              'https://github.com/advisories/GHSA-w3rx-r6r6-pgpr',
-            ),
-          ],
-          {
-            imageEffects: ['other'],
-            imageNodes: ['node_modules/other/image-size'],
-          },
-        ),
-        lock,
-      ),
-    /unexpected advisories/i,
+  const report = audit(
+    [allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr')],
+    {
+      imageEffects: ['other'],
+      imageNodes: ['node_modules/other/image-size'],
+    },
   );
+  report.vulnerabilities.other = {
+    severity: 'high',
+    via: ['image-size'],
+    effects: [],
+    nodes: ['node_modules/other'],
+  };
+  delete report.vulnerabilities.metro;
+  assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
 });
 
 test('allows only the exact temporary Expo Router decoder chain', () => {

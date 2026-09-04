@@ -121,6 +121,20 @@ export function validateAudit(audit, lock) {
       `Unreciprocated npm audit references: ${unreciprocated.join(', ')}`,
     );
 
+  const unreciprocatedEffects = entries.flatMap(
+    ([packageName, vulnerability]) =>
+      (vulnerability.effects ?? [])
+        .filter(
+          (effect) =>
+            !audit.vulnerabilities[effect]?.via?.includes(packageName),
+        )
+        .map((effect) => `${packageName} -> ${effect}`),
+  );
+  if (unreciprocatedEffects.length)
+    throw new Error(
+      `Unreciprocated npm audit effects: ${unreciprocatedEffects.join(', ')}`,
+    );
+
   const malformedAdvisories = entries.flatMap(([packageName, vulnerability]) =>
     (vulnerability.via ?? [])
       .filter(
