@@ -37,6 +37,17 @@ test('uses the pinned unsigned release toolchain', () => {
   assert.match(workflow, /CODE_SIGNING_REQUIRED=NO/);
 });
 
+test('runs CocoaPods from the generated iOS project', () => {
+  const podStep = workflow.match(
+    /- name: Install iOS dependencies\n(?<contents>[\s\S]*?)(?=      - name:)/,
+  )?.groups?.contents;
+
+  assert.ok(podStep);
+  assert.match(podStep, /working-directory: apps\/mobile\/ios/);
+  assert.match(podStep, /\n          pod install\n/);
+  assert.doesNotMatch(podStep, /--project-directory/);
+});
+
 test('pins every external action to an immutable commit', () => {
   const actionReferences = [...workflow.matchAll(/^\s*uses:\s+(\S+)$/gm)].map(
     (match) => match[1],

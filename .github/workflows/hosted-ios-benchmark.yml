@@ -108,10 +108,11 @@ jobs:
       - name: Install iOS dependencies
         id: pods
         timeout-minutes: 6
+        working-directory: apps/mobile/ios
         run: |
           started_at=$(date +%s)
           trap 'status=$?; echo "seconds=$(( $(date +%s) - started_at ))" >> "$GITHUB_OUTPUT"; exit "$status"' EXIT
-          pod install --project-directory=apps/mobile/ios
+          pod install
 
       - name: Derive cache key
         id: cache-key
