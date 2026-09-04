@@ -1,0 +1,293 @@
+name: Hosted iOS Release benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Standard macOS runner to benchmark
+        required: true
+        default: macos-26
+        type: choice
+        options:
+          - macos-26
+          - macos-26-intel
+      cache_mode:
+        description: Start a fresh cold run or resume its matching cache generation
+        required: true
+        default: cold
+        type: choice
+        options:
+          - cold
+          - warm
+      cache_generation:
+        description: Increment for a fresh cold/warm comparison pair
+        required: true
+        default: '1'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    if: ${{ (inputs.runner == 'macos-26' || inputs.runner == 'macos-26-intel') && (inputs.cache_mode == 'cold' || inputs.cache_mode == 'warm') }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    env:
+      CACHE_AND_SUMMARY_RESERVE_SECONDS: 300
+      CACHE_GENERATION: ${{ inputs.cache_generation }}
+      COCOAPODS_VERSION: 1.17.0
+      EXPO_PUBLIC_CHANGE_REMINDER_TEST_BUILD: 'true'
+      EXPO_PUBLIC_REMINDER_REGISTRATION_URL: https://reminders.example.test/reminder-subscriptions
+      JOB_LIMIT_SECONDS: 1800
+      XCODE_BUILD: 17F113
+      XCODE_VERSION: '26.6'
+    steps:
+      - name: Start benchmark budget
+        id: benchmark-start
+        run: |
+          started_at=$(date +%s)
+          deadline=$((started_at + JOB_LIMIT_SECONDS))
+          echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
+          echo "deadline=$deadline" >> "$GITHUB_OUTPUT"
+
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+
+      - name: Record observed runtime
+        id: runtime
+        timeout-minutes: 2
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "platform=$(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))" >> "$GITHUB_OUTPUT"
+          echo "architecture=$(uname -m)" >> "$GITHUB_OUTPUT"
+          echo "image_os=${ImageOS:-unavailable}" >> "$GITHUB_OUTPUT"
+          echo "image_version=${ImageVersion:-unavailable}" >> "$GITHUB_OUTPUT"
+
+      - name: Select and verify Xcode
+        id: xcode
+        timeout-minutes: 2
+        run: |
+          sudo xcode-select --switch "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          version=$(xcodebuild -version | awk '/^Xcode / { print $2 }')
+          build=$(xcodebuild -version | awk '/^Build version/ { print $3 }')
+          test "$version" = "$XCODE_VERSION"
+          test "$build" = "$XCODE_BUILD"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+      - name: Verify CocoaPods
+        id: cocoapods
+        timeout-minutes: 2
+        run: |
+          version=$(pod --version)
+          test "$version" = "$COCOAPODS_VERSION"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        id: npm-ci
+        timeout-minutes: 6
+        run: |
+          started_at=$(date +%s)
+          trap 'status=$?; echo "seconds=$(( $(date +%s) - started_at ))" >> "$GITHUB_OUTPUT"; exit "$status"' EXIT
+          npm ci
+
+      - name: Generate iOS project
+        id: prebuild
+        timeout-minutes: 6
+        run: |
+          started_at=$(date +%s)
+          trap 'status=$?; echo "seconds=$(( $(date +%s) - started_at ))" >> "$GITHUB_OUTPUT"; exit "$status"' EXIT
+          npm exec --workspace=@daylight-saviour/mobile -- expo prebuild --platform ios --clean --no-install
+
+      - name: Install iOS dependencies
+        id: pods
+        timeout-minutes: 6
+        run: |
+          started_at=$(date +%s)
+          trap 'status=$?; echo "seconds=$(( $(date +%s) - started_at ))" >> "$GITHUB_OUTPUT"; exit "$status"' EXIT
+          pod install --project-directory=apps/mobile/ios
+
+      - name: Derive cache key
+        id: cache-key
+        run: |
+          case "$CACHE_GENERATION" in
+            '' | *[!0-9]*)
+              echo 'cache_generation must contain only decimal digits.' >&2
+              exit 1
+              ;;
+          esac
+          package_lock_hash=$(shasum -a 256 package-lock.json | awk '{ print $1 }')
+          pod_lock_hash=$(shasum -a 256 apps/mobile/ios/Podfile.lock | awk '{ print $1 }')
+          cache_prefix="ios-unsigned-benchmark-${RUNNER_ARCH}-${GITHUB_SHA}-${XCODE_VERSION}-${XCODE_BUILD}-${package_lock_hash}-${pod_lock_hash}-${CACHE_GENERATION}"
+          echo "prefix=$cache_prefix" >> "$GITHUB_OUTPUT"
+          echo "locks=${package_lock_hash}-${pod_lock_hash}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore matching benchmark cache
+        id: cache-restore
+        if: ${{ inputs.cache_mode == 'warm' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ${{ runner.temp }}/ios-derived-data/Build/Intermediates.noindex/Pods.build
+            ${{ runner.temp }}/ios-derived-data/ModuleCache.noindex
+          key: ${{ steps.cache-key.outputs.prefix }}-complete
+          restore-keys: |
+            ${{ steps.cache-key.outputs.prefix }}-complete-
+            ${{ steps.cache-key.outputs.prefix }}-partial-
+
+      - name: Require requested cache mode
+        id: cache-contract
+        run: |
+          if [ '${{ inputs.cache_mode }}' = cold ]; then
+            echo 'origin=cold' >> "$GITHUB_OUTPUT"
+            echo 'hit=false' >> "$GITHUB_OUTPUT"
+            echo 'proceed=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          matched_key='${{ steps.cache-restore.outputs.cache-matched-key }}'
+          if [ -z "$matched_key" ]; then
+            echo 'origin=warm miss' >> "$GITHUB_OUTPUT"
+            echo 'hit=false' >> "$GITHUB_OUTPUT"
+            echo 'proceed=false' >> "$GITHUB_OUTPUT"
+            echo 'Warm mode requires a matching cache generation. Dispatch cold first or increment the generation for a fresh pair.' >&2
+            exit 1
+          fi
+          case "$matched_key" in
+            *-complete-*) origin='complete warm' ;;
+            *-partial-*) origin='partial warm' ;;
+            *)
+              echo "Unexpected cache key: $matched_key" >&2
+              exit 1
+              ;;
+          esac
+          echo "origin=$origin" >> "$GITHUB_OUTPUT"
+          echo 'hit=true' >> "$GITHUB_OUTPUT"
+          echo 'proceed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Calculate compilation budget
+        id: compile-budget
+        run: |
+          now=$(date +%s)
+          remaining_seconds=$(( ${{ steps.benchmark-start.outputs.deadline }} - now - CACHE_AND_SUMMARY_RESERVE_SECONDS ))
+          echo "seconds=$remaining_seconds" >> "$GITHUB_OUTPUT"
+          if [ "$remaining_seconds" -lt 60 ]; then
+            echo 'Less than one minute remains after preserving diagnostics and cache inspection.' >&2
+            exit 1
+          fi
+
+      - name: Compile unsigned Release app
+        id: compile
+        timeout-minutes: 25
+        env:
+          COMPILE_LIMIT_SECONDS: ${{ steps.compile-budget.outputs.seconds }}
+        run: |
+          started_at=$(date +%s)
+          timeout_marker="$RUNNER_TEMP/ios-compile-timeout"
+          rm -f "$timeout_marker"
+          set +e
+          xcodebuild \
+            -workspace apps/mobile/ios/DaylightSaviour.xcworkspace \
+            -scheme DaylightSaviour \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ios-derived-data" \
+            build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO &
+          build_pid=$!
+          (
+            sleep "$COMPILE_LIMIT_SECONDS"
+            if kill -0 "$build_pid" 2>/dev/null; then
+              touch "$timeout_marker"
+              kill -TERM "$build_pid"
+            fi
+          ) &
+          watchdog_pid=$!
+          wait "$build_pid"
+          build_status=$?
+          kill "$watchdog_pid" 2>/dev/null
+          wait "$watchdog_pid" 2>/dev/null
+          set -e
+          echo "seconds=$(( $(date +%s) - started_at ))" >> "$GITHUB_OUTPUT"
+          if [ -f "$timeout_marker" ]; then
+            echo 'outcome=timed out' >> "$GITHUB_OUTPUT"
+            exit 124
+          fi
+          if [ "$build_status" -eq 0 ]; then
+            echo 'outcome=completed' >> "$GITHUB_OUTPUT"
+          else
+            echo 'outcome=failed' >> "$GITHUB_OUTPUT"
+            exit "$build_status"
+          fi
+
+      - name: Check allowlisted cache size
+        id: cache-size
+        if: ${{ always() }}
+        run: |
+          cache_kib=0
+          for cache_directory in \
+            "$RUNNER_TEMP/ios-derived-data/Build/Intermediates.noindex/Pods.build" \
+            "$RUNNER_TEMP/ios-derived-data/ModuleCache.noindex"; do
+            if [ -d "$cache_directory" ]; then
+              directory_kib=$(du -sk "$cache_directory" | awk '{ print $1 }')
+              cache_kib=$((cache_kib + directory_kib))
+            fi
+          done
+          echo "kib=$cache_kib" >> "$GITHUB_OUTPUT"
+          if [ "$cache_kib" -gt 0 ] && [ "$cache_kib" -le 4194304 ]; then
+            echo 'cacheable=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'cacheable=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Classify compilation cache
+        id: cache-classification
+        if: ${{ always() }}
+        run: |
+          if [ '${{ steps.compile.outputs.outcome }}' = completed ]; then
+            echo 'kind=complete' >> "$GITHUB_OUTPUT"
+          else
+            echo 'kind=partial' >> "$GITHUB_OUTPUT"
+          fi
+          now=$(date +%s)
+          echo "total_seconds=$((now - ${{ steps.benchmark-start.outputs.started_at }}))" >> "$GITHUB_OUTPUT"
+          echo "margin_seconds=$(( ${{ steps.benchmark-start.outputs.deadline }} - now ))" >> "$GITHUB_OUTPUT"
+
+      - name: Record benchmark summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo '## Hosted iOS Release benchmark'
+            echo
+            echo "- Source SHA: $GITHUB_SHA"
+            echo "- Requested runner: ${{ inputs.runner }}; observed: ${{ steps.runtime.outputs.platform }} / ${{ steps.runtime.outputs.architecture }}; image: ${{ steps.runtime.outputs.image_os }} ${{ steps.runtime.outputs.image_version }}"
+            echo "- Runtime: Node ${{ steps.runtime.outputs.node }}"
+            echo "- Toolchain: Xcode ${{ steps.xcode.outputs.version }} (${{ steps.xcode.outputs.build }}); CocoaPods ${{ steps.cocoapods.outputs.version }}"
+            echo "- Cache mode: ${{ inputs.cache_mode }}; origin: ${{ steps.cache-contract.outputs.origin }}; hit: ${{ steps.cache-contract.outputs.hit }}"
+            echo "- Cache destination: ${{ steps.cache-classification.outputs.kind }} (partial is limited to this unsigned benchmark); allowlisted size: ${{ steps.cache-size.outputs.kib }} KiB"
+            echo "- Job limit: ${JOB_LIMIT_SECONDS}s; compile limit: ${{ steps.compile-budget.outputs.seconds || 'not calculated' }}s; remaining margin: ${{ steps.cache-classification.outputs.margin_seconds }}s"
+            echo "- Compilation outcome: ${{ steps.compile.outputs.outcome || 'not started' }}; total elapsed: ${{ steps.cache-classification.outputs.total_seconds }}s"
+            echo
+            echo '| Phase | Seconds |'
+            echo '| --- | ---: |'
+            echo "| npm ci | ${{ steps.npm-ci.outputs.seconds || 'not completed' }} |"
+            echo "| Expo prebuild | ${{ steps.prebuild.outputs.seconds || 'not completed' }} |"
+            echo "| CocoaPods install | ${{ steps.pods.outputs.seconds || 'not completed' }} |"
+            echo "| Release compilation | ${{ steps.compile.outputs.seconds || 'not completed' }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save allowlisted benchmark cache
+        if: ${{ always() && steps.cache-contract.outputs.proceed == 'true' && steps.cache-size.outputs.cacheable == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ${{ runner.temp }}/ios-derived-data/Build/Intermediates.noindex/Pods.build
+            ${{ runner.temp }}/ios-derived-data/ModuleCache.noindex
+          key: ${{ steps.cache-key.outputs.prefix }}-${{ steps.cache-classification.outputs.kind }}-${{ github.run_id }}-${{ github.run_attempt }}

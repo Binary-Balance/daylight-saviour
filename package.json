@@ -48,9 +48,10 @@
     "lint": "eslint .",
     "native:generate:android": "npm exec --workspace=@daylight-saviour/mobile -- expo prebuild --platform android --clean --no-install",
     "start": "npm run start --workspace @daylight-saviour/mobile",
-    "test": "npm run test:audit && npm run test:android-fcm-build-input && npm run test --workspace @daylight-saviour/contracts && npm run test --workspace @daylight-saviour/time-zone-data && npm run test --workspace @daylight-saviour/domain && npm run test --workspace @daylight-saviour/copy && npm run test --workspace @daylight-saviour/mobile -- --runInBand && npm run test --workspace @daylight-saviour/notifications",
+    "test": "npm run test:audit && npm run test:android-fcm-build-input && npm run test:hosted-ios-benchmark && npm run test --workspace @daylight-saviour/contracts && npm run test --workspace @daylight-saviour/time-zone-data && npm run test --workspace @daylight-saviour/domain && npm run test --workspace @daylight-saviour/copy && npm run test --workspace @daylight-saviour/mobile -- --runInBand && npm run test --workspace @daylight-saviour/notifications",
     "test:audit": "node --test scripts/audit.test.mjs",
     "test:android-fcm-build-input": "node --test apps/mobile/build/android-fcm-build-input.test.cjs apps/mobile/src/features/change-reminders/reminder-registration-endpoint.test.cjs apps/mobile/src/features/time-zone-data/time-zone-data-remote-configuration.test.cjs",
+    "test:hosted-ios-benchmark": "node --test scripts/hosted-ios-benchmark-workflow.test.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "web": "npm run web --workspace @daylight-saviour/mobile",
     "web:export": "npm exec --workspace=@daylight-saviour/mobile -- expo export --platform web"

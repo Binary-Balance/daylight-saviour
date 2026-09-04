@@ -17,6 +17,8 @@
 | Android build tools   | 35.0.0 and 36.0.0 |
 | Android NDK           | 27.1.12297006     |
 | CMake                 | 3.22.1            |
+| Xcode                 | 26.6 (17F113)     |
+| CocoaPods             | 1.17.0            |
 
 `.nvmrc`, `package.json`, `package-lock.json`, Expo configuration, and generated Gradle files are authoritative. Update this table in the same pull request when changing them.
 
