@@ -6,9 +6,9 @@
 | --------------------- | ----------------- |
 | Node.js               | 24.18.0           |
 | npm                   | 11.16.0           |
-| Expo                  | 57.0.16           |
+| Expo                  | 57.0.20           |
 | React                 | 19.2.3            |
-| React Native          | 0.86.2            |
+| React Native          | 0.86.3            |
 | TypeScript            | 6.0.3             |
 | Eclipse Temurin JDK   | 17.0.19+10        |
 | Gradle wrapper        | 9.3.1             |
@@ -32,6 +32,8 @@ npm exec --workspace=@daylight-saviour/mobile -- expo install <expo-package>
 ```
 
 Add each dependency to its consuming workspace. Keep React, React DOM, and React Test Renderer exact and aligned with root overrides. Do not run installs inside workspace directories or commit nested lockfiles.
+
+Keep React Native Reanimated 4.5.1 and React Native Worklets 0.10.1 aligned across app dependencies, root overrides, and root development hoisting constraints: npm 11 otherwise materializes incompatible optional-peer copies.
 
 Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycle-script approvals to suppress dependency problems. Resolve conflicts explicitly, document accepted advisories, and verify dependency shape with `npm run dependencies:check`.
 
