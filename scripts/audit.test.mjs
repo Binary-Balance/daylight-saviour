@@ -55,7 +55,7 @@ const lock = {
     'node_modules/image-size': { version: '1.2.1' },
     'node_modules/metro': { dependencies: { 'image-size': '^1.0.2' } },
     'node_modules/expo-router': {
-      version: '57.0.16',
+      version: '57.0.19',
       dependencies: { 'query-string': '^7.1.3' },
     },
     'node_modules/query-string': {
@@ -112,6 +112,22 @@ test('rejects unresolved audit references', () => {
   assert.throws(
     () => validateAudit(report, lock),
     /unresolved npm audit references/i,
+  );
+});
+
+test('rejects an audit edge missing its reciprocal effect', () => {
+  const report = audit([
+    allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
+  ]);
+  report.vulnerabilities.evil = {
+    severity: 'critical',
+    via: ['decode-uri-component'],
+    effects: [],
+    nodes: ['node_modules/evil'],
+  };
+  assert.throws(
+    () => validateAudit(report, lock),
+    /unreciprocated npm audit references/i,
   );
 });
 
@@ -233,7 +249,7 @@ test('rejects a changed decoder advisory, path, node, or lockfile version', () =
   ]) {
     assert.throws(
       () => validateAudit(report, selectedLock),
-      /temporary decode-uri-component exception changed|unexpected advisories/i,
+      /temporary decode-uri-component exception changed|unreciprocated npm audit references|unexpected advisories/i,
     );
   }
 });

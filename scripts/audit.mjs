@@ -41,7 +41,7 @@ const isAllowedAdvisory = (packageName, vulnerability, advisory) =>
 const hasLockedExpoRouterDecoder = (lock) => {
   const packages = lock?.packages;
   return (
-    packages?.['node_modules/expo-router']?.version === '57.0.16' &&
+    packages?.['node_modules/expo-router']?.version === '57.0.19' &&
     packages?.['node_modules/expo-router']?.dependencies?.['query-string'] ===
       '^7.1.3' &&
     packages['node_modules/query-string']?.version === '7.1.3' &&
@@ -105,6 +105,20 @@ export function validateAudit(audit, lock) {
   if (unresolved.length)
     throw new Error(
       `Unresolved npm audit references: ${unresolved.join(', ')}`,
+    );
+
+  const unreciprocated = entries.flatMap(([packageName, vulnerability]) =>
+    (vulnerability.via ?? [])
+      .filter(
+        (reference) =>
+          typeof reference === 'string' &&
+          !audit.vulnerabilities[reference].effects?.includes(packageName),
+      )
+      .map((reference) => `${packageName} -> ${reference}`),
+  );
+  if (unreciprocated.length)
+    throw new Error(
+      `Unreciprocated npm audit references: ${unreciprocated.join(', ')}`,
     );
 
   const malformedAdvisories = entries.flatMap(([packageName, vulnerability]) =>
