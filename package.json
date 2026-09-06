@@ -42,7 +42,7 @@
     "doctor": "npm exec --workspace=@daylight-saviour/mobile -- expo-doctor",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "infra:build": "az bicep build --file infra/modules/minimal-functions-platform.bicep --outfile infra/tests/minimal-functions-platform.generated.json",
+    "infra:build": "az bicep build --file infra/modules/minimal-functions-platform.bicep --outfile infra/tests/minimal-functions-platform.generated.json && az bicep build --file infra/tests/sanitized-caller.bicep --outfile infra/tests/sanitized-caller.generated.json",
     "infra:test": "node --test infra/tests/*.test.mjs",
     "infra:validate": "npm run infra:build && npm run infra:test",
     "lint": "eslint .",

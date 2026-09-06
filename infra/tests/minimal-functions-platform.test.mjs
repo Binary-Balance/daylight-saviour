@@ -7,8 +7,15 @@ const compiledTemplatePath = new URL(
   import.meta.url,
 );
 const compiledTemplate = JSON.parse(readFileSync(compiledTemplatePath, 'utf8'));
+const callerCompiledTemplatePath = new URL(
+  './sanitized-caller.generated.json',
+  import.meta.url,
+);
+const callerCompiledTemplate = JSON.parse(
+  readFileSync(callerCompiledTemplatePath, 'utf8'),
+);
 
-function resourcesOfType(type) {
+function resourcesOfType(type, template = compiledTemplate) {
   const matches = [];
 
   function visit(value) {
@@ -28,12 +35,12 @@ function resourcesOfType(type) {
     Object.values(value).forEach(visit);
   }
 
-  visit(compiledTemplate);
+  visit(template);
   return matches;
 }
 
-function oneResource(type) {
-  const resources = resourcesOfType(type);
+function oneResource(type, template = compiledTemplate) {
+  const resources = resourcesOfType(type, template);
   assert.equal(resources.length, 1, `expected one ${type} resource`);
   return resources[0];
 }
@@ -234,18 +241,93 @@ describe('minimal Functions platform Bicep module', () => {
     const expectedRoleIds = [
       '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3',
       '3913510d-42f4-4e42-8a64-420c390055eb',
-      '4633458b-17de-408a-b874-0445c86b69e6',
       'b7e6dc6d-f1e8-4753-8033-0f276bb0955b',
     ];
-
-    assert.equal(
-      resourcesOfType('Microsoft.Authorization/roleAssignments').length,
-      4,
+    const roleAssignments = resourcesOfType(
+      'Microsoft.Authorization/roleAssignments',
     );
+
+    assert.equal(roleAssignments.length, 3);
     expectedRoleIds.forEach((roleId) =>
       assert.match(templateText, new RegExp(roleId)),
     );
     assert.doesNotMatch(templateText, /974c5e8b-45b9-4653-ba55-5f855dd0fb88/);
+    assert.doesNotMatch(templateText, /4633458b-17de-408a-b874-0445c86b69e6/);
+    const authorizationDeployment = resourcesOfType(
+      'Microsoft.Resources/deployments',
+    ).find(
+      (deployment) => deployment.name === 'notification-platform-authorization',
+    );
+    assert.deepEqual(authorizationDeployment.properties.template.variables, {
+      monitoringMetricsPublisherRoleId: '3913510d-42f4-4e42-8a64-420c390055eb',
+      storageBlobDataOwnerRoleId: 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b',
+      storageTableDataContributorRoleId: '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3',
+    });
+
+    const scopeForRole = (roleVariable) => {
+      const matches = roleAssignments.filter((assignment) =>
+        assignment.properties.roleDefinitionId.includes(
+          `variables('${roleVariable}')`,
+        ),
+      );
+      assert.equal(matches.length, 1);
+      return matches[0].scope;
+    };
+    assert.equal(
+      scopeForRole('storageTableDataContributorRoleId'),
+      "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+    );
+    assert.equal(
+      scopeForRole('storageBlobDataOwnerRoleId'),
+      "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+    );
+    assert.equal(
+      scopeForRole('monitoringMetricsPublisherRoleId'),
+      "[resourceId('Microsoft.Insights/components', parameters('applicationInsightsName'))]",
+    );
+  });
+
+  it('supports a caller-owned exact secret grant through the platform output', () => {
+    const roleAssignments = resourcesOfType(
+      'Microsoft.Authorization/roleAssignments',
+      callerCompiledTemplate,
+    );
+    const secretRoleAssignments = roleAssignments.filter((assignment) =>
+      assignment.properties.roleDefinitionId.includes(
+        "variables('keyVaultSecretsUserRoleId')",
+      ),
+    );
+    const secretRoleAssignment = secretRoleAssignments[0];
+
+    assert.equal(roleAssignments.length, 4);
+    assert.equal(secretRoleAssignments.length, 1);
+    assert.ok(secretRoleAssignment);
+    assert.equal(
+      callerCompiledTemplate.variables.keyVaultSecretsUserRoleId,
+      '4633458b-17de-408a-b874-0445c86b69e6',
+    );
+    const platformDeployment = resourcesOfType(
+      'Microsoft.Resources/deployments',
+      callerCompiledTemplate,
+    ).find((deployment) => deployment.name === 'sample-notify-platform');
+    assert.equal(
+      platformDeployment.properties.template.outputs.platform.value
+        .runtimeIdentityPrincipalId,
+      "[reference('identity').outputs.principalId.value]",
+    );
+    assert.equal(
+      secretRoleAssignment.scope,
+      "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('resourceNames').keyVault, 'application-secret')]",
+    );
+    assert.equal(
+      secretRoleAssignment.properties.principalId,
+      "[reference(resourceId('Microsoft.Resources/deployments', 'sample-notify-platform'), '2025-04-01').outputs.platform.value.runtimeIdentityPrincipalId]",
+    );
+    assert.equal(
+      secretRoleAssignment.name,
+      "[guid(resourceId('Microsoft.KeyVault/vaults/secrets', variables('resourceNames').keyVault, 'application-secret'), variables('runtimeIdentityResourceId'), variables('keyVaultSecretsUserRoleId'))]",
+    );
+    assert.doesNotMatch(secretRoleAssignment.name, /reference|list/i);
   });
 
   it('derives deterministic role-assignment names without runtime identity lookup', () => {
