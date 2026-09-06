@@ -253,6 +253,16 @@ describe('minimal Functions platform Bicep module', () => {
     );
     assert.doesNotMatch(templateText, /974c5e8b-45b9-4653-ba55-5f855dd0fb88/);
     assert.doesNotMatch(templateText, /4633458b-17de-408a-b874-0445c86b69e6/);
+    const authorizationDeployment = resourcesOfType(
+      'Microsoft.Resources/deployments',
+    ).find(
+      (deployment) => deployment.name === 'notification-platform-authorization',
+    );
+    assert.deepEqual(authorizationDeployment.properties.template.variables, {
+      monitoringMetricsPublisherRoleId: '3913510d-42f4-4e42-8a64-420c390055eb',
+      storageBlobDataOwnerRoleId: 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b',
+      storageTableDataContributorRoleId: '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3',
+    });
 
     const scopeForRole = (roleVariable) => {
       const matches = roleAssignments.filter((assignment) =>
@@ -292,6 +302,10 @@ describe('minimal Functions platform Bicep module', () => {
     assert.equal(roleAssignments.length, 4);
     assert.equal(secretRoleAssignments.length, 1);
     assert.ok(secretRoleAssignment);
+    assert.equal(
+      callerCompiledTemplate.variables.keyVaultSecretsUserRoleId,
+      '4633458b-17de-408a-b874-0445c86b69e6',
+    );
     const platformDeployment = resourcesOfType(
       'Microsoft.Resources/deployments',
       callerCompiledTemplate,
