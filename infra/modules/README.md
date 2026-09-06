@@ -37,9 +37,9 @@ Global names remain caller responsibility. Module never generates names or embed
 
 ### Security invariants
 
-- One user-assigned managed identity handles Function host storage, package deployment storage, Key Vault secrets, and authenticated Application Insights publishing.
+- One user-assigned managed identity handles Function host storage, package deployment storage, and authenticated Application Insights publishing. Its principal ID is returned in `platform.runtimeIdentityPrincipalId` for caller-owned permissions.
 - Storage shared-key authorization, public blob access, cross-tenant replication, and insecure transport are disabled. Deployment container remains private.
-- Runtime receives Storage Blob Data Owner, Storage Table Data Contributor, Key Vault Secrets User, and Monitoring Metrics Publisher. Queue access remains absent until a queue trigger or equivalent requirement exists.
+- Runtime receives Storage Blob Data Owner, Storage Table Data Contributor, and Monitoring Metrics Publisher. Queue access remains absent until a queue trigger or equivalent requirement exists.
 - Key Vault uses Azure RBAC, soft delete, and purge protection; module provisions no secret values.
 - Function App requires HTTPS/TLS 1.2, disables FTP and remote debugging, and denies FTP and SCM basic publishing credentials.
 - FCM workload federation values remain caller-supplied and
@@ -50,5 +50,52 @@ Global names remain caller responsibility. Module never generates names or embed
 - Function App logs, Key Vault audit events, and supported platform metrics route to Log Analytics. Application Insights local authentication is disabled.
 
 Public endpoints remain enabled for this minimal stack. Private networking requires a separate module or deliberate extension because it changes Flex Consumption routing and deployment-storage requirements.
+
+## Caller-owned secret access
+
+This is a breaking contract change: the module does not grant its runtime
+identity `Key Vault Secrets User` at vault scope. Applications that do not read
+secrets need no Key Vault role. Callers that do need a secret should create the
+assignment at the exact secret scope and use the supported runtime principal
+output. The referenced secret must already be provisioned by the caller. A
+complete sanitized caller is in
+[`infra/tests/sanitized-caller.bicep`](../tests/sanitized-caller.bicep).
+
+```bicep
+resource callerVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
+  name: resourceNames.keyVault
+}
+
+resource applicationSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = {
+  parent: callerVault
+  name: 'application-secret'
+}
+
+var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
+var runtimeIdentityResourceId = resourceId(
+  'Microsoft.ManagedIdentity/userAssignedIdentities',
+  resourceNames.runtimeIdentity
+)
+
+resource applicationSecretAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(applicationSecret.id, runtimeIdentityResourceId, keyVaultSecretsUserRoleId)
+  scope: applicationSecret
+  properties: {
+    principalId: platform.outputs.platform.runtimeIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      keyVaultSecretsUserRoleId
+    )
+  }
+}
+```
+
+For an existing deployment, review removal of the old vault-wide assignment
+separately. First deploy each required secret-scoped assignment and verify the
+application's reads. Then explicitly revoke the old broad assignment after
+those checks, and re-check reads after revocation and RBAC propagation. An
+incremental deployment or deployment-stack detach does not automatically
+remove a role assignment that the earlier module version created.
 
 References: [secure Flex Consumption Bicep quickstart](https://learn.microsoft.com/azure/azure-functions/functions-create-first-function-bicep), [Flex Consumption plan](https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan), [identity-based host storage](https://learn.microsoft.com/azure/azure-functions/functions-reference#connecting-to-host-storage-with-an-identity), and [Azure naming rules](https://learn.microsoft.com/azure/azure-resource-manager/management/resource-name-rules).

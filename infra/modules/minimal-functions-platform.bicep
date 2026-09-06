@@ -171,7 +171,6 @@ module authorization './internal/authorization.bicep' = {
   name: 'notification-platform-authorization'
   params: {
     applicationInsightsName: resourceNames.applicationInsights
-    keyVaultName: resourceNames.keyVault
     runtimePrincipalId: identity.outputs.principalId
     runtimeIdentityResourceId: runtimeIdentityResourceId
     storageAccountName: resourceNames.storageAccount
@@ -179,7 +178,6 @@ module authorization './internal/authorization.bicep' = {
   dependsOn: [
     observability
     storage
-    vault
   ]
 }
 
