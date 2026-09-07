@@ -63,6 +63,14 @@ describe('reminder subscription registration contract', () => {
       parseReminderSubscriptionRegistration(androidRegistration),
       androidRegistration,
     );
+    const versionedRegistration = {
+      ...androidRegistration,
+      registrationRequestId: `v2.1760000000000.${'b'.repeat(64)}`,
+    };
+    assert.deepEqual(
+      parseReminderSubscriptionRegistration(versionedRegistration),
+      versionedRegistration,
+    );
     const iosRegistration = {
       ...androidRegistration,
       deviceToken: 'a'.repeat(66),
@@ -88,6 +96,10 @@ describe('reminder subscription registration contract', () => {
     [
       'uppercase registration request ID',
       { ...androidRegistration, registrationRequestId: 'A'.repeat(64) },
+    ],
+    [
+      'malformed versioned registration request ID',
+      { ...androidRegistration, registrationRequestId: 'v2.123.invalid' },
     ],
     [
       'zero attempt generation',

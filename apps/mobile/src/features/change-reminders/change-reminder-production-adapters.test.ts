@@ -469,13 +469,12 @@ describe('production Change Reminder adapters', () => {
     expect(put?.[1]).toMatchObject({ method: 'PUT' });
   });
 
-  it('replaces a deleted authenticated installation but not a bad credential', async () => {
+  it('does not recreate a deleted authenticated installation after PUT 404', async () => {
     const deleted = harness({
       fetchImplementation: jest
         .fn()
-        .mockResolvedValueOnce(new Response(null, { status: 404 }))
         .mockResolvedValueOnce(
-          Response.json(responseBody),
+          new Response(null, { status: 404 }),
         ) as jest.MockedFunction<typeof fetch>,
       storage: {
         value: JSON.stringify({
@@ -492,11 +491,11 @@ describe('production Change Reminder adapters', () => {
       },
     });
     await expect(deleted.adapters.enable('Australia/Sydney')).resolves.toEqual({
-      kind: 'enabled',
+      kind: 'failed',
     });
     expect(
       deleted.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
-    ).toEqual(['PUT', 'POST']);
+    ).toEqual(['PUT']);
 
     const unauthorized = harness({
       currentToken: 'fcm-token:another_valid.characters-789',
@@ -512,6 +511,41 @@ describe('production Change Reminder adapters', () => {
       kind: 'failed',
     });
     expect(unauthorized.dependencies.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears an expired initial identity so an explicit retry creates v2', async () => {
+    const nextRequestId = `v2.${String(Date.now()).padStart(13, '0')}.${'b'.repeat(64)}`;
+    const test = harness({
+      createRegistrationRequestId: async () => nextRequestId,
+      fetchImplementation: jest
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 410 }))
+        .mockResolvedValueOnce(
+          Response.json(responseBody),
+        ) as jest.MockedFunction<typeof fetch>,
+      storage: {
+        value: JSON.stringify({
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'pending',
+          version: 4,
+        }),
+      },
+    });
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'failed',
+    });
+    expect(test.stored()).toBeNull();
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'enabled',
+    });
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[1]?.[1]?.body)),
+    ).toMatchObject({ registrationRequestId: nextRequestId });
   });
 
   it('reconciles an offline token rotation during restore before reporting enabled', async () => {
@@ -882,9 +916,11 @@ describe('production Change Reminder adapters', () => {
         ) as jest.MockedFunction<typeof fetch>,
       storage,
     });
-    const before = storage.value;
     await expect(test.adapters.disable()).resolves.toEqual({ kind: 'failed' });
-    expect(storage.value).toBe(before);
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      state: 'pending-delete',
+      credential: responseBody.credential,
+    });
     await expect(test.adapters.disable()).resolves.toEqual({
       kind: 'disabled',
     });
@@ -892,12 +928,19 @@ describe('production Change Reminder adapters', () => {
     expect(
       test.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
     ).toEqual(['DELETE', 'DELETE']);
+    expect(test.calls).toEqual([
+      'store:change-reminder-registration-v2',
+      'fetch',
+      'store:change-reminder-registration-v2',
+      'fetch',
+      'delete:change-reminder-registration-v2',
+    ]);
     expect(test.dependencies.fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
       authorization: `Bearer ${responseBody.credential}`,
     });
   });
 
-  it('keeps the registration when local deletion cannot finish after remote 204', async () => {
+  it('keeps pending deletion when local cleanup cannot finish after remote 204', async () => {
     const storage = {
       value: JSON.stringify({
         ...responseBody,
@@ -921,9 +964,180 @@ describe('production Change Reminder adapters', () => {
       ) as jest.MockedFunction<typeof fetch>,
       storage,
     });
-    const before = storage.value;
     await expect(test.adapters.disable()).resolves.toEqual({ kind: 'failed' });
-    expect(storage.value).toBe(before);
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      state: 'pending-delete',
+      credential: responseBody.credential,
+      installationId: responseBody.installationId,
+    });
+  });
+
+  it('restores pending deletion without requesting permission or a device token', async () => {
+    const storage = {
+      value: JSON.stringify({
+        attemptGeneration: 4,
+        credential: responseBody.credential,
+        homeTimeZone: 'Australia/Sydney',
+        installationId: responseBody.installationId,
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'pending-delete',
+        version: 4,
+      }),
+    };
+    const test = harness({ storage });
+    await expect(test.adapters.restore()).resolves.toEqual({
+      homeTimeZone: 'Australia/Sydney',
+      kind: 'deleting',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    expect(
+      test.dependencies.notifications.getPermissionsAsync,
+    ).not.toHaveBeenCalled();
+    expect(
+      test.dependencies.notifications.getDevicePushTokenAsync,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('does not send DELETE when persisting deletion intent fails', async () => {
+    const test = harness({
+      setItemImplementation: async () => {
+        throw new Error('SecureStore write failed');
+      },
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: false,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 4,
+        }),
+      },
+    });
+    await expect(test.adapters.disable()).resolves.toEqual({ kind: 'failed' });
+    expect(test.dependencies.fetch).not.toHaveBeenCalled();
+  });
+
+  it('deletes a pending update and never recreates a missing server row', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 5,
+        deviceToken: 'fcm-token:replacement_valid.characters-456',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'pending-update',
+        version: 4,
+      }),
+    };
+    const test = harness({
+      fetchImplementation: jest
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(null, { status: 204 }),
+        ) as jest.MockedFunction<typeof fetch>,
+      storage,
+    });
+    await expect(test.adapters.disable()).resolves.toEqual({
+      kind: 'disabled',
+    });
+    expect(
+      test.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
+    ).toEqual(['DELETE']);
+  });
+
+  it('ignores a delayed token callback after deletion and fresh opt-in', async () => {
+    let oldListener: ((token: { readonly data: unknown }) => void) | undefined;
+    const test = harness({
+      createRegistrationRequestId: async () => 'b'.repeat(64),
+      fetchImplementation: jest
+        .fn()
+        .mockResolvedValueOnce(Response.json(responseBody))
+        .mockResolvedValueOnce(new Response(null, { status: 204 }))
+        .mockResolvedValueOnce(
+          Response.json(responseBody),
+        ) as jest.MockedFunction<typeof fetch>,
+    });
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((listener) => {
+        oldListener = listener;
+        return { remove: jest.fn() };
+      });
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'enabled',
+    });
+    const stop = test.adapters.startTokenRefresh('Australia/Sydney');
+    stop();
+    await expect(test.adapters.disable()).resolves.toEqual({
+      kind: 'disabled',
+    });
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'enabled',
+    });
+    oldListener?.({ data: 'fcm-token:old_valid.characters-123' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      test.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
+    ).toEqual(['POST', 'DELETE', 'POST']);
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[2]?.[1]?.body)),
+    ).toMatchObject({
+      registrationRequestId: 'b'.repeat(64),
+    });
+  });
+
+  it('does not let a delayed restore re-register after deletion', async () => {
+    let resolveToken!: (value: { readonly data: string }) => void;
+    const test = harness({
+      currentToken: 'fcm-token:replacement_valid.characters-456',
+      fetchImplementation: jest.fn(
+        async (_input: URL | RequestInfo) =>
+          new Response(null, { status: 204 }),
+      ) as jest.MockedFunction<typeof fetch>,
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:old_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 4,
+        }),
+      },
+    });
+    jest
+      .mocked(test.dependencies.notifications.getDevicePushTokenAsync)
+      .mockImplementationOnce(
+        async () =>
+          await new Promise<{ readonly data: string }>((resolve) => {
+            resolveToken = resolve;
+          }),
+      );
+    const restoring = test.adapters.restore();
+    await Promise.resolve();
+    await expect(test.adapters.disable()).resolves.toEqual({
+      kind: 'disabled',
+    });
+    resolveToken({ data: 'fcm-token:replacement_valid.characters-456' });
+    await expect(restoring).resolves.toMatchObject({
+      homeTimeZone: 'Australia/Sydney',
+      kind: 'pending',
+    });
+    expect(
+      test.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
+    ).toEqual(['DELETE']);
+    expect(test.stored()).toBeNull();
   });
 
   it('keeps confirmed timing choices when a token refresh updates the registration', async () => {

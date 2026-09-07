@@ -16,10 +16,13 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 
 const maxRequestBytes = 8 * 1024;
 const throttleWindowMs = 10 * 60 * 1000;
-const throttleRetentionMs = 30 * 24 * 60 * 60 * 1000;
+const operationalRetentionMs = 30 * 24 * 60 * 60 * 1000;
+const registrationRequestValidityMs = 24 * 60 * 60 * 1000;
+const registrationRequestFutureSkewMs = 5 * 60 * 1000;
 const throttleLimit = 5;
 const tableMutationRetryLimit = 12;
 const subscriptionPartitionKey = 'subscriptions-v1';
+const versionedRegistrationPrefix = 'v2.';
 
 interface ReminderSubscriptionRegistration {
   readonly attemptGeneration: number;
@@ -48,7 +51,7 @@ interface ReminderSubscriptionRecord extends Omit<
 interface SubscriptionEntity {
   readonly attemptGeneration: number;
   readonly credentialHash?: string | undefined;
-  readonly deviceToken: string;
+  readonly deviceToken?: string | undefined;
   readonly etag: string;
   readonly homeTimeZone?: string | undefined;
   readonly oneDayEnabled?: boolean | undefined;
@@ -56,7 +59,9 @@ interface SubscriptionEntity {
   readonly platform?: 'android' | 'ios' | undefined;
   readonly partitionKey: string;
   readonly registeredAt?: Date | undefined;
+  readonly retiredAt?: Date | undefined;
   readonly rowKey: string;
+  readonly state?: 'retired' | undefined;
 }
 
 interface SubscriptionTable {
@@ -70,6 +75,7 @@ interface SubscriptionTable {
     partitionKey: string,
     rowKey: string,
   ) => Promise<SubscriptionEntity>;
+  readonly listRetiredExpired: (now: Date) => AsyncIterable<SubscriptionEntity>;
   readonly replace: (
     entity: Record<string, unknown>,
     etag: string,
@@ -140,13 +146,20 @@ export interface ReminderSubscriptionStore {
     invalidatedAt?: Date,
   ) => Promise<'removed' | 'not-found' | 'token-replaced'>;
   readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
+  readonly purgeExpiredRetiredSubscriptions: (now: Date) => Promise<void>;
   readonly createSubscription: (
     record: ReminderSubscriptionRecord,
-  ) => Promise<'accepted' | 'stale' | 'conflict'>;
+    registrationRequestId: string,
+  ) => Promise<'accepted' | 'stale' | 'expired' | 'conflict'>;
   readonly updateSubscription: (
     record: Omit<ReminderSubscriptionRecord, 'credentialHash'>,
     credentialHash: string,
   ) => Promise<'accepted' | 'not-found' | 'stale' | 'unauthorized'>;
+  readonly deleteSubscription: (
+    installationId: string,
+    credentialHash: string,
+    retiredAt?: Date,
+  ) => Promise<'deleted' | 'not-found' | 'unauthorized'>;
   readonly takeInstallationAllowance: (
     installationId: string,
     now: Date,
@@ -191,7 +204,28 @@ function equalOpaqueValues(left: string, right: string) {
 
 export function deriveInstallationId(registrationRequestId: string) {
   return hashOpaqueValue(
-    `daylight-saviour:reminder-registration:v1:${registrationRequestId}`,
+    `daylight-saviour:reminder-registration:${registrationRequestId.startsWith(versionedRegistrationPrefix) ? 'v2' : 'v1'}:${registrationRequestId}`,
+  );
+}
+
+function versionedRegistrationIssuedAt(registrationRequestId: string) {
+  const match = /^v2\.(\d{13})\.[a-f0-9]{64}$/.exec(registrationRequestId);
+  if (match === null) return null;
+  const milliseconds = Number(match[1]);
+  return Number.isSafeInteger(milliseconds) ? milliseconds : null;
+}
+
+function isFreshVersionedRegistrationRequest(
+  registrationRequestId: string,
+  now: Date,
+) {
+  const issuedAt = versionedRegistrationIssuedAt(registrationRequestId);
+  const currentTime = now.getTime();
+  if (issuedAt === null || !Number.isFinite(currentTime)) return false;
+  const age = currentTime - issuedAt;
+  return (
+    age <= registrationRequestValidityMs &&
+    age >= -registrationRequestFutureSkewMs
   );
 }
 
@@ -349,6 +383,15 @@ async function readUpdate(request: HttpRequest) {
   }
 }
 
+async function readDeletion(request: HttpRequest) {
+  if ((await readBoundedBody(request)) !== '') {
+    throw new ReminderSubscriptionRequestError(
+      400,
+      'Invalid registration deletion',
+    );
+  }
+}
+
 function readBearerCredential(request: HttpRequest) {
   const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(
     request.headers.get('authorization') ?? '',
@@ -381,19 +424,25 @@ export async function registerReminderSubscription(
       registration.registrationRequestId,
     );
     const credential = opaqueRandomValue();
-    const saveResult = await store.createSubscription({
-      attemptGeneration: registration.attemptGeneration,
-      credentialHash: hashOpaqueValue(credential),
-      deviceToken: registration.deviceToken,
-      homeTimeZone: registration.homeTimeZone,
-      installationId,
-      oneDayEnabled: registration.oneDayEnabled,
-      oneWeekEnabled: registration.oneWeekEnabled,
-      platform: registration.platform,
-      registeredAt: now,
-    });
+    const saveResult = await store.createSubscription(
+      {
+        attemptGeneration: registration.attemptGeneration,
+        credentialHash: hashOpaqueValue(credential),
+        deviceToken: registration.deviceToken,
+        homeTimeZone: registration.homeTimeZone,
+        installationId,
+        oneDayEnabled: registration.oneDayEnabled,
+        oneWeekEnabled: registration.oneWeekEnabled,
+        platform: registration.platform,
+        registeredAt: now,
+      },
+      registration.registrationRequestId,
+    );
     if (saveResult === 'stale') {
       return response(409, 'Registration attempt superseded');
+    }
+    if (saveResult === 'expired') {
+      return response(410, 'Registration request expired');
     }
     if (saveResult === 'conflict') {
       return response(409, 'Registration unavailable');
@@ -459,6 +508,43 @@ export async function updateReminderSubscription(
   }
 }
 
+export async function deleteReminderSubscription(
+  request: HttpRequest,
+  store: ReminderSubscriptionStore,
+  installationId: string | undefined,
+  now = new Date(),
+): Promise<HttpResponseInit> {
+  try {
+    const credential = readBearerCredential(request);
+    const target = readInstallationId(installationId);
+    if (credential === null || target === null)
+      return response(401, 'Unauthorized');
+    await readDeletion(request);
+    const sourceHash = sourceAddressHash(request);
+    if (!(await store.takeSourceAllowance(sourceHash, now))) {
+      return response(
+        429,
+        'Try again later',
+        Math.ceil(throttleWindowMs / 1000),
+      );
+    }
+    if (!(await store.takeInstallationAllowance(target, now))) {
+      return response(
+        429,
+        'Try again later',
+        Math.ceil(throttleWindowMs / 1000),
+      );
+    }
+    await store.deleteSubscription(target, hashOpaqueValue(credential), now);
+    return { status: 204, headers: { 'Cache-Control': 'no-store' } };
+  } catch (error) {
+    if (error instanceof ReminderSubscriptionRequestError) {
+      return response(error.status, error.message);
+    }
+    return response(503, 'Registration unavailable');
+  }
+}
+
 function statusCode(error: unknown) {
   if (
     typeof error === 'object' &&
@@ -490,7 +576,9 @@ function storedSubscription(
   existing: SubscriptionEntity,
   installationId: string,
 ): StoredReminderSubscription | null {
-  return existing.platform === 'android' || existing.platform === 'ios'
+  return existing.state !== 'retired' &&
+    typeof existing.deviceToken === 'string' &&
+    (existing.platform === 'android' || existing.platform === 'ios')
     ? {
         deviceToken: existing.deviceToken,
         installationId,
@@ -538,6 +626,7 @@ async function removeStoredSubscription(
   attemptGeneration: number | undefined,
   invalidatedAt: Date | undefined,
 ) {
+  const retiredAt = new Date();
   for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
     let existing: SubscriptionEntity;
     try {
@@ -548,6 +637,9 @@ async function removeStoredSubscription(
     } catch (error) {
       if (statusCode(error) === 404) return 'not-found' as const;
       throw error;
+    }
+    if (existing.state === 'retired' || existing.deviceToken === undefined) {
+      return 'not-found' as const;
     }
     if (existing.deviceToken !== subscription.deviceToken) {
       return 'token-replaced' as const;
@@ -567,18 +659,23 @@ async function removeStoredSubscription(
       return 'token-replaced' as const;
     }
     try {
-      await subscriptions.delete(
-        subscriptionPartitionKey,
-        subscription.installationId,
+      await subscriptions.replace(
+        {
+          partitionKey: subscriptionPartitionKey,
+          rowKey: subscription.installationId,
+          state: 'retired',
+          attemptGeneration: existing.attemptGeneration,
+          retiredAt,
+        },
         existing.etag,
       );
       return 'removed' as const;
     } catch (error) {
-      const deleteStatus = statusCode(error);
+      const replaceStatus = statusCode(error);
       if (
-        deleteStatus !== 404 &&
-        deleteStatus !== 409 &&
-        deleteStatus !== 412
+        replaceStatus !== 404 &&
+        replaceStatus !== 409 &&
+        replaceStatus !== 412
       ) {
         throw error;
       }
@@ -590,6 +687,7 @@ async function removeStoredSubscription(
 export function createTableReminderSubscriptionStore(
   subscriptions: SubscriptionTable,
   throttles: ThrottleTable,
+  now: () => Date = () => new Date(),
 ): ReminderSubscriptionStore {
   return {
     async getSubscription(installationId) {
@@ -636,7 +734,7 @@ export function createTableReminderSubscriptionStore(
         invalidatedAt,
       );
     },
-    async createSubscription(record) {
+    async createSubscription(record, registrationRequestId) {
       const entity = {
         partitionKey: subscriptionPartitionKey,
         rowKey: record.installationId,
@@ -659,6 +757,11 @@ export function createTableReminderSubscriptionStore(
           );
         } catch (error) {
           if (statusCode(error) !== 404) throw error;
+          if (
+            !isFreshVersionedRegistrationRequest(registrationRequestId, now())
+          ) {
+            return 'expired';
+          }
           try {
             await subscriptions.create(entity);
             return 'accepted';
@@ -667,6 +770,7 @@ export function createTableReminderSubscriptionStore(
             continue;
           }
         }
+        if (existing.state === 'retired') return 'stale';
         const sameInitialFields =
           existing.deviceToken === record.deviceToken &&
           existing.homeTimeZone === record.homeTimeZone &&
@@ -725,6 +829,49 @@ export function createTableReminderSubscriptionStore(
       }
       throw new Error('Subscription update contention exceeded retry limit');
     },
+    async deleteSubscription(
+      installationId,
+      credentialHash,
+      retiredAt = new Date(),
+    ) {
+      for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
+        let existing: SubscriptionEntity;
+        try {
+          existing = await subscriptions.get(
+            subscriptionPartitionKey,
+            installationId,
+          );
+        } catch (error) {
+          if (statusCode(error) === 404) return 'not-found';
+          throw error;
+        }
+        if (existing.state === 'retired') return 'not-found';
+        if (
+          existing.credentialHash === undefined ||
+          !equalOpaqueValues(existing.credentialHash, credentialHash)
+        ) {
+          return 'unauthorized';
+        }
+        try {
+          await subscriptions.replace(
+            {
+              partitionKey: subscriptionPartitionKey,
+              rowKey: installationId,
+              state: 'retired',
+              attemptGeneration: existing.attemptGeneration,
+              retiredAt,
+            },
+            existing.etag,
+          );
+          return 'deleted';
+        } catch (error) {
+          const replaceStatus = statusCode(error);
+          if (replaceStatus === 404) return 'not-found';
+          if (replaceStatus !== 409 && replaceStatus !== 412) throw error;
+        }
+      }
+      throw new Error('Subscription deletion contention exceeded retry limit');
+    },
     async takeSourceAllowance(sourceHash, now) {
       return takeThrottleAllowance(
         throttles,
@@ -750,6 +897,26 @@ export function createTableReminderSubscriptionStore(
         }
       }
     },
+    async purgeExpiredRetiredSubscriptions(now) {
+      const cutoff = new Date(now.getTime() - operationalRetentionMs);
+      for await (const entity of subscriptions.listRetiredExpired(cutoff)) {
+        try {
+          await subscriptions.delete(
+            entity.partitionKey,
+            entity.rowKey,
+            entity.etag,
+          );
+        } catch (error) {
+          if (
+            statusCode(error) !== 404 &&
+            statusCode(error) !== 409 &&
+            statusCode(error) !== 412
+          ) {
+            throw error;
+          }
+        }
+      }
+    },
   };
 }
 
@@ -760,7 +927,9 @@ async function takeThrottleAllowance(
 ) {
   const window = Math.floor(now.getTime() / throttleWindowMs);
   const rowKey = String(window);
-  const expiresAt = new Date(window * throttleWindowMs + throttleRetentionMs);
+  const expiresAt = new Date(
+    window * throttleWindowMs + operationalRetentionMs,
+  );
 
   for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
     let entity: ThrottleEntity;
@@ -845,15 +1014,20 @@ export function createAzureReminderSubscriptionStore(
       get: async (partitionKey, rowKey) => {
         const entity = await subscriptions.getEntity<{
           attemptGeneration: number;
-          credentialHash: string;
-          deviceToken: string;
-          homeTimeZone: string;
-          oneDayEnabled: boolean;
-          oneWeekEnabled: boolean;
-          platform: 'android' | 'ios';
+          credentialHash?: string;
+          deviceToken?: string;
+          homeTimeZone?: string;
+          oneDayEnabled?: boolean;
+          oneWeekEnabled?: boolean;
+          platform?: 'android' | 'ios';
           registeredAt?: unknown;
+          retiredAt?: unknown;
+          state?: 'retired';
         }>(partitionKey, rowKey);
-        if (typeof entity.deviceToken !== 'string') {
+        if (
+          entity.state !== 'retired' &&
+          typeof entity.deviceToken !== 'string'
+        ) {
           throw new Error('Stored subscription record is invalid');
         }
         return {
@@ -862,7 +1036,10 @@ export function createAzureReminderSubscriptionStore(
             typeof entity.credentialHash === 'string'
               ? entity.credentialHash
               : undefined,
-          deviceToken: entity.deviceToken,
+          deviceToken:
+            typeof entity.deviceToken === 'string'
+              ? entity.deviceToken
+              : undefined,
           etag: entity.etag,
           homeTimeZone:
             typeof entity.homeTimeZone === 'string'
@@ -885,9 +1062,22 @@ export function createAzureReminderSubscriptionStore(
             entity.registeredAt instanceof Date
               ? entity.registeredAt
               : undefined,
+          retiredAt:
+            entity.retiredAt instanceof Date ? entity.retiredAt : undefined,
           rowKey,
+          state: entity.state === 'retired' ? 'retired' : undefined,
         };
       },
+      listRetiredExpired: (now) =>
+        subscriptions.listEntities<{
+          attemptGeneration: number;
+          retiredAt?: unknown;
+          state?: 'retired';
+        }>({
+          queryOptions: {
+            filter: odata`state eq 'retired' and retiredAt lt ${now}`,
+          },
+        }) as AsyncIterable<SubscriptionEntity>,
       replace: async (entity, etag) => {
         await subscriptions.updateEntity(entity as never, 'Replace', { etag });
       },
@@ -948,6 +1138,22 @@ export function createReminderSubscriptionUpdateHandler(
     );
 }
 
+export function createReminderSubscriptionDeleteHandler(
+  createStore: () => ReminderSubscriptionStore = createAzureReminderSubscriptionStore,
+) {
+  return async (request: HttpRequest): Promise<HttpResponseInit> => {
+    try {
+      return await deleteReminderSubscription(
+        request,
+        createStore(),
+        request.params.installationId,
+      );
+    } catch {
+      return response(503, 'Registration unavailable');
+    }
+  };
+}
+
 export const reminderSubscriptionOptions: HttpFunctionOptions = {
   authLevel: 'anonymous' as const,
   handler: createReminderSubscriptionHandler(),
@@ -962,11 +1168,19 @@ export const reminderSubscriptionUpdateOptions: HttpFunctionOptions = {
   route: 'reminder-subscriptions/{installationId}',
 };
 
+export const reminderSubscriptionDeleteOptions: HttpFunctionOptions = {
+  authLevel: 'anonymous' as const,
+  handler: createReminderSubscriptionDeleteHandler(),
+  methods: ['DELETE'],
+  route: 'reminder-subscriptions/{installationId}',
+};
+
 export const reminderThrottleCleanupOptions: TimerFunctionOptions = {
   handler: async () => {
-    await createAzureReminderSubscriptionStore().purgeExpiredThrottleRecords(
-      new Date(),
-    );
+    const store = createAzureReminderSubscriptionStore();
+    const now = new Date();
+    await store.purgeExpiredThrottleRecords(now);
+    await store.purgeExpiredRetiredSubscriptions(now);
   },
   schedule: '0 17 3 * * *',
   useMonitor: true,

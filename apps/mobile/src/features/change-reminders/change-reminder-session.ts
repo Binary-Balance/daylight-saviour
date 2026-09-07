@@ -133,6 +133,11 @@ export function createChangeReminderSession({
       if (result.kind === 'unavailable') publish({ kind: 'unavailable' });
       else if (result.kind === 'unregistered') publish({ kind: 'untouched' });
       else if (result.kind === 'pending') publish({ kind: 'retry-pending' });
+      else if (result.kind === 'deleting')
+        publish({
+          kind: 'disable-failed',
+          preferences: result.preferences,
+        });
       else if (result.registration.homeTimeZone !== homeTimeZone)
         publish({ kind: 'zone-mismatch' });
       else if (!result.notificationPermissionGranted)
@@ -303,18 +308,12 @@ export function createChangeReminderSession({
       return;
     }
     if (event.type === 'cancel-disable') {
-      if (
-        snapshot.kind === 'confirm-disable' ||
-        snapshot.kind === 'disable-failed'
-      )
+      if (snapshot.kind === 'confirm-disable')
         publish({ kind: 'enabled', preferences: snapshot.preferences });
       return;
     }
     if (event.type === 'token-refresh') {
-      if (
-        event.result.kind === 'succeeded' &&
-        snapshot.kind === 'permission-revoked'
-      )
+      if (snapshot.kind !== 'enabled' && snapshot.kind !== 'retry-pending')
         return;
       if (
         event.result.kind === 'succeeded' &&

@@ -100,7 +100,7 @@ Review requests must be difficult to miss without becoming noisy. The private op
 
 MVP has no accounts, advertising, behavioral analytics, cross-app tracking, or third-party client telemetry. It stores only an installation identifier, push token, Home Time Zone, reminder preferences, and service timestamps needed to deliver Change Reminders. The app can delete its reminder subscription and associated server data. Server logs must not contain full push tokens.
 
-An enabled reminder subscription remains active without arbitrary inactivity expiry: reminders are intentionally set-and-forget. Explicit disable or deletion, and permanent invalid-token responses from APNs or FCM, remove the server record promptly. Token-free dispatch-ledger and operational records expire after 30 days. Retention behavior is stated plainly in the privacy policy.
+An enabled reminder subscription remains active without arbitrary inactivity expiry: reminders are intentionally set-and-forget. Explicit disable or deletion, and permanent invalid-token responses from APNs or FCM, remove the subscription data promptly. A token-free retired-identity marker may remain for up to 30 days to fence delayed registration replays; token-free dispatch-ledger and other operational records expire after 30 days. Retention behavior is stated plainly in the privacy policy.
 
 Each installation receives an opaque credential for updating or deleting only its own reminder subscription. No shared secret is embedded in the app. Registration accepts only fixed, validated reminder fields and never arbitrary notification content; platform attestation is deferred unless observed abuse justifies it.
 

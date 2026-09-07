@@ -9,6 +9,21 @@ Reminder delivery; the owner-gated on-demand handler composes FCM or APNs only
 when that provider's two gates are enabled. No Google service-account key or
 long-lived FCM credential is accepted.
 
+The registration HTTP surface accepts a strictly validated `POST`, and the
+installation-scoped `PUT` and `DELETE` endpoints require the current bearer
+credential. Deletes physically remove subscription fields from the Table row
+with an ETag check and retry concurrent mutations. The deleted subscription fields are replaced by a
+credential-free retired-identity marker for 30 days so delayed registration
+replays cannot recreate the identity; the marker is removed by the existing
+operational cleanup timer. New registrations use versioned, time-bounded
+request IDs, while active legacy rows remain recoverable during the rollout.
+Well-formed missing or mismatched credentials return the same empty `204` as a
+completed delete so idempotent retries do not reveal whether another
+installation exists; malformed requests and storage failures remain coarse
+errors. The mobile and service versions must be rolled out together: old
+backends reject new versioned IDs and new backends do not create absent legacy
+IDs.
+
 ## Portable reminder dispatch
 
 The [ledger](src/reminder-dispatch-ledger.ts) and

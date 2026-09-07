@@ -82,7 +82,10 @@ export function parseReminderSubscriptionRegistration(value) {
   validateSubscriptionFields(input);
   if (
     typeof input.registrationRequestId !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(input.registrationRequestId)
+    !(
+      /^[a-f0-9]{64}$/.test(input.registrationRequestId) ||
+      /^v2\.\d{13}\.[a-f0-9]{64}$/.test(input.registrationRequestId)
+    )
   )
     throw new ReminderSubscriptionValidationError(
       'Invalid registration request ID',

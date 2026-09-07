@@ -11,6 +11,6 @@ Daylight Saviour will launch without accounts, advertising, behavioral analytics
 - Product usage funnels and retention metrics will not be available initially.
 - Privacy documentation must enumerate stored reminder data, purpose, retention, and deletion behavior.
 - A permanent APNs or FCM unregistered-token response removes the corresponding subscription.
-- Explicit reminder disable or in-app deletion promptly removes the server subscription; inactivity alone does not silently cancel an enabled service.
+- Explicit reminder disable or in-app deletion promptly removes the server subscription data; a credential-free retired-identity marker may remain for up to 30 days to fence delayed registration replays. Inactivity alone does not silently cancel an enabled service.
 - Token-free dispatch-ledger and operational records are retained for 30 days, then purged automatically.
 - Adding client analytics or diagnostics later requires a deliberate review of consent, disclosure, data minimisation, and this ADR.

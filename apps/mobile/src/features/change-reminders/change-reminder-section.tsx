@@ -253,17 +253,17 @@ export default function ChangeReminderSection({
       {snapshot.kind === 'confirm-disable' ||
       snapshot.kind === 'disable-failed' ? (
         <View style={styles.actions}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => session.dispatch({ type: 'cancel-disable' })}
-            style={[styles.button, { borderColor: palette.controlBoundary }]}
-          >
-            <Text style={[styles.buttonText, { color: palette.ink }]}>
-              {snapshot.kind === 'disable-failed'
-                ? copy.changeReminders.disableFailed.cancel
-                : copy.changeReminders.disableConfirmation.cancel}
-            </Text>
-          </Pressable>
+          {snapshot.kind === 'confirm-disable' ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => session.dispatch({ type: 'cancel-disable' })}
+              style={[styles.button, { borderColor: palette.controlBoundary }]}
+            >
+              <Text style={[styles.buttonText, { color: palette.ink }]}>
+                {copy.changeReminders.disableConfirmation.cancel}
+              </Text>
+            </Pressable>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             onPress={() => session.dispatch({ type: 'confirm-disable' })}
