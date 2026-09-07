@@ -1,4 +1,7 @@
-import type { ChangeReminderAdapters } from './change-reminder-adapters';
+import type {
+  ChangeReminderAdapters,
+  ChangeReminderEnableResult,
+} from './change-reminder-adapters';
 import {
   createChangeReminderSession,
   type ChangeReminderSession,
@@ -126,6 +129,41 @@ describe('Change Reminder session', () => {
       preferences: { oneDayEnabled: true, oneWeekEnabled: true },
     });
     expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
+    stop();
+  });
+
+  it('restores an uncertain timing change with confirmed and proposed values', async () => {
+    const boundary = adapters({
+      restore: jest.fn(async () => ({
+        homeTimeZone: 'Australia/Sydney',
+        kind: 'pending' as const,
+        pendingPreferences: {
+          confirmed: { oneDayEnabled: true, oneWeekEnabled: true },
+          proposed: { oneDayEnabled: false, oneWeekEnabled: true },
+        },
+      })),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'preferences-failed',
+      ),
+    ).toEqual({
+      kind: 'preferences-failed',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+      proposedPreferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    session.dispatch({ type: 'retry-preferences' });
+    expect(boundary.updatePreferences).toHaveBeenCalledWith({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    });
     stop();
   });
 
@@ -325,7 +363,7 @@ describe('Change Reminder session', () => {
   });
 
   it('saves either timing independently and keeps confirmed timings after failure', async () => {
-    let resolve!: (result: { readonly kind: 'failed' }) => void;
+    let resolve!: (result: ChangeReminderEnableResult) => void;
     const boundary = adapters({
       restore: jest.fn(async () => ({
         kind: 'registered' as const,
@@ -334,7 +372,7 @@ describe('Change Reminder session', () => {
       })),
       updatePreferences: jest.fn(
         () =>
-          new Promise((done) => {
+          new Promise<ChangeReminderEnableResult>((done) => {
             resolve = done;
           }),
       ),
@@ -370,7 +408,25 @@ describe('Change Reminder session', () => {
     });
     session.dispatch({ type: 'cancel-preferences' });
     expect(session.getSnapshot()).toMatchObject({
-      kind: 'enabled',
+      kind: 'saving-preferences',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+      proposedPreferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
+    resolve({ kind: 'failed' });
+    await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'preferences-failed',
+    );
+    session.dispatch({ type: 'retry-preferences' });
+    expect(session.getSnapshot()).toMatchObject({
+      kind: 'saving-preferences',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+      proposedPreferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
+    resolve({ kind: 'enabled' });
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
+    ).toMatchObject({
       preferences: { oneDayEnabled: true, oneWeekEnabled: true },
     });
     stop();

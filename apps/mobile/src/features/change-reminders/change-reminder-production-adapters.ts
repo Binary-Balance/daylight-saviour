@@ -128,6 +128,9 @@ function parseStoredState(value: string): StoredChangeReminderState {
   const candidate = parsed as Record<string, unknown>;
   const isLegacy = candidate.version === 2;
   const isV3 = candidate.version === 3;
+  const hasConfirmedPreferences =
+    typeof candidate.confirmedOneDayEnabled === 'boolean' &&
+    typeof candidate.confirmedOneWeekEnabled === 'boolean';
   const expectedKeys =
     candidate.state === 'pending' && !isLegacy
       ? [
@@ -143,6 +146,9 @@ function parseStoredState(value: string): StoredChangeReminderState {
       : candidate.state === 'pending-update' && !isLegacy
         ? [
             'attemptGeneration',
+            ...(hasConfirmedPreferences
+              ? ['confirmedOneDayEnabled', 'confirmedOneWeekEnabled']
+              : []),
             'credential',
             'deviceToken',
             'homeTimeZone',
@@ -279,6 +285,12 @@ function parseStoredState(value: string): StoredChangeReminderState {
     return {
       ...base,
       ...response,
+      ...(hasConfirmedPreferences
+        ? {
+            confirmedOneDayEnabled: Boolean(candidate.confirmedOneDayEnabled),
+            confirmedOneWeekEnabled: Boolean(candidate.confirmedOneWeekEnabled),
+          }
+        : {}),
       state: 'pending-update',
     } as StoredChangeReminderPendingUpdate;
   }
@@ -368,9 +380,9 @@ export function createProductionChangeReminderAdapters({
     deviceToken: string,
     forceTokenReplacement: boolean,
     preferences: ChangeReminderPreferences,
-    preserveConfirmedRecord = false,
     expectedRegistrationRequestId?: string,
     expectedInstallationId?: string,
+    preservePreferenceContext = false,
   ): Promise<ChangeReminderEnableResult> {
     const registrationEndpoint = parseReminderRegistrationEndpoint(endpoint);
     if (registrationEndpoint === null || !validDeviceToken(deviceToken)) {
@@ -423,10 +435,28 @@ export function createProductionChangeReminderAdapters({
           saved?.registrationRequestId ?? (await createRegistrationRequestId()),
         version: 4 as const,
       };
+      const carriesPreferenceContext =
+        preservePreferenceContext ||
+        (saved?.state === 'pending-update' &&
+          saved.confirmedOneDayEnabled !== undefined &&
+          saved.confirmedOneWeekEnabled !== undefined);
       const pending =
         saved?.state === 'registered' || saved?.state === 'pending-update'
           ? ({
               ...base,
+              ...(carriesPreferenceContext
+                ? {
+                    confirmedOneDayEnabled:
+                      saved.state === 'pending-update'
+                        ? (saved.confirmedOneDayEnabled ?? saved.oneDayEnabled)
+                        : saved.oneDayEnabled,
+                    confirmedOneWeekEnabled:
+                      saved.state === 'pending-update'
+                        ? (saved.confirmedOneWeekEnabled ??
+                          saved.oneWeekEnabled)
+                        : saved.oneWeekEnabled,
+                  }
+                : {}),
               credential: saved.credential,
               installationId: saved.installationId,
               state: 'pending-update' as const,
@@ -438,11 +468,14 @@ export function createProductionChangeReminderAdapters({
       if (!validRegistrationRequestId(pending.registrationRequestId)) {
         return { kind: 'failed' };
       }
+      // A successful server write can outlive its response, so retries must
+      // advance from this durable proposed attempt rather than the last
+      // confirmed display values.
       const replayNeedsAuthenticatedUpdate =
         replayingInitialRegistration &&
         (pending.deviceToken !== deviceToken ||
           pending.homeTimeZone !== homeTimeZone);
-      if (!preserveConfirmedRecord) await saveStoredState(pending);
+      await saveStoredState(pending);
 
       const response = await fetchWithTimeout(
         request,
@@ -489,7 +522,12 @@ export function createProductionChangeReminderAdapters({
               installationId: pending.installationId,
             };
       await saveStoredState({
-        ...pending,
+        attemptGeneration: pending.attemptGeneration,
+        deviceToken: pending.deviceToken,
+        homeTimeZone: pending.homeTimeZone,
+        oneDayEnabled: pending.oneDayEnabled,
+        oneWeekEnabled: pending.oneWeekEnabled,
+        registrationRequestId: pending.registrationRequestId,
         ...registration,
         state: 'registered' as const,
         version: 4,
@@ -671,6 +709,22 @@ export function createProductionChangeReminderAdapters({
         return {
           homeTimeZone: saved.homeTimeZone,
           kind: 'pending',
+          ...(saved.state === 'pending-update' &&
+          saved.confirmedOneDayEnabled !== undefined &&
+          saved.confirmedOneWeekEnabled !== undefined
+            ? {
+                pendingPreferences: {
+                  confirmed: {
+                    oneDayEnabled: saved.confirmedOneDayEnabled,
+                    oneWeekEnabled: saved.confirmedOneWeekEnabled,
+                  },
+                  proposed: {
+                    oneDayEnabled: saved.oneDayEnabled,
+                    oneWeekEnabled: saved.oneWeekEnabled,
+                  },
+                },
+              }
+            : {}),
         };
       }
       const permission = await notifications.getPermissionsAsync();
@@ -691,20 +745,25 @@ export function createProductionChangeReminderAdapters({
         return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
       }
       if (saved.version !== 4 || saved.deviceToken !== currentToken) {
-        const result = await enqueue(() =>
-          synchronize(
-            saved.homeTimeZone,
+        const result = await enqueue(async () => {
+          const latest = await loadStoredState();
+          return synchronize(
+            latest?.homeTimeZone ?? saved.homeTimeZone,
             currentToken,
             true,
-            {
-              oneDayEnabled: saved.oneDayEnabled,
-              oneWeekEnabled: saved.oneWeekEnabled,
-            },
-            false,
+            latest === null
+              ? {
+                  oneDayEnabled: saved.oneDayEnabled,
+                  oneWeekEnabled: saved.oneWeekEnabled,
+                }
+              : {
+                  oneDayEnabled: latest.oneDayEnabled,
+                  oneWeekEnabled: latest.oneWeekEnabled,
+                },
             saved.registrationRequestId,
             saved.installationId,
-          ),
-        );
+          );
+        });
         if (result.kind !== 'enabled') {
           return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
         }
@@ -742,13 +801,19 @@ export function createProductionChangeReminderAdapters({
       }
       return enqueue(async () => {
         const saved = await loadStoredState();
-        if (saved?.state !== 'registered' || saved.version === 2)
+        if (
+          (saved?.state !== 'registered' &&
+            saved?.state !== 'pending-update') ||
+          saved.version === 2
+        )
           return { kind: 'failed' };
         return synchronize(
           saved.homeTimeZone,
           saved.deviceToken,
           true,
           preferences,
+          undefined,
+          undefined,
           true,
         );
       });
