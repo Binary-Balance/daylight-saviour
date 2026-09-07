@@ -99,9 +99,9 @@ export const changeReminders = Object.freeze({
     openSettings: 'Open notification settings',
   }),
   preferencesFailed: Object.freeze({
-    body: 'Your saved reminder timings are unchanged. Check your connection and try the timing change again.',
+    body: 'Your timing change could not be confirmed. Remote reminder timings may differ from those shown. Try again to reconcile them.',
     cancel: 'Keep saved timings',
-    heading: 'TIMING CHANGE NOT SAVED',
+    heading: 'TIMING CHANGE UNCONFIRMED',
     retry: 'Try timing change again',
   }),
   retryPending: Object.freeze({

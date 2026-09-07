@@ -129,6 +129,41 @@ describe('Change Reminder session', () => {
     stop();
   });
 
+  it('restores an uncertain timing change with confirmed and proposed values', async () => {
+    const boundary = adapters({
+      restore: jest.fn(async () => ({
+        homeTimeZone: 'Australia/Sydney',
+        kind: 'pending' as const,
+        pendingPreferences: {
+          confirmed: { oneDayEnabled: true, oneWeekEnabled: true },
+          proposed: { oneDayEnabled: false, oneWeekEnabled: true },
+        },
+      })),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'preferences-failed',
+      ),
+    ).toEqual({
+      kind: 'preferences-failed',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+      proposedPreferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    session.dispatch({ type: 'retry-preferences' });
+    expect(boundary.updatePreferences).toHaveBeenCalledWith({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    });
+    stop();
+  });
+
   it('recovers from load and rejected enable failures', async () => {
     const boundary = adapters({
       enable: jest.fn(async () => {

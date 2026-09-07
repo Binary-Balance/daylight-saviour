@@ -132,7 +132,16 @@ export function createChangeReminderSession({
       if (!current(expectedGeneration)) return;
       if (result.kind === 'unavailable') publish({ kind: 'unavailable' });
       else if (result.kind === 'unregistered') publish({ kind: 'untouched' });
-      else if (result.kind === 'pending') publish({ kind: 'retry-pending' });
+      else if (result.kind === 'pending')
+        publish(
+          result.pendingPreferences === undefined
+            ? { kind: 'retry-pending' }
+            : {
+                kind: 'preferences-failed',
+                preferences: result.pendingPreferences.confirmed,
+                proposedPreferences: result.pendingPreferences.proposed,
+              },
+        );
       else if (result.kind === 'deleting')
         publish({
           kind: 'disable-failed',

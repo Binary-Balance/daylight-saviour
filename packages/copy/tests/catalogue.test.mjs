@@ -85,7 +85,7 @@ describe('Australian-English copy catalogue', () => {
     });
   });
 
-  it('states saved reminder timings and failed changes literally', () => {
+  it('states saved reminder timings and uncertain changes literally', () => {
     const reminders = australianEnglish.changeReminders;
     assert.equal(
       reminders.enabled.body({ oneDayEnabled: false, oneWeekEnabled: true }),
@@ -97,7 +97,7 @@ describe('Australian-English copy catalogue', () => {
     );
     assert.equal(
       reminders.preferencesFailed.body,
-      'Your saved reminder timings are unchanged. Check your connection and try the timing change again.',
+      'Your timing change could not be confirmed. Remote reminder timings may differ from those shown. Try again to reconcile them.',
     );
     assert.equal(
       reminders.disableFailed.body,

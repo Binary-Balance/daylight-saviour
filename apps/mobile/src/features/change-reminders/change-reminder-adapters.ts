@@ -38,6 +38,9 @@ export interface StoredChangeReminderRegistration extends StoredChangeReminderBa
 }
 
 export interface StoredChangeReminderPendingUpdate extends StoredChangeReminderBase {
+  /** Last values confirmed by the service; absent in older v4 pending state. */
+  readonly confirmedOneDayEnabled?: boolean;
+  readonly confirmedOneWeekEnabled?: boolean;
   readonly credential: string;
   readonly installationId: string;
   readonly state: 'pending-update';
@@ -95,6 +98,10 @@ export type ChangeReminderRestoreResult =
   | {
       readonly homeTimeZone: string;
       readonly kind: 'pending';
+      readonly pendingPreferences?: {
+        readonly confirmed: ChangeReminderPreferences;
+        readonly proposed: ChangeReminderPreferences;
+      };
     }
   | {
       readonly homeTimeZone: string;
@@ -124,7 +131,7 @@ export interface ChangeReminderAdapters {
   readonly enable: (
     homeTimeZone: string,
   ) => Promise<ChangeReminderEnableResult>;
-  /** Saves a non-empty timing selection only after the service accepts it. */
+  /** Persists a timing attempt before sending and confirms it with the service. */
   readonly updatePreferences: (
     preferences: ChangeReminderPreferences,
   ) => Promise<ChangeReminderEnableResult>;
