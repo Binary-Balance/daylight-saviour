@@ -10,7 +10,7 @@ export const changeReminders = Object.freeze({
   }),
   disabled: Object.freeze({
     action: 'Enable Change Reminders',
-    body: 'Change Reminders are disabled and this installation’s reminder registration has been deleted.',
+    body: 'Change Reminders are disabled on this device. Enabling again will create a fresh reminder registration.',
     heading: 'CHANGE REMINDERS DISABLED',
   }),
   disableConfirmation: Object.freeze({
@@ -21,7 +21,6 @@ export const changeReminders = Object.freeze({
   }),
   disableFailed: Object.freeze({
     body: 'Deletion could not be confirmed on this device. Check your connection and try again.',
-    cancel: 'Keep reminders',
     confirm: 'Try deletion again',
     heading: 'REMINDER DELETION NOT CONFIRMED',
   }),

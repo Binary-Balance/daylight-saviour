@@ -527,7 +527,9 @@ it('shows disabling, disabled, and recoverable deletion uncertainty', async () =
   ).toBeTruthy();
   await act(async () => resolveDelete({ kind: 'disabled' }));
   expect(
-    await screen.findByText(/registration has been deleted/i),
+    await screen.findByText(
+      /enabling again will create a fresh reminder registration/i,
+    ),
   ).toBeTruthy();
   rendered.unmount();
   appStateSpy.mockRestore();
@@ -573,7 +575,7 @@ it('keeps deletion uncertainty factual and recoverable', async () => {
   expect(
     screen.getByRole('button', { name: 'Try deletion again' }),
   ).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Keep reminders' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Keep reminders' })).toBeNull();
   rendered.unmount();
   appStateSpy.mockRestore();
 });

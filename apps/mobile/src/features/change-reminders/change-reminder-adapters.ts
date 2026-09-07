@@ -43,6 +43,16 @@ export interface StoredChangeReminderPendingUpdate extends StoredChangeReminderB
   readonly state: 'pending-update';
 }
 
+export interface StoredChangeReminderPendingDelete extends Omit<
+  StoredChangeReminderBase,
+  'deviceToken' | 'version'
+> {
+  readonly credential: string;
+  readonly installationId: string;
+  readonly state: 'pending-delete';
+  readonly version: 4;
+}
+
 export interface StoredLegacyChangeReminderRegistration {
   readonly attemptGeneration: number;
   readonly credential: string;
@@ -87,6 +97,11 @@ export type ChangeReminderRestoreResult =
       readonly kind: 'pending';
     }
   | {
+      readonly homeTimeZone: string;
+      readonly kind: 'deleting';
+      readonly preferences: ChangeReminderPreferences;
+    }
+  | {
       readonly kind: 'registered';
       readonly notificationPermissionGranted: boolean;
       readonly registration:
@@ -99,6 +114,7 @@ export type StoredChangeReminderState =
   | StoredChangeReminderPending
   | StoredChangeReminderRegistration
   | StoredChangeReminderPendingUpdate
+  | StoredChangeReminderPendingDelete
   | StoredLegacyChangeReminderPending
   | StoredLegacyChangeReminderRegistration
   | StoredV3ChangeReminderPending

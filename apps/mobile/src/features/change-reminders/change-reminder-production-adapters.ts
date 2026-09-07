@@ -14,6 +14,7 @@ import type {
   StoredLegacyChangeReminderPending,
   StoredLegacyChangeReminderRegistration,
   StoredChangeReminderPending,
+  StoredChangeReminderPendingDelete,
   StoredChangeReminderPendingUpdate,
   StoredChangeReminderState,
 } from './change-reminder-adapters';
@@ -63,8 +64,7 @@ function validStoredBase(candidate: Record<string, unknown>) {
   return (
     (candidate.version === 3 || candidate.version === 4) &&
     validDeviceToken(candidate.deviceToken) &&
-    typeof candidate.registrationRequestId === 'string' &&
-    /^[a-f0-9]{64}$/.test(candidate.registrationRequestId) &&
+    validRegistrationRequestId(candidate.registrationRequestId) &&
     Number.isSafeInteger(candidate.attemptGeneration) &&
     Number(candidate.attemptGeneration) >= 1 &&
     Number(candidate.attemptGeneration) <= maximumAttemptGeneration &&
@@ -81,7 +81,7 @@ function validLegacyStoredBase(candidate: Record<string, unknown>) {
   return (
     candidate.version === 2 &&
     typeof candidate.registrationRequestId === 'string' &&
-    /^[a-f0-9]{64}$/.test(candidate.registrationRequestId) &&
+    validRegistrationRequestId(candidate.registrationRequestId) &&
     Number.isSafeInteger(candidate.attemptGeneration) &&
     Number(candidate.attemptGeneration) >= 1 &&
     Number(candidate.attemptGeneration) <= maximumAttemptGeneration &&
@@ -90,6 +90,33 @@ function validLegacyStoredBase(candidate: Record<string, unknown>) {
       candidate.homeTimeZone &&
     candidate.oneDayEnabled === true &&
     candidate.oneWeekEnabled === true
+  );
+}
+
+function validStoredPendingDelete(candidate: Record<string, unknown>) {
+  return (
+    candidate.version === 4 &&
+    typeof candidate.credential === 'string' &&
+    /^[A-Za-z0-9_-]{32,128}$/.test(candidate.credential) &&
+    typeof candidate.installationId === 'string' &&
+    /^[A-Za-z0-9_-]{32,128}$/.test(candidate.installationId) &&
+    validRegistrationRequestId(candidate.registrationRequestId) &&
+    Number.isSafeInteger(candidate.attemptGeneration) &&
+    Number(candidate.attemptGeneration) >= 1 &&
+    Number(candidate.attemptGeneration) <= maximumAttemptGeneration &&
+    typeof candidate.homeTimeZone === 'string' &&
+    canonicalAustralianZoneId(candidate.homeTimeZone) ===
+      candidate.homeTimeZone &&
+    typeof candidate.oneDayEnabled === 'boolean' &&
+    typeof candidate.oneWeekEnabled === 'boolean' &&
+    (candidate.oneDayEnabled || candidate.oneWeekEnabled)
+  );
+}
+
+function validRegistrationRequestId(value: unknown): value is string {
+  return (
+    (typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)) ||
+    (typeof value === 'string' && /^v2\.\d{13}\.[a-f0-9]{64}$/.test(value))
   );
 }
 
@@ -126,32 +153,10 @@ function parseStoredState(value: string): StoredChangeReminderState {
             'state',
             'version',
           ]
-        : isLegacy
-          ? candidate.state === 'pending'
-            ? [
-                'attemptGeneration',
-                'homeTimeZone',
-                'oneDayEnabled',
-                'oneWeekEnabled',
-                'registrationRequestId',
-                'state',
-                'version',
-              ]
-            : [
-                'attemptGeneration',
-                'credential',
-                'homeTimeZone',
-                'installationId',
-                'oneDayEnabled',
-                'oneWeekEnabled',
-                'registrationRequestId',
-                'state',
-                'version',
-              ]
-          : [
+        : candidate.state === 'pending-delete' && !isLegacy
+          ? [
               'attemptGeneration',
               'credential',
-              'deviceToken',
               'homeTimeZone',
               'installationId',
               'oneDayEnabled',
@@ -159,14 +164,70 @@ function parseStoredState(value: string): StoredChangeReminderState {
               'registrationRequestId',
               'state',
               'version',
-            ];
+            ]
+          : isLegacy
+            ? candidate.state === 'pending'
+              ? [
+                  'attemptGeneration',
+                  'homeTimeZone',
+                  'oneDayEnabled',
+                  'oneWeekEnabled',
+                  'registrationRequestId',
+                  'state',
+                  'version',
+                ]
+              : [
+                  'attemptGeneration',
+                  'credential',
+                  'homeTimeZone',
+                  'installationId',
+                  'oneDayEnabled',
+                  'oneWeekEnabled',
+                  'registrationRequestId',
+                  'state',
+                  'version',
+                ]
+            : [
+                'attemptGeneration',
+                'credential',
+                'deviceToken',
+                'homeTimeZone',
+                'installationId',
+                'oneDayEnabled',
+                'oneWeekEnabled',
+                'registrationRequestId',
+                'state',
+                'version',
+              ];
+  const validBase =
+    candidate.state === 'pending-delete'
+      ? validStoredPendingDelete(candidate)
+      : isLegacy
+        ? validLegacyStoredBase(candidate)
+        : validStoredBase(candidate);
   if (
     Object.keys(candidate).sort().join(',') !== expectedKeys.sort().join(',') ||
-    !(isLegacy ? validLegacyStoredBase(candidate) : validStoredBase(candidate))
+    !validBase
   ) {
     throw new Error('Invalid stored reminder state');
   }
 
+  if (candidate.state === 'pending-delete') {
+    const response = parseReminderSubscriptionRegistrationResponse({
+      credential: candidate.credential,
+      installationId: candidate.installationId,
+    });
+    return {
+      attemptGeneration: Number(candidate.attemptGeneration),
+      ...response,
+      homeTimeZone: String(candidate.homeTimeZone),
+      oneDayEnabled: Boolean(candidate.oneDayEnabled),
+      oneWeekEnabled: Boolean(candidate.oneWeekEnabled),
+      registrationRequestId: String(candidate.registrationRequestId),
+      state: 'pending-delete',
+      version: 4,
+    } satisfies StoredChangeReminderPendingDelete;
+  }
   const base = {
     attemptGeneration: Number(candidate.attemptGeneration),
     deviceToken: String(candidate.deviceToken),
@@ -240,7 +301,9 @@ function bytesToLowerHex(bytes: Uint8Array) {
 }
 
 async function createRegistrationRequestId() {
-  return bytesToLowerHex(await Crypto.getRandomBytesAsync(32));
+  return `v2.${String(Date.now()).padStart(13, '0')}.${bytesToLowerHex(
+    await Crypto.getRandomBytesAsync(32),
+  )}`;
 }
 
 function updateEndpoint(registrationEndpoint: string, installationId: string) {
@@ -306,12 +369,24 @@ export function createProductionChangeReminderAdapters({
     forceTokenReplacement: boolean,
     preferences: ChangeReminderPreferences,
     preserveConfirmedRecord = false,
+    expectedRegistrationRequestId?: string,
+    expectedInstallationId?: string,
   ): Promise<ChangeReminderEnableResult> {
     const registrationEndpoint = parseReminderRegistrationEndpoint(endpoint);
     if (registrationEndpoint === null || !validDeviceToken(deviceToken)) {
       return { kind: 'failed' };
     }
     const saved = await loadStoredState();
+    if (
+      expectedRegistrationRequestId !== undefined &&
+      (saved?.registrationRequestId !== expectedRegistrationRequestId ||
+        (expectedInstallationId !== undefined &&
+          saved?.state !== 'pending' &&
+          saved?.installationId !== expectedInstallationId))
+    ) {
+      return { kind: 'failed' };
+    }
+    if (saved?.state === 'pending-delete') return { kind: 'failed' };
     if (
       saved?.state === 'registered' &&
       saved.version !== 2 &&
@@ -360,7 +435,7 @@ export function createProductionChangeReminderAdapters({
               ...base,
               state: 'pending',
             } satisfies StoredChangeReminderPending);
-      if (!/^[a-f0-9]{64}$/.test(pending.registrationRequestId)) {
+      if (!validRegistrationRequestId(pending.registrationRequestId)) {
         return { kind: 'failed' };
       }
       const replayNeedsAuthenticatedUpdate =
@@ -398,26 +473,11 @@ export function createProductionChangeReminderAdapters({
         timeoutMs,
       );
       if (!response.ok) {
-        if (
-          pending.state === 'pending-update' &&
-          response.status === 404 &&
-          !preserveConfirmedRecord
-        ) {
-          const replacement = {
-            attemptGeneration: 1,
-            deviceToken,
-            homeTimeZone,
-            oneDayEnabled: preferences.oneDayEnabled,
-            oneWeekEnabled: preferences.oneWeekEnabled,
-            registrationRequestId: await createRegistrationRequestId(),
-            state: 'pending' as const,
-            version: 4 as const,
-          } satisfies StoredChangeReminderPending;
-          if (!/^[a-f0-9]{64}$/.test(replacement.registrationRequestId)) {
-            return { kind: 'failed' };
-          }
-          await saveStoredState(replacement);
-          return synchronize(homeTimeZone, deviceToken, true, preferences);
+        if (response.status === 410 && pending.state === 'pending') {
+          // The server proved this unauthenticated identity cannot be resumed.
+          // Clear it only on this explicit enable/retry so the next attempt
+          // creates a new request identity instead of replaying an expired one.
+          await secureStore.deleteItemAsync(registrationKey);
         }
         return { kind: 'failed' };
       }
@@ -490,6 +550,7 @@ export function createProductionChangeReminderAdapters({
       if (saved === null || saved.homeTimeZone !== homeTimeZone) {
         return null;
       }
+      if (saved.state === 'pending-delete') return null;
       if (
         saved.state === 'registered' &&
         saved.version !== 2 &&
@@ -532,9 +593,11 @@ export function createProductionChangeReminderAdapters({
   > | null = null;
   let registrationQueue = Promise.resolve();
   let queuedRefreshToken: unknown = null;
+  let queuedRefreshListenerGeneration = 0;
   let refreshInFlight: Promise<void> | null = null;
   let refreshingToken: unknown = null;
   let lastRefreshedToken: unknown = null;
+  let tokenListenerGeneration = 0;
 
   function enqueue<T>(operation: () => Promise<T>) {
     const next = registrationQueue.then(operation, operation);
@@ -548,6 +611,7 @@ export function createProductionChangeReminderAdapters({
   function queueTokenRefresh(
     homeTimeZone: string,
     token: unknown,
+    listenerGeneration: number,
     onResult: (result: ChangeReminderTokenRefreshResult) => void,
   ) {
     if (!validDeviceToken(token)) return;
@@ -559,15 +623,19 @@ export function createProductionChangeReminderAdapters({
       return;
     }
     queuedRefreshToken = token;
+    queuedRefreshListenerGeneration = listenerGeneration;
     if (refreshInFlight !== null) return;
     refreshInFlight = (async () => {
       while (queuedRefreshToken !== null) {
         const currentToken = queuedRefreshToken;
+        const currentListenerGeneration = queuedRefreshListenerGeneration;
         queuedRefreshToken = null;
         refreshingToken = currentToken;
         try {
           const result = await enqueue(() =>
-            performTokenRefresh(homeTimeZone, currentToken),
+            currentListenerGeneration === tokenListenerGeneration
+              ? performTokenRefresh(homeTimeZone, currentToken)
+              : Promise.resolve(null),
           );
           if (result?.kind === 'succeeded') {
             lastRefreshedToken = currentToken;
@@ -589,6 +657,16 @@ export function createProductionChangeReminderAdapters({
       if (platform === 'web') return { kind: 'unavailable' };
       const saved = await loadStoredState();
       if (saved === null) return { kind: 'unregistered' };
+      if (saved.state === 'pending-delete') {
+        return {
+          homeTimeZone: saved.homeTimeZone,
+          kind: 'deleting',
+          preferences: {
+            oneDayEnabled: saved.oneDayEnabled,
+            oneWeekEnabled: saved.oneWeekEnabled,
+          },
+        };
+      }
       if (saved.state === 'pending' || saved.state === 'pending-update') {
         return {
           homeTimeZone: saved.homeTimeZone,
@@ -614,10 +692,18 @@ export function createProductionChangeReminderAdapters({
       }
       if (saved.version !== 4 || saved.deviceToken !== currentToken) {
         const result = await enqueue(() =>
-          synchronize(saved.homeTimeZone, currentToken, true, {
-            oneDayEnabled: saved.oneDayEnabled,
-            oneWeekEnabled: saved.oneWeekEnabled,
-          }),
+          synchronize(
+            saved.homeTimeZone,
+            currentToken,
+            true,
+            {
+              oneDayEnabled: saved.oneDayEnabled,
+              oneWeekEnabled: saved.oneWeekEnabled,
+            },
+            false,
+            saved.registrationRequestId,
+            saved.installationId,
+          ),
         );
         if (result.kind !== 'enabled') {
           return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
@@ -674,14 +760,34 @@ export function createProductionChangeReminderAdapters({
           const registrationEndpoint =
             parseReminderRegistrationEndpoint(endpoint);
           const saved = await loadStoredState();
-          if (registrationEndpoint === null || saved?.state !== 'registered') {
+          if (
+            registrationEndpoint === null ||
+            (saved?.state !== 'registered' &&
+              saved?.state !== 'pending-update' &&
+              saved?.state !== 'pending-delete')
+          ) {
             return { kind: 'failed' as const };
           }
+          const pendingDelete =
+            saved.state === 'pending-delete'
+              ? saved
+              : ({
+                  attemptGeneration: saved.attemptGeneration,
+                  credential: saved.credential,
+                  homeTimeZone: saved.homeTimeZone,
+                  installationId: saved.installationId,
+                  oneDayEnabled: saved.oneDayEnabled,
+                  oneWeekEnabled: saved.oneWeekEnabled,
+                  registrationRequestId: saved.registrationRequestId,
+                  state: 'pending-delete' as const,
+                  version: 4 as const,
+                } satisfies StoredChangeReminderPendingDelete);
+          await saveStoredState(pendingDelete);
           const response = await fetchWithTimeout(
             request,
-            updateEndpoint(registrationEndpoint, saved.installationId),
+            updateEndpoint(registrationEndpoint, pendingDelete.installationId),
             {
-              headers: { authorization: `Bearer ${saved.credential}` },
+              headers: { authorization: `Bearer ${pendingDelete.credential}` },
               method: 'DELETE',
             },
             timeoutMs,
@@ -706,13 +812,24 @@ export function createProductionChangeReminderAdapters({
     startTokenRefresh(homeTimeZone, onResult = () => undefined) {
       if (platform === 'web') return () => undefined;
       let listening = true;
+      const listenerGeneration = ++tokenListenerGeneration;
       const subscription = notifications.addPushTokenListener((token) => {
-        queueTokenRefresh(homeTimeZone, token.data, (result) => {
-          if (listening) onResult(result);
-        });
+        if (!listening) return;
+        queueTokenRefresh(
+          homeTimeZone,
+          token.data,
+          listenerGeneration,
+          (result) => {
+            if (listening) onResult(result);
+          },
+        );
       });
       return () => {
         listening = false;
+        if (tokenListenerGeneration === listenerGeneration) {
+          tokenListenerGeneration += 1;
+          queuedRefreshToken = null;
+        }
         subscription.remove();
       };
     },

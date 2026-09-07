@@ -444,7 +444,38 @@ describe('Change Reminder session', () => {
       preferences: { oneDayEnabled: true, oneWeekEnabled: true },
     });
     session.dispatch({ type: 'cancel-disable' });
-    expect(session.getSnapshot()).toMatchObject({ kind: 'enabled' });
+    expect(session.getSnapshot()).toMatchObject({ kind: 'disable-failed' });
+    stop();
+  });
+
+  it('restores an unconfirmed deletion as retryable without offering opt-in', async () => {
+    const boundary = adapters({
+      disable: jest.fn(async () => ({ kind: 'disabled' as const })),
+      restore: jest.fn(async () => ({
+        homeTimeZone: 'Australia/Sydney',
+        kind: 'deleting' as const,
+        preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+      })),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'disable-failed',
+      ),
+    ).toEqual({
+      kind: 'disable-failed',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    session.dispatch({ type: 'cancel-disable' });
+    expect(session.getSnapshot()).toMatchObject({ kind: 'disable-failed' });
+    session.dispatch({ type: 'confirm-disable' });
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'disabled');
+    expect(boundary.disable).toHaveBeenCalledTimes(1);
     stop();
   });
 
