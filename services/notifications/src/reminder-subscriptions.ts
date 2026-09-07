@@ -116,9 +116,29 @@ export interface ReminderSubscriptionStore {
     >,
     invalidatedAt?: Date,
   ) => Promise<'removed' | 'not-found' | 'token-replaced'>;
+  /**
+   * Returns only the fields needed by the owner-gated smoke handler. Dispatch
+   * uses getSubscriptionSnapshot so it can fence an async send by generation.
+   */
   readonly getSubscription: (
     installationId: string,
   ) => Promise<StoredReminderSubscription | null>;
+  readonly getSubscriptionSnapshot: (
+    installationId: string,
+  ) => Promise<ReminderSubscriptionSnapshot | null>;
+  /**
+   * Provider invalid-token cleanup must include the generation that was sent.
+   * This prevents a same-token re-registration from being removed by a late
+   * provider response.
+   */
+  readonly removeIfDeviceTokenAndGenerationMatches: (
+    subscription: Pick<
+      StoredReminderSubscription,
+      'deviceToken' | 'installationId'
+    >,
+    attemptGeneration: number,
+    invalidatedAt?: Date,
+  ) => Promise<'removed' | 'not-found' | 'token-replaced'>;
   readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
   readonly createSubscription: (
     record: ReminderSubscriptionRecord,
@@ -142,6 +162,14 @@ export interface StoredReminderSubscription {
   readonly deviceToken: string;
   readonly installationId: string;
   readonly platform: 'android' | 'ios';
+}
+
+export interface ReminderSubscriptionSnapshot extends StoredReminderSubscription {
+  readonly attemptGeneration: number;
+  readonly homeTimeZone: string;
+  readonly oneDayEnabled: boolean;
+  readonly oneWeekEnabled: boolean;
+  readonly registeredAt?: Date;
 }
 
 export function hashOpaqueValue(value: string) {
@@ -458,6 +486,107 @@ function preservesPostInvalidationRegistration(
   );
 }
 
+function storedSubscription(
+  existing: SubscriptionEntity,
+  installationId: string,
+): StoredReminderSubscription | null {
+  return existing.platform === 'android' || existing.platform === 'ios'
+    ? {
+        deviceToken: existing.deviceToken,
+        installationId,
+        platform: existing.platform,
+      }
+    : null;
+}
+
+function subscriptionSnapshot(
+  existing: SubscriptionEntity,
+  installationId: string,
+): ReminderSubscriptionSnapshot | null {
+  const subscription = storedSubscription(existing, installationId);
+  if (
+    subscription === null ||
+    !Number.isSafeInteger(existing.attemptGeneration) ||
+    existing.attemptGeneration < 1 ||
+    existing.homeTimeZone === undefined ||
+    canonicalAustralianZoneId(existing.homeTimeZone) !==
+      existing.homeTimeZone ||
+    typeof existing.oneDayEnabled !== 'boolean' ||
+    typeof existing.oneWeekEnabled !== 'boolean' ||
+    (!existing.oneDayEnabled && !existing.oneWeekEnabled)
+  ) {
+    return null;
+  }
+  return {
+    ...subscription,
+    attemptGeneration: existing.attemptGeneration,
+    homeTimeZone: existing.homeTimeZone,
+    oneDayEnabled: existing.oneDayEnabled,
+    oneWeekEnabled: existing.oneWeekEnabled,
+    ...(existing.registeredAt === undefined
+      ? {}
+      : { registeredAt: existing.registeredAt }),
+  };
+}
+
+async function removeStoredSubscription(
+  subscriptions: SubscriptionTable,
+  subscription: Pick<
+    StoredReminderSubscription,
+    'deviceToken' | 'installationId'
+  >,
+  attemptGeneration: number | undefined,
+  invalidatedAt: Date | undefined,
+) {
+  for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
+    let existing: SubscriptionEntity;
+    try {
+      existing = await subscriptions.get(
+        subscriptionPartitionKey,
+        subscription.installationId,
+      );
+    } catch (error) {
+      if (statusCode(error) === 404) return 'not-found' as const;
+      throw error;
+    }
+    if (existing.deviceToken !== subscription.deviceToken) {
+      return 'token-replaced' as const;
+    }
+    if (
+      attemptGeneration !== undefined &&
+      existing.attemptGeneration !== attemptGeneration
+    ) {
+      return 'token-replaced' as const;
+    }
+    if (
+      preservesPostInvalidationRegistration(
+        existing.registeredAt,
+        invalidatedAt,
+      )
+    ) {
+      return 'token-replaced' as const;
+    }
+    try {
+      await subscriptions.delete(
+        subscriptionPartitionKey,
+        subscription.installationId,
+        existing.etag,
+      );
+      return 'removed' as const;
+    } catch (error) {
+      const deleteStatus = statusCode(error);
+      if (
+        deleteStatus !== 404 &&
+        deleteStatus !== 409 &&
+        deleteStatus !== 412
+      ) {
+        throw error;
+      }
+    }
+  }
+  throw new Error('Subscription removal contention exceeded retry limit');
+}
+
 export function createTableReminderSubscriptionStore(
   subscriptions: SubscriptionTable,
   throttles: ThrottleTable,
@@ -469,60 +598,43 @@ export function createTableReminderSubscriptionStore(
           subscriptionPartitionKey,
           installationId,
         );
-        return existing.platform === 'android' || existing.platform === 'ios'
-          ? {
-              deviceToken: existing.deviceToken,
-              installationId,
-              platform: existing.platform,
-            }
-          : null;
+        return storedSubscription(existing, installationId);
+      } catch (error) {
+        if (statusCode(error) === 404) return null;
+        throw error;
+      }
+    },
+    async getSubscriptionSnapshot(installationId) {
+      try {
+        const existing = await subscriptions.get(
+          subscriptionPartitionKey,
+          installationId,
+        );
+        return subscriptionSnapshot(existing, installationId);
       } catch (error) {
         if (statusCode(error) === 404) return null;
         throw error;
       }
     },
     async removeIfDeviceTokenMatches(subscription, invalidatedAt) {
-      for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-        let existing: SubscriptionEntity;
-        try {
-          existing = await subscriptions.get(
-            subscriptionPartitionKey,
-            subscription.installationId,
-          );
-        } catch (error) {
-          if (statusCode(error) === 404) return 'not-found';
-          throw error;
-        }
-        if (existing.deviceToken !== subscription.deviceToken) {
-          return 'token-replaced';
-        }
-        if (
-          preservesPostInvalidationRegistration(
-            existing.registeredAt,
-            invalidatedAt,
-          )
-        ) {
-          return 'token-replaced';
-        }
-        try {
-          await subscriptions.delete(
-            subscriptionPartitionKey,
-            subscription.installationId,
-            existing.etag,
-          );
-          return 'removed';
-        } catch (error) {
-          const deleteStatus = statusCode(error);
-          if (
-            deleteStatus !== 404 &&
-            deleteStatus !== 409 &&
-            deleteStatus !== 412
-          ) {
-            throw error;
-          }
-        }
-      }
-      throw new Error('Subscription removal contention exceeded retry limit');
+      return removeStoredSubscription(
+        subscriptions,
+        subscription,
+        undefined,
+        invalidatedAt,
+      );
+    },
+    async removeIfDeviceTokenAndGenerationMatches(
+      subscription,
+      attemptGeneration,
+      invalidatedAt,
+    ) {
+      return removeStoredSubscription(
+        subscriptions,
+        subscription,
+        attemptGeneration,
+        invalidatedAt,
+      );
     },
     async createSubscription(record) {
       const entity = {
