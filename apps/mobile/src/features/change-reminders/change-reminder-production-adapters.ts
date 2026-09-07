@@ -382,6 +382,7 @@ export function createProductionChangeReminderAdapters({
     preferences: ChangeReminderPreferences,
     expectedRegistrationRequestId?: string,
     expectedInstallationId?: string,
+    preservePreferenceContext = false,
   ): Promise<ChangeReminderEnableResult> {
     const registrationEndpoint = parseReminderRegistrationEndpoint(endpoint);
     if (registrationEndpoint === null || !validDeviceToken(deviceToken)) {
@@ -434,18 +435,28 @@ export function createProductionChangeReminderAdapters({
           saved?.registrationRequestId ?? (await createRegistrationRequestId()),
         version: 4 as const,
       };
+      const carriesPreferenceContext =
+        preservePreferenceContext ||
+        (saved?.state === 'pending-update' &&
+          saved.confirmedOneDayEnabled !== undefined &&
+          saved.confirmedOneWeekEnabled !== undefined);
       const pending =
         saved?.state === 'registered' || saved?.state === 'pending-update'
           ? ({
               ...base,
-              confirmedOneDayEnabled:
-                saved.state === 'pending-update'
-                  ? (saved.confirmedOneDayEnabled ?? saved.oneDayEnabled)
-                  : saved.oneDayEnabled,
-              confirmedOneWeekEnabled:
-                saved.state === 'pending-update'
-                  ? (saved.confirmedOneWeekEnabled ?? saved.oneWeekEnabled)
-                  : saved.oneWeekEnabled,
+              ...(carriesPreferenceContext
+                ? {
+                    confirmedOneDayEnabled:
+                      saved.state === 'pending-update'
+                        ? (saved.confirmedOneDayEnabled ?? saved.oneDayEnabled)
+                        : saved.oneDayEnabled,
+                    confirmedOneWeekEnabled:
+                      saved.state === 'pending-update'
+                        ? (saved.confirmedOneWeekEnabled ??
+                          saved.oneWeekEnabled)
+                        : saved.oneWeekEnabled,
+                  }
+                : {}),
               credential: saved.credential,
               installationId: saved.installationId,
               state: 'pending-update' as const,
@@ -700,9 +711,7 @@ export function createProductionChangeReminderAdapters({
           kind: 'pending',
           ...(saved.state === 'pending-update' &&
           saved.confirmedOneDayEnabled !== undefined &&
-          saved.confirmedOneWeekEnabled !== undefined &&
-          (saved.oneDayEnabled !== saved.confirmedOneDayEnabled ||
-            saved.oneWeekEnabled !== saved.confirmedOneWeekEnabled)
+          saved.confirmedOneWeekEnabled !== undefined
             ? {
                 pendingPreferences: {
                   confirmed: {
@@ -736,19 +745,25 @@ export function createProductionChangeReminderAdapters({
         return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
       }
       if (saved.version !== 4 || saved.deviceToken !== currentToken) {
-        const result = await enqueue(() =>
-          synchronize(
-            saved.homeTimeZone,
+        const result = await enqueue(async () => {
+          const latest = await loadStoredState();
+          return synchronize(
+            latest?.homeTimeZone ?? saved.homeTimeZone,
             currentToken,
             true,
-            {
-              oneDayEnabled: saved.oneDayEnabled,
-              oneWeekEnabled: saved.oneWeekEnabled,
-            },
+            latest === null
+              ? {
+                  oneDayEnabled: saved.oneDayEnabled,
+                  oneWeekEnabled: saved.oneWeekEnabled,
+                }
+              : {
+                  oneDayEnabled: latest.oneDayEnabled,
+                  oneWeekEnabled: latest.oneWeekEnabled,
+                },
             saved.registrationRequestId,
             saved.installationId,
-          ),
-        );
+          );
+        });
         if (result.kind !== 'enabled') {
           return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
         }
@@ -797,6 +812,9 @@ export function createProductionChangeReminderAdapters({
           saved.deviceToken,
           true,
           preferences,
+          undefined,
+          undefined,
+          true,
         );
       });
     },

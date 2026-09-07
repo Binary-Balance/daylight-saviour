@@ -206,6 +206,7 @@ export function createChangeReminderSession({
   function updatePreferences(
     preferences: ChangeReminderPreferences,
     confirmed: ChangeReminderPreferences,
+    forceAttempt = false,
   ) {
     if (!preferences.oneDayEnabled && !preferences.oneWeekEnabled) {
       beginOperation();
@@ -213,6 +214,7 @@ export function createChangeReminderSession({
       return;
     }
     if (
+      !forceAttempt &&
       preferences.oneDayEnabled === confirmed.oneDayEnabled &&
       preferences.oneWeekEnabled === confirmed.oneWeekEnabled
     )
@@ -300,12 +302,16 @@ export function createChangeReminderSession({
     }
     if (event.type === 'retry-preferences') {
       if (snapshot.kind === 'preferences-failed')
-        updatePreferences(snapshot.proposedPreferences, snapshot.preferences);
+        updatePreferences(
+          snapshot.proposedPreferences,
+          snapshot.preferences,
+          true,
+        );
       return;
     }
     if (event.type === 'cancel-preferences') {
       if (snapshot.kind === 'preferences-failed')
-        publish({ kind: 'enabled', preferences: snapshot.preferences });
+        updatePreferences(snapshot.preferences, snapshot.preferences, true);
       return;
     }
     if (event.type === 'confirm-disable') {

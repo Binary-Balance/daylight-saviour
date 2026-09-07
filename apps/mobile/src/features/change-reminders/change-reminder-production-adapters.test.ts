@@ -916,17 +916,18 @@ describe('production Change Reminder adapters', () => {
         version: 4,
       }),
     };
+    const fetchImplementation = jest
+      .fn()
+      .mockResolvedValue(
+        new Response(null, { status: 204 }),
+      ) as jest.MockedFunction<typeof fetch>;
     const test = harness({
       setItemImplementation: async () => {
         writes += 1;
         if (writes === 2) throw new Error('SecureStore write failed');
       },
       storage,
-      fetchImplementation: jest
-        .fn()
-        .mockResolvedValue(
-          new Response(null, { status: 204 }),
-        ) as jest.MockedFunction<typeof fetch>,
+      fetchImplementation,
     });
 
     await expect(
@@ -942,8 +943,9 @@ describe('production Change Reminder adapters', () => {
       state: 'pending-update',
     });
 
+    const recreated = harness({ fetchImplementation, storage });
     await expect(
-      test.adapters.updatePreferences({
+      recreated.adapters.updatePreferences({
         oneDayEnabled: false,
         oneWeekEnabled: true,
       }),
@@ -955,7 +957,7 @@ describe('production Change Reminder adapters', () => {
       state: 'registered',
     });
     expect(
-      test.dependencies.fetch.mock.calls.map(
+      fetchImplementation.mock.calls.map(
         (call) => JSON.parse(String(call[1]?.body)).attemptGeneration,
       ),
     ).toEqual([5, 6]);
@@ -1017,28 +1019,29 @@ describe('production Change Reminder adapters', () => {
     let serverPreferences = { oneDayEnabled: true, oneWeekEnabled: true };
     let loseResponse = true;
     const attempts: number[] = [];
+    const serverRequest = jest.fn(async (_input: URL | RequestInfo, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        attemptGeneration: number;
+        oneDayEnabled: boolean;
+        oneWeekEnabled: boolean;
+      };
+      attempts.push(body.attemptGeneration);
+      if (body.attemptGeneration <= serverGeneration) {
+        return new Response(null, { status: 409 });
+      }
+      serverGeneration = body.attemptGeneration;
+      serverPreferences = {
+        oneDayEnabled: body.oneDayEnabled,
+        oneWeekEnabled: body.oneWeekEnabled,
+      };
+      if (loseResponse) {
+        loseResponse = false;
+        throw new Error('response lost after server commit');
+      }
+      return new Response(null, { status: 204 });
+    }) as jest.MockedFunction<typeof fetch>;
     const test = harness({
-      fetchImplementation: jest.fn(async (_input, init) => {
-        const body = JSON.parse(String(init?.body)) as {
-          attemptGeneration: number;
-          oneDayEnabled: boolean;
-          oneWeekEnabled: boolean;
-        };
-        attempts.push(body.attemptGeneration);
-        if (body.attemptGeneration <= serverGeneration) {
-          return new Response(null, { status: 409 });
-        }
-        serverGeneration = body.attemptGeneration;
-        serverPreferences = {
-          oneDayEnabled: body.oneDayEnabled,
-          oneWeekEnabled: body.oneWeekEnabled,
-        };
-        if (loseResponse) {
-          loseResponse = false;
-          throw new Error('response lost after server commit');
-        }
-        return new Response(null, { status: 204 });
-      }) as jest.MockedFunction<typeof fetch>,
+      fetchImplementation: serverRequest,
       storage,
     });
 
@@ -1049,8 +1052,12 @@ describe('production Change Reminder adapters', () => {
       }),
     ).resolves.toEqual({ kind: 'failed' });
 
+    const recreated = harness({
+      fetchImplementation: serverRequest,
+      storage,
+    });
     await expect(
-      test.adapters.updatePreferences({
+      recreated.adapters.updatePreferences({
         oneDayEnabled: false,
         oneWeekEnabled: true,
       }),
@@ -1064,6 +1071,190 @@ describe('production Change Reminder adapters', () => {
     });
     expect(JSON.parse(storage.value ?? '')).toMatchObject({
       attemptGeneration: 6,
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+      state: 'registered',
+    });
+  });
+
+  it('reconciles cancelled timings through newer uncertain attempts after restart', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    let serverGeneration = 4;
+    let serverPreferences = { oneDayEnabled: true, oneWeekEnabled: true };
+    const attempts: {
+      readonly attemptGeneration: number;
+      readonly oneDayEnabled: boolean;
+    }[] = [];
+    const loseResponses = new Set([5, 6]);
+    const serverRequest = jest.fn(async (_input: URL | RequestInfo, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        attemptGeneration: number;
+        oneDayEnabled: boolean;
+        oneWeekEnabled: boolean;
+      };
+      attempts.push({
+        attemptGeneration: body.attemptGeneration,
+        oneDayEnabled: body.oneDayEnabled,
+      });
+      if (body.attemptGeneration <= serverGeneration) {
+        return new Response(null, { status: 409 });
+      }
+      serverGeneration = body.attemptGeneration;
+      serverPreferences = {
+        oneDayEnabled: body.oneDayEnabled,
+        oneWeekEnabled: true,
+      };
+      if (loseResponses.delete(body.attemptGeneration)) {
+        throw new Error('response lost after server commit');
+      }
+      return new Response(null, { status: 204 });
+    }) as jest.MockedFunction<typeof fetch>;
+    const first = harness({ fetchImplementation: serverRequest, storage });
+
+    await expect(
+      first.adapters.updatePreferences({
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+      }),
+    ).resolves.toEqual({ kind: 'failed' });
+    await expect(
+      first.adapters.updatePreferences({
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+      }),
+    ).resolves.toEqual({ kind: 'failed' });
+
+    const recreated = harness({ fetchImplementation: serverRequest, storage });
+    await expect(recreated.adapters.restore()).resolves.toEqual({
+      homeTimeZone: 'Australia/Sydney',
+      kind: 'pending',
+      pendingPreferences: {
+        confirmed: { oneDayEnabled: true, oneWeekEnabled: true },
+        proposed: { oneDayEnabled: true, oneWeekEnabled: true },
+      },
+    });
+    await expect(
+      recreated.adapters.updatePreferences({
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+      }),
+    ).resolves.toEqual({ kind: 'enabled' });
+
+    expect(attempts).toEqual([
+      { attemptGeneration: 5, oneDayEnabled: false },
+      { attemptGeneration: 6, oneDayEnabled: true },
+      { attemptGeneration: 7, oneDayEnabled: true },
+    ]);
+    expect(serverGeneration).toBe(7);
+    expect(serverPreferences).toEqual({
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
+    });
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 7,
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
+      state: 'registered',
+    });
+  });
+
+  it('serializes a concurrent token refresh after a pending preference attempt', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    const replacement = 'fcm-token:replacement_valid.characters-456';
+    let serverGeneration = 4;
+    let releasePreferenceRequest!: () => void;
+    let markPreferenceRequestStarted!: () => void;
+    const preferenceRequestStarted = new Promise<void>((resolve) => {
+      markPreferenceRequestStarted = resolve;
+    });
+    const attempts: {
+      readonly attemptGeneration: number;
+      readonly deviceToken: string;
+      readonly oneDayEnabled: boolean;
+    }[] = [];
+    const test = harness({
+      fetchImplementation: jest.fn(async (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as {
+          attemptGeneration: number;
+          deviceToken: string;
+          oneDayEnabled: boolean;
+          oneWeekEnabled: boolean;
+        };
+        attempts.push(body);
+        if (body.attemptGeneration <= serverGeneration) {
+          return new Response(null, { status: 409 });
+        }
+        serverGeneration = body.attemptGeneration;
+        if (body.attemptGeneration === 5) {
+          markPreferenceRequestStarted();
+          await new Promise<void>((resolve) => {
+            releasePreferenceRequest = resolve;
+          });
+          throw new Error('response lost after server commit');
+        }
+        return new Response(null, { status: 204 });
+      }) as jest.MockedFunction<typeof fetch>,
+      storage,
+    });
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove: jest.fn() };
+      });
+
+    const preferenceUpdate = test.adapters.updatePreferences({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    });
+    await preferenceRequestStarted;
+    test.adapters.startTokenRefresh('Australia/Sydney');
+    listener?.({ data: replacement });
+    releasePreferenceRequest();
+
+    await expect(preferenceUpdate).resolves.toEqual({ kind: 'failed' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(attempts).toEqual([
+      expect.objectContaining({
+        attemptGeneration: 5,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        oneDayEnabled: false,
+      }),
+      expect.objectContaining({
+        attemptGeneration: 6,
+        deviceToken: replacement,
+        oneDayEnabled: false,
+      }),
+    ]);
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 6,
+      deviceToken: replacement,
       oneDayEnabled: false,
       oneWeekEnabled: true,
       state: 'registered',
@@ -1317,6 +1508,108 @@ describe('production Change Reminder adapters', () => {
     expect(test.stored()).toBeNull();
   });
 
+  it('reloads latest timing intent before a delayed restore token update', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:old_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    const replacement = 'fcm-token:replacement_valid.characters-456';
+    let serverGeneration = 4;
+    let serverPreferences = { oneDayEnabled: true, oneWeekEnabled: true };
+    const attempts: {
+      readonly attemptGeneration: number;
+      readonly deviceToken: string;
+      readonly oneDayEnabled: boolean;
+    }[] = [];
+    const serverRequest = jest.fn(async (_input: URL | RequestInfo, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        attemptGeneration: number;
+        deviceToken: string;
+        oneDayEnabled: boolean;
+        oneWeekEnabled: boolean;
+      };
+      attempts.push({
+        attemptGeneration: body.attemptGeneration,
+        deviceToken: body.deviceToken,
+        oneDayEnabled: body.oneDayEnabled,
+      });
+      if (body.attemptGeneration <= serverGeneration) {
+        return new Response(null, { status: 409 });
+      }
+      serverGeneration = body.attemptGeneration;
+      serverPreferences = {
+        oneDayEnabled: body.oneDayEnabled,
+        oneWeekEnabled: body.oneWeekEnabled,
+      };
+      return new Response(null, { status: 204 });
+    }) as jest.MockedFunction<typeof fetch>;
+    let releaseToken!: () => void;
+    let markTokenRequested!: () => void;
+    const tokenRequested = new Promise<void>((resolve) => {
+      markTokenRequested = resolve;
+    });
+    const test = harness({
+      currentToken: replacement,
+      fetchImplementation: serverRequest,
+      storage,
+    });
+    jest
+      .mocked(test.dependencies.notifications.getDevicePushTokenAsync)
+      .mockImplementation(
+        async () =>
+          await new Promise<{ readonly data: string }>((resolve) => {
+            markTokenRequested();
+            releaseToken = () => resolve({ data: replacement });
+          }),
+      );
+
+    const restoring = test.adapters.restore();
+    await tokenRequested;
+    await expect(
+      test.adapters.updatePreferences({
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+      }),
+    ).resolves.toEqual({ kind: 'enabled' });
+    releaseToken();
+
+    await expect(restoring).resolves.toMatchObject({
+      kind: 'registered',
+      registration: {
+        attemptGeneration: 6,
+        deviceToken: replacement,
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+      },
+    });
+    expect(attempts).toEqual([
+      {
+        attemptGeneration: 5,
+        deviceToken: 'fcm-token:old_valid.characters-123',
+        oneDayEnabled: false,
+      },
+      {
+        attemptGeneration: 6,
+        deviceToken: replacement,
+        oneDayEnabled: false,
+      },
+    ]);
+    expect(serverGeneration).toBe(6);
+    expect(serverPreferences).toEqual({
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    });
+  });
+
   it('keeps confirmed timing choices when a token refresh updates the registration', async () => {
     const test = harness({
       currentToken: 'fcm-token:replacement_valid.characters-456',
@@ -1403,8 +1696,6 @@ describe('production Change Reminder adapters', () => {
         value: JSON.stringify({
           ...responseBody,
           attemptGeneration: 5,
-          confirmedOneDayEnabled: true,
-          confirmedOneWeekEnabled: true,
           deviceToken: 'fcm-token:replacement_valid.characters-456',
           homeTimeZone: 'Australia/Sydney',
           oneDayEnabled: true,
