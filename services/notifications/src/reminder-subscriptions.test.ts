@@ -66,8 +66,10 @@ function store(
   return {
     createSubscription: async () => 'accepted',
     getSubscription: async () => null,
+    getSubscriptionSnapshot: async () => null,
     purgeExpiredThrottleRecords: async () => undefined,
     removeIfDeviceTokenMatches: async () => 'not-found',
+    removeIfDeviceTokenAndGenerationMatches: async () => 'not-found',
     takeInstallationAllowance: async () => true,
     updateSubscription: async () => 'accepted',
     takeSourceAllowance: async () => true,
@@ -94,6 +96,9 @@ function subscriptionTable(
       readonly attemptGeneration: number;
       readonly deviceToken: string;
       readonly etag: string;
+      readonly homeTimeZone?: string;
+      readonly oneDayEnabled?: boolean;
+      readonly oneWeekEnabled?: boolean;
       readonly partitionKey: string;
       readonly platform?: 'android' | 'ios';
       readonly registeredAt?: Date;
@@ -655,7 +660,90 @@ describe('Azure Table mapping', () => {
     );
 
     assert.equal(await tableStore.getSubscription('installation-id'), null);
+    assert.equal(
+      await tableStore.getSubscriptionSnapshot('installation-id'),
+      null,
+    );
   });
+
+  it('returns a validated snapshot with dispatch fields', async () => {
+    const registeredAt = new Date('2026-07-24T05:00:00.000Z');
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable({
+        get: async () => ({
+          attemptGeneration: 7,
+          deviceToken: validRegistration.deviceToken,
+          etag: 'etag',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: false,
+          partitionKey: 'subscriptions-v1',
+          platform: 'android',
+          registeredAt,
+          rowKey: 'installation-id',
+        }),
+      }),
+      unusedThrottleTable(),
+    );
+
+    assert.deepEqual(
+      await tableStore.getSubscriptionSnapshot('installation-id'),
+      {
+        attemptGeneration: 7,
+        deviceToken: validRegistration.deviceToken,
+        homeTimeZone: 'Australia/Sydney',
+        installationId: 'installation-id',
+        oneDayEnabled: true,
+        oneWeekEnabled: false,
+        platform: 'android',
+        registeredAt,
+      },
+    );
+  });
+
+  const validSnapshotEntity = {
+    attemptGeneration: 7,
+    deviceToken: validRegistration.deviceToken,
+    etag: 'etag',
+    homeTimeZone: 'Australia/Sydney',
+    oneDayEnabled: true,
+    oneWeekEnabled: true,
+    partitionKey: 'subscriptions-v1',
+    platform: 'android' as const,
+    rowKey: 'installation-id',
+  };
+  for (const [name, entity] of [
+    ['zero generation', { ...validSnapshotEntity, attemptGeneration: 0 }],
+    [
+      'fractional generation',
+      { ...validSnapshotEntity, attemptGeneration: 1.5 },
+    ],
+    ['invalid platform', { ...validSnapshotEntity, platform: 'web' as never }],
+    [
+      'noncanonical zone',
+      { ...validSnapshotEntity, homeTimeZone: 'Australia/ACT' },
+    ],
+    [
+      'non-boolean preference',
+      { ...validSnapshotEntity, oneDayEnabled: 'yes' as never },
+    ],
+    [
+      'both timings disabled',
+      { ...validSnapshotEntity, oneDayEnabled: false, oneWeekEnabled: false },
+    ],
+  ] as const) {
+    it(`rejects a snapshot with ${name}`, async () => {
+      const tableStore = createTableReminderSubscriptionStore(
+        subscriptionTable({ get: async () => entity as never }),
+        unusedThrottleTable(),
+      );
+
+      assert.equal(
+        await tableStore.getSubscriptionSnapshot('installation-id'),
+        null,
+      );
+    });
+  }
 
   it('preserves a non-404 subscription read failure', async () => {
     const tableStore = createTableReminderSubscriptionStore(
@@ -978,6 +1066,86 @@ describe('generation-ordered subscription persistence', () => {
       'removed',
     );
     assert.equal(subscriptions.rows.size, 0);
+  });
+
+  it('removes an exact token and generation with conditional cleanup', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const current = record(1);
+    await registrationStore.createSubscription(current);
+
+    assert.equal(
+      await registrationStore.removeIfDeviceTokenAndGenerationMatches(
+        {
+          deviceToken: current.deviceToken,
+          installationId: current.installationId,
+        },
+        current.attemptGeneration,
+      ),
+      'removed',
+    );
+    assert.equal(subscriptions.rows.size, 0);
+  });
+
+  it('preserves a newer same-token generation during conditional cleanup', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const original = record(1);
+    const replacement = { ...record(2), deviceToken: original.deviceToken };
+    await registrationStore.createSubscription(original);
+    await updateSubscription(registrationStore, replacement, 'credential-1');
+
+    assert.equal(
+      await registrationStore.removeIfDeviceTokenAndGenerationMatches(
+        {
+          deviceToken: original.deviceToken,
+          installationId: original.installationId,
+        },
+        original.attemptGeneration,
+      ),
+      'token-replaced',
+    );
+    assert.equal(onlyRow(subscriptions.rows).attemptGeneration, 2);
+  });
+
+  it('preserves a newer same-token generation after a storage CAS race', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const original = record(1);
+    const replacement = { ...record(2), deviceToken: original.deviceToken };
+    await registrationStore.createSubscription(original);
+    subscriptions.setBeforeDelete(async () => {
+      subscriptions.setBeforeDelete(undefined);
+      assert.equal(
+        await updateSubscription(
+          registrationStore,
+          replacement,
+          'credential-1',
+        ),
+        'accepted',
+      );
+    });
+
+    assert.equal(
+      await registrationStore.removeIfDeviceTokenAndGenerationMatches(
+        {
+          deviceToken: original.deviceToken,
+          installationId: original.installationId,
+        },
+        original.attemptGeneration,
+      ),
+      'token-replaced',
+    );
+    assert.equal(onlyRow(subscriptions.rows).attemptGeneration, 2);
   });
 
   it('removes an older matching registration after APNs invalidation', async () => {
