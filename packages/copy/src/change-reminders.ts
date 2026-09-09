@@ -111,6 +111,7 @@ export const changeReminders = Object.freeze({
   }),
   saving: 'Registering reminders…',
   savingPreferences: 'Saving reminder timings…',
+  savingZone: 'Updating reminders for your Home Time Zone…',
   timing: Object.freeze({
     oneDay: 'One day before',
     oneWeek: 'One week before',
@@ -122,6 +123,11 @@ export const changeReminders = Object.freeze({
   zoneMismatch: Object.freeze({
     body: 'Saved Change Reminders still follow a different Home Time Zone. They are not enabled for this Home Time Zone.',
     heading: 'REMINDER ZONE CHANGED',
+  }),
+  zoneFailed: Object.freeze({
+    body: 'Your Home Time Zone is saved, but the reminder update could not be confirmed. Remote reminders may still follow the previous zone. Try again to reconcile them.',
+    heading: 'HOME TIME ZONE CHANGE UNCONFIRMED',
+    retry: 'Try Home Time Zone update again',
   }),
   webUnavailable: Object.freeze({
     body: 'Change Reminders require the Android or iOS app. Web preview does not request notification permission.',

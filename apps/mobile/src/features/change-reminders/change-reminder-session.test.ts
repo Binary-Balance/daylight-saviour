@@ -244,6 +244,103 @@ describe('Change Reminder session', () => {
     stop();
   });
 
+  it('silently reconciles an old-zone registration after Home Time Zone changes', async () => {
+    const updateHomeTimeZone = jest.fn(async () => ({
+      kind: 'enabled' as const,
+    }));
+    const session = createChangeReminderSession({
+      adapters: adapters({
+        restore: jest.fn(async () => ({
+          kind: 'registered' as const,
+          notificationPermissionGranted: true,
+          registration: {
+            ...registration,
+            homeTimeZone: 'Australia/Brisbane',
+          },
+        })),
+        updateHomeTimeZone,
+      }),
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
+    ).toEqual({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
+    expect(updateHomeTimeZone).toHaveBeenCalledWith('Australia/Sydney');
+    stop();
+  });
+
+  it('keeps an uncertain zone update retryable in the foreground', async () => {
+    const updateHomeTimeZone = jest
+      .fn()
+      .mockResolvedValueOnce({ kind: 'failed' as const })
+      .mockResolvedValueOnce({ kind: 'enabled' as const });
+    const session = createChangeReminderSession({
+      adapters: adapters({
+        restore: jest.fn(async () => ({
+          kind: 'registered' as const,
+          notificationPermissionGranted: true,
+          registration: {
+            ...registration,
+            homeTimeZone: 'Australia/Brisbane',
+          },
+        })),
+        updateHomeTimeZone,
+      }),
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'zone-failed',
+      ),
+    ).toMatchObject({
+      kind: 'zone-failed',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
+    session.dispatch({ type: 'foreground' });
+    expect(session.getSnapshot()).toMatchObject({ kind: 'saving-zone' });
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+    expect(updateHomeTimeZone).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it('reconciles an older pending zone before rendering it enabled', async () => {
+    const updateHomeTimeZone = jest.fn(async () => ({
+      kind: 'enabled' as const,
+    }));
+    const session = createChangeReminderSession({
+      adapters: adapters({
+        restore: jest.fn(async () => ({
+          homeTimeZone: 'Australia/Brisbane',
+          kind: 'pending' as const,
+          pendingHomeTimeZone: {
+            confirmed: 'Australia/Melbourne',
+            proposed: 'Australia/Brisbane',
+          },
+        })),
+        updateHomeTimeZone,
+      }),
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled'),
+    ).toMatchObject({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
+    expect(updateHomeTimeZone).toHaveBeenCalledWith('Australia/Sydney');
+    stop();
+  });
+
   it('does not claim delivery after OS permission is revoked', async () => {
     const session = createChangeReminderSession({
       adapters: adapters({

@@ -281,6 +281,56 @@ it('renders truthful zone-mismatch and revoked-permission restore states', async
   expect(openSettings).toHaveBeenCalledTimes(1);
 });
 
+it('shows a recoverable Home Time Zone update failure', async () => {
+  let resolveUpdate!: (result: { readonly kind: 'failed' }) => void;
+  const updateHomeTimeZone = jest
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<{ readonly kind: 'failed' }>((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    )
+    .mockResolvedValueOnce({ kind: 'enabled' as const });
+  const boundary = adapters({
+    restore: jest.fn(async () => ({
+      kind: 'registered' as const,
+      notificationPermissionGranted: true,
+      registration: {
+        attemptGeneration: 1,
+        credential: 'c'.repeat(43),
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Brisbane',
+        installationId: 'i'.repeat(43),
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered' as const,
+        version: 4 as const,
+      },
+    })),
+    updateHomeTimeZone,
+  });
+  renderSection(boundary);
+
+  expect(
+    await screen.findByText('Updating reminders for your Home Time Zone…'),
+  ).toBeTruthy();
+  await act(async () => resolveUpdate({ kind: 'failed' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    /Home Time Zone is saved/i,
+  );
+  fireEvent.press(
+    screen.getByRole('button', { name: 'Try Home Time Zone update again' }),
+  );
+  expect(
+    await screen.findByText(
+      /one-week and one-day Change Reminders are enabled/i,
+    ),
+  ).toBeTruthy();
+  expect(updateHomeTimeZone).toHaveBeenCalledTimes(2);
+});
+
 it('stops token listening and shows retry when a valid refresh fails', async () => {
   let onResult:
     | ((result: {
