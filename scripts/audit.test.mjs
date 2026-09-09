@@ -61,7 +61,7 @@ const lock = {
     'node_modules/image-size': { version: '1.2.1' },
     'node_modules/metro': { dependencies: { 'image-size': '^1.0.2' } },
     'node_modules/expo-router': {
-      version: '57.0.19',
+      version: '57.0.20',
       dependencies: { 'query-string': '^7.1.3' },
     },
     'node_modules/query-string': {
@@ -256,6 +256,20 @@ test('rejects a changed decoder advisory, path, node, or lockfile version', () =
           'node_modules/query-string': {
             ...lock.packages['node_modules/query-string'],
             version: '7.1.4',
+          },
+        },
+      },
+    ],
+    [
+      audit([
+        allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
+      ]),
+      {
+        packages: {
+          ...lock.packages,
+          'node_modules/expo-router': {
+            ...lock.packages['node_modules/expo-router'],
+            version: '57.0.19',
           },
         },
       },

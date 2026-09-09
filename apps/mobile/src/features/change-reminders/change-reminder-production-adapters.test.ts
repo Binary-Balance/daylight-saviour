@@ -1,6 +1,7 @@
 import { AndroidImportance } from 'expo-notifications';
 
 import { createProductionChangeReminderAdapters } from './change-reminder-production-adapters';
+import { createChangeReminderSession } from './change-reminder-session';
 
 const responseBody = {
   credential: 'c'.repeat(43),
@@ -348,6 +349,609 @@ describe('production Change Reminder adapters', () => {
         state: 'registered',
         version: 4,
       },
+    });
+  });
+
+  it('updates the saved zone through the authenticated registration without permission work', async () => {
+    const test = harness({
+      existingPermission: { canAskAgain: false, granted: false },
+      fetchImplementation: jest.fn(
+        async (_input: URL | RequestInfo) =>
+          new Response(null, { status: 204 }),
+      ) as jest.MockedFunction<typeof fetch>,
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 4,
+        }),
+      },
+    });
+
+    await expect(
+      test.adapters.updateHomeTimeZone!('Australia/Queensland'),
+    ).resolves.toEqual({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    expect(
+      test.dependencies.notifications.getPermissionsAsync,
+    ).not.toHaveBeenCalled();
+    expect(
+      test.dependencies.notifications.getDevicePushTokenAsync,
+    ).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(String(test.dependencies.fetch.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({
+      attemptGeneration: 5,
+      deviceToken: 'fcm-token:with_valid.characters-123',
+      homeTimeZone: 'Australia/Brisbane',
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    });
+    expect(test.dependencies.fetch.mock.calls[0]?.[1]).toMatchObject({
+      headers: { authorization: `Bearer ${responseBody.credential}` },
+      method: 'PUT',
+    });
+    expect(JSON.parse(test.stored() ?? '')).toEqual({
+      ...responseBody,
+      attemptGeneration: 5,
+      deviceToken: 'fcm-token:with_valid.characters-123',
+      homeTimeZone: 'Australia/Brisbane',
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+      registrationRequestId: 'a'.repeat(64),
+      state: 'registered',
+      version: 4,
+    });
+  });
+
+  it('queues a same-zone restore intent behind an earlier zone selection from pending timings', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        confirmedOneDayEnabled: true,
+        confirmedOneWeekEnabled: true,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'pending-update',
+        version: 4,
+      }),
+    };
+    let blockPendingWrite = true;
+    let releasePendingWrite!: () => void;
+    let markPendingWriteStarted!: () => void;
+    const pendingWriteStarted = new Promise<void>((resolve) => {
+      markPendingWriteStarted = resolve;
+    });
+    const test = harness({
+      fetchImplementation: jest.fn(
+        async (_input: URL | RequestInfo) =>
+          new Response(null, { status: 204 }),
+      ) as jest.MockedFunction<typeof fetch>,
+      setItemImplementation: async (_key, value) => {
+        if (blockPendingWrite && JSON.parse(value).state === 'pending-update') {
+          blockPendingWrite = false;
+          markPendingWriteStarted();
+          await new Promise<void>((resolve) => {
+            releasePendingWrite = resolve;
+          });
+        }
+      },
+      storage,
+    });
+
+    const brisbane = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
+    await pendingWriteStarted;
+    const session = createChangeReminderSession({
+      adapters: test.adapters,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(session.getSnapshot()).toMatchObject({ kind: 'saving-zone' });
+
+    releasePendingWrite();
+    await expect(brisbane).resolves.toMatchObject({ kind: 'enabled' });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (session.getSnapshot().kind === 'enabled') break;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(session.getSnapshot()).toMatchObject({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    expect(
+      test.dependencies.fetch.mock.calls.map((call) =>
+        JSON.parse(String(call[1]?.body)),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        attemptGeneration: 5,
+        homeTimeZone: 'Australia/Brisbane',
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+      }),
+      expect.objectContaining({
+        attemptGeneration: 6,
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+      }),
+    ]);
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 6,
+      homeTimeZone: 'Australia/Sydney',
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+      state: 'registered',
+    });
+    stop();
+  });
+
+  it('keeps a failed zone update durable and exposes its confirmed zone for retry', async () => {
+    const test = harness({
+      fetchImplementation: jest.fn(async (_input: URL | RequestInfo) => {
+        throw new Error('offline');
+      }) as jest.MockedFunction<typeof fetch>,
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: false,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 4,
+        }),
+      },
+    });
+
+    await expect(
+      test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+    ).resolves.toEqual({ kind: 'failed' });
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 5,
+      confirmedHomeTimeZone: 'Australia/Sydney',
+      confirmedOneDayEnabled: true,
+      confirmedOneWeekEnabled: false,
+      homeTimeZone: 'Australia/Brisbane',
+      state: 'pending-update',
+    });
+    await expect(test.adapters.restore()).resolves.toEqual({
+      homeTimeZone: 'Australia/Brisbane',
+      kind: 'pending',
+      pendingHomeTimeZone: {
+        confirmed: 'Australia/Sydney',
+        proposed: 'Australia/Brisbane',
+      },
+      pendingPreferences: {
+        confirmed: { oneDayEnabled: true, oneWeekEnabled: false },
+        proposed: { oneDayEnabled: true, oneWeekEnabled: false },
+      },
+    });
+  });
+
+  it('returns proposed timing preferences after a pending zone update succeeds', async () => {
+    const test = harness({
+      fetchImplementation: jest.fn(
+        async (_input: URL | RequestInfo) =>
+          new Response(null, { status: 204 }),
+      ) as jest.MockedFunction<typeof fetch>,
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 5,
+          confirmedHomeTimeZone: 'Australia/Sydney',
+          confirmedOneDayEnabled: true,
+          confirmedOneWeekEnabled: true,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Brisbane',
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'pending-update',
+          version: 4,
+        }),
+      },
+    });
+
+    await expect(
+      test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+    ).resolves.toEqual({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 6,
+      homeTimeZone: 'Australia/Brisbane',
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+      state: 'registered',
+    });
+  });
+
+  it('converges after a zone response is lost and the app restarts', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    let serverGeneration = 4;
+    let loseResponse = true;
+    const attempts: { attemptGeneration: number; homeTimeZone: string }[] = [];
+    const serverRequest = jest.fn(async (_input: URL | RequestInfo, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        attemptGeneration: number;
+        homeTimeZone: string;
+      };
+      attempts.push(body);
+      if (body.attemptGeneration <= serverGeneration) {
+        return new Response(null, { status: 409 });
+      }
+      serverGeneration = body.attemptGeneration;
+      if (loseResponse) {
+        loseResponse = false;
+        throw new Error('response lost after server commit');
+      }
+      return new Response(null, { status: 204 });
+    }) as jest.MockedFunction<typeof fetch>;
+    const first = harness({ fetchImplementation: serverRequest, storage });
+
+    await expect(
+      first.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+    ).resolves.toEqual({ kind: 'failed' });
+    const recreated = harness({ fetchImplementation: serverRequest, storage });
+    await expect(
+      recreated.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+    ).resolves.toMatchObject({ kind: 'enabled' });
+
+    expect(
+      attempts.map(({ attemptGeneration, homeTimeZone }) => ({
+        attemptGeneration,
+        homeTimeZone,
+      })),
+    ).toEqual([
+      { attemptGeneration: 5, homeTimeZone: 'Australia/Brisbane' },
+      { attemptGeneration: 6, homeTimeZone: 'Australia/Brisbane' },
+    ]);
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 6,
+      homeTimeZone: 'Australia/Brisbane',
+      state: 'registered',
+    });
+  });
+
+  it('retries a zone update after its final SecureStore write fails', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    let writes = 0;
+    const first = harness({
+      fetchImplementation: jest.fn(
+        async (_input: URL | RequestInfo) =>
+          new Response(null, { status: 204 }),
+      ) as jest.MockedFunction<typeof fetch>,
+      setItemImplementation: async () => {
+        writes += 1;
+        if (writes === 2) throw new Error('SecureStore unavailable');
+      },
+      storage,
+    });
+
+    await expect(
+      first.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+    ).resolves.toEqual({ kind: 'failed' });
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 5,
+      confirmedHomeTimeZone: 'Australia/Sydney',
+      homeTimeZone: 'Australia/Brisbane',
+      state: 'pending-update',
+    });
+
+    const restarted = harness({
+      fetchImplementation: jest.fn(
+        async (_input: URL | RequestInfo) =>
+          new Response(null, { status: 204 }),
+      ) as jest.MockedFunction<typeof fetch>,
+      storage,
+    });
+    await expect(
+      restarted.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+    ).resolves.toMatchObject({ kind: 'enabled' });
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 6,
+      homeTimeZone: 'Australia/Brisbane',
+      state: 'registered',
+    });
+  });
+
+  it('serializes rapid zone selections and leaves the latest zone registered', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const serverRequest = jest.fn(async (_input: URL | RequestInfo, init) => {
+      if (serverRequest.mock.calls.length === 1) {
+        markFirstStarted();
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      return new Response(null, { status: 204 });
+    }) as jest.MockedFunction<typeof fetch>;
+    const test = harness({ fetchImplementation: serverRequest, storage });
+
+    const first = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
+    await firstStarted;
+    const second = test.adapters.updateHomeTimeZone!('Australia/Adelaide');
+    expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+    releaseFirst();
+    await expect(first).resolves.toMatchObject({ kind: 'enabled' });
+    await expect(second).resolves.toMatchObject({ kind: 'enabled' });
+
+    expect(
+      test.dependencies.fetch.mock.calls.map((call) =>
+        JSON.parse(String(call[1]?.body)),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        attemptGeneration: 5,
+        homeTimeZone: 'Australia/Brisbane',
+      }),
+      expect.objectContaining({
+        attemptGeneration: 6,
+        homeTimeZone: 'Australia/Adelaide',
+      }),
+    ]);
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 6,
+      homeTimeZone: 'Australia/Adelaide',
+      state: 'registered',
+    });
+  });
+
+  it('keeps a token replacement queued during a zone update on the latest zone', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    const replacement = 'fcm-token:replacement_valid.characters-456';
+    let releaseZone!: () => void;
+    let markZoneStarted!: () => void;
+    const zoneStarted = new Promise<void>((resolve) => {
+      markZoneStarted = resolve;
+    });
+    const serverRequest = jest.fn(async (_input: URL | RequestInfo, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        attemptGeneration: number;
+        deviceToken: string;
+        homeTimeZone: string;
+      };
+      if (body.attemptGeneration === 5) {
+        markZoneStarted();
+        await new Promise<void>((resolve) => {
+          releaseZone = resolve;
+        });
+      }
+      return new Response(null, { status: 204 });
+    }) as jest.MockedFunction<typeof fetch>;
+    const test = harness({ fetchImplementation: serverRequest, storage });
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove: jest.fn() };
+      });
+    test.adapters.startTokenRefresh('Australia/Sydney');
+
+    const zoneUpdate = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
+    await zoneStarted;
+    listener?.({ data: replacement });
+    releaseZone();
+
+    await expect(zoneUpdate).resolves.toMatchObject({ kind: 'enabled' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      test.dependencies.fetch.mock.calls.map((call) =>
+        JSON.parse(String(call[1]?.body)),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        attemptGeneration: 5,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Brisbane',
+      }),
+      expect.objectContaining({
+        attemptGeneration: 6,
+        deviceToken: replacement,
+        homeTimeZone: 'Australia/Brisbane',
+      }),
+    ]);
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 6,
+      deviceToken: replacement,
+      homeTimeZone: 'Australia/Brisbane',
+      state: 'registered',
+    });
+  });
+
+  it('keeps a token replacement on the latest of multiple queued zones', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    const replacement = 'fcm-token:replacement_valid.characters-456';
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const serverRequest = jest.fn(async (_input: URL | RequestInfo, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        attemptGeneration: number;
+        deviceToken: string;
+        homeTimeZone: string;
+      };
+      if (body.attemptGeneration === 5) {
+        markFirstStarted();
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      return new Response(null, { status: 204 });
+    }) as jest.MockedFunction<typeof fetch>;
+    const test = harness({ fetchImplementation: serverRequest, storage });
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove: jest.fn() };
+      });
+    test.adapters.startTokenRefresh('Australia/Sydney');
+
+    const first = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
+    await firstStarted;
+    listener?.({ data: replacement });
+    const latest = test.adapters.updateHomeTimeZone!('Australia/Adelaide');
+    releaseFirst();
+
+    await expect(first).resolves.toMatchObject({ kind: 'enabled' });
+    await expect(latest).resolves.toMatchObject({ kind: 'enabled' });
+    expect(
+      serverRequest.mock.calls.map((call) => JSON.parse(String(call[1]?.body))),
+    ).toEqual([
+      expect.objectContaining({
+        attemptGeneration: 5,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Brisbane',
+      }),
+      expect.objectContaining({
+        attemptGeneration: 6,
+        deviceToken: replacement,
+        homeTimeZone: 'Australia/Adelaide',
+      }),
+    ]);
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 6,
+      deviceToken: replacement,
+      homeTimeZone: 'Australia/Adelaide',
+      state: 'registered',
+    });
+  });
+
+  it('carries a timing intent through a pending zone update', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    const serverRequest = jest
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(null, { status: 204 }),
+      ) as jest.MockedFunction<typeof fetch>;
+    const test = harness({ fetchImplementation: serverRequest, storage });
+
+    await expect(
+      test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+    ).resolves.toEqual({ kind: 'failed' });
+    await expect(
+      test.adapters.updatePreferences({
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+      }),
+    ).resolves.toEqual({ kind: 'enabled' });
+
+    expect(
+      JSON.parse(String(serverRequest.mock.calls[1]?.[1]?.body)),
+    ).toMatchObject({
+      attemptGeneration: 6,
+      deviceToken: 'fcm-token:with_valid.characters-123',
+      homeTimeZone: 'Australia/Brisbane',
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+    });
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 6,
+      homeTimeZone: 'Australia/Brisbane',
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+      state: 'registered',
     });
   });
 

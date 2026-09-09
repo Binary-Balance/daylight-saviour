@@ -167,6 +167,9 @@ export default function StatusScreen({
           homeTimeZone={viewModel.zoneId}
           palette={palette}
           testBuild={changeReminderTestBuildEnabled()}
+          verifiedNoEvent={
+            viewModel.availability === 'ready' && viewModel.phase === 'no-event'
+          }
         />
 
         <DataFreshnessSection

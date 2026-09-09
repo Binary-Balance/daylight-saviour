@@ -66,11 +66,13 @@ export default function ChangeReminderSection({
   homeTimeZone,
   palette,
   testBuild = false,
+  verifiedNoEvent = false,
 }: {
   readonly adapters: ChangeReminderAdapters;
   readonly homeTimeZone: string;
   readonly palette: DaylightSaviourPalette;
   readonly testBuild?: boolean;
+  readonly verifiedNoEvent?: boolean;
 }) {
   const session = useMemo(
     () => createChangeReminderSession({ adapters, homeTimeZone }),
@@ -139,22 +141,25 @@ export default function ChangeReminderSection({
                     ? copy.changeReminders.permissionRevoked
                     : snapshot.kind === 'zone-mismatch'
                       ? copy.changeReminders.zoneMismatch
-                      : snapshot.kind === 'retry-pending'
-                        ? copy.changeReminders.retryPending
-                        : snapshot.kind === 'unavailable'
-                          ? copy.changeReminders.webUnavailable
-                          : snapshot.kind === 'loading' ||
-                              snapshot.kind === 'saving' ||
-                              snapshot.kind === 'saving-preferences' ||
-                              snapshot.kind === 'disabling'
-                            ? null
-                            : snapshot.kind === 'load-failed'
-                              ? copy.changeReminders.loadFailed
-                              : snapshot.kind === 'preferences-failed'
-                                ? copy.changeReminders.preferencesFailed
-                                : snapshot.kind === 'permission-denied'
-                                  ? copy.changeReminders.permissionDenied
-                                  : copy.changeReminders.failed;
+                      : snapshot.kind === 'zone-failed'
+                        ? copy.changeReminders.zoneFailed
+                        : snapshot.kind === 'retry-pending'
+                          ? copy.changeReminders.retryPending
+                          : snapshot.kind === 'unavailable'
+                            ? copy.changeReminders.webUnavailable
+                            : snapshot.kind === 'loading' ||
+                                snapshot.kind === 'saving' ||
+                                snapshot.kind === 'saving-preferences' ||
+                                snapshot.kind === 'saving-zone' ||
+                                snapshot.kind === 'disabling'
+                              ? null
+                              : snapshot.kind === 'load-failed'
+                                ? copy.changeReminders.loadFailed
+                                : snapshot.kind === 'preferences-failed'
+                                  ? copy.changeReminders.preferencesFailed
+                                  : snapshot.kind === 'permission-denied'
+                                    ? copy.changeReminders.permissionDenied
+                                    : copy.changeReminders.failed;
   const errorState =
     snapshot.kind === 'failed' ||
     snapshot.kind === 'load-failed' ||
@@ -164,11 +169,13 @@ export default function ChangeReminderSection({
     snapshot.kind === 'disable-failed' ||
     snapshot.kind === 'preferences-failed' ||
     snapshot.kind === 'retry-pending' ||
-    snapshot.kind === 'zone-mismatch';
+    snapshot.kind === 'zone-mismatch' ||
+    snapshot.kind === 'zone-failed';
   const pending =
     snapshot.kind === 'loading' ||
     snapshot.kind === 'saving' ||
     snapshot.kind === 'saving-preferences' ||
+    snapshot.kind === 'saving-zone' ||
     snapshot.kind === 'disabling';
 
   return (
@@ -193,7 +200,9 @@ export default function ChangeReminderSection({
               ? copy.changeReminders.saving
               : snapshot.kind === 'disabling'
                 ? copy.changeReminders.disabling
-                : copy.changeReminders.savingPreferences}
+                : snapshot.kind === 'saving-zone'
+                  ? copy.changeReminders.savingZone
+                  : copy.changeReminders.savingPreferences}
         </Text>
       ) : (
         <>
@@ -211,6 +220,11 @@ export default function ChangeReminderSection({
           </Text>
         </>
       )}
+      {snapshot.kind === 'enabled' && verifiedNoEvent ? (
+        <Text style={[styles.body, { color: palette.ink }]}>
+          {copy.changeReminders.noEvent}
+        </Text>
+      ) : null}
       {snapshot.kind === 'enabled' ||
       snapshot.kind === 'preferences-failed' ||
       snapshot.kind === 'disable-failed' ? (
@@ -298,6 +312,17 @@ export default function ChangeReminderSection({
             </Text>
           </Pressable>
         </View>
+      ) : null}
+      {snapshot.kind === 'zone-failed' ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => session.dispatch({ type: 'retry-zone' })}
+          style={[styles.button, { borderColor: palette.controlBoundary }]}
+        >
+          <Text style={[styles.buttonText, { color: palette.ink }]}>
+            {copy.changeReminders.zoneFailed.retry}
+          </Text>
+        </Pressable>
       ) : null}
       {snapshot.kind === 'failed' || snapshot.kind === 'permission-denied' ? (
         <Pressable

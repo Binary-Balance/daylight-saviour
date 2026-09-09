@@ -10,12 +10,25 @@ type EnabledSnapshot = {
   readonly preferences: ChangeReminderPreferences;
 };
 
+const defaultPreferences: ChangeReminderPreferences = {
+  oneDayEnabled: true,
+  oneWeekEnabled: true,
+};
+
 export type ChangeReminderSessionSnapshot =
   | { readonly kind: 'loading' }
   | { readonly kind: 'load-failed' }
   | { readonly kind: 'untouched' }
   | { readonly kind: 'explainer' }
   | { readonly kind: 'saving' }
+  | {
+      readonly kind: 'saving-zone';
+      readonly preferences: ChangeReminderPreferences;
+    }
+  | {
+      readonly kind: 'zone-failed';
+      readonly preferences: ChangeReminderPreferences;
+    }
   | { readonly kind: 'retry-pending' }
   | { readonly kind: 'zone-mismatch' }
   | { readonly kind: 'permission-revoked' }
@@ -49,6 +62,7 @@ export type ChangeReminderSessionEvent =
   | { readonly type: 'show-explainer' }
   | { readonly type: 'enable' }
   | { readonly type: 'retry-load' }
+  | { readonly type: 'retry-zone' }
   | { readonly type: 'foreground' }
   | {
       readonly type: 'change-preferences';
@@ -82,10 +96,7 @@ function preferencesOf(registration: {
 
 function enabledSnapshot(
   result: ChangeReminderEnableResult,
-  fallback: ChangeReminderPreferences = {
-    oneDayEnabled: true,
-    oneWeekEnabled: true,
-  },
+  fallback: ChangeReminderPreferences = defaultPreferences,
 ): EnabledSnapshot {
   return {
     kind: 'enabled',
@@ -107,6 +118,7 @@ export function createChangeReminderSession({
   let generation = 0;
   let lastConfirmedPreferences: ChangeReminderPreferences | null = null;
   let restoreInFlightGeneration: number | null = null;
+  let zonePermissionGranted = true;
   let snapshot: ChangeReminderSessionSnapshot = { kind: 'loading' };
   const listeners = new Set<() => void>();
 
@@ -126,27 +138,82 @@ export function createChangeReminderSession({
     return generation;
   }
 
+  function reconcileHomeTimeZone(
+    expectedGeneration: number,
+    preferences: ChangeReminderPreferences,
+    permissionGranted = zonePermissionGranted,
+  ) {
+    zonePermissionGranted = permissionGranted;
+    if (adapters.updateHomeTimeZone === undefined) {
+      if (current(expectedGeneration)) publish({ kind: 'zone-mismatch' });
+      return;
+    }
+    publish({ kind: 'saving-zone', preferences });
+    void adapters.updateHomeTimeZone(homeTimeZone).then(
+      (result) => {
+        if (!current(expectedGeneration)) return;
+        publish(
+          result.kind === 'enabled'
+            ? zonePermissionGranted
+              ? enabledSnapshot(result, preferences)
+              : { kind: 'permission-revoked' }
+            : { kind: 'zone-failed', preferences },
+        );
+      },
+      () => {
+        if (current(expectedGeneration))
+          publish({ kind: 'zone-failed', preferences });
+      },
+    );
+  }
+
+  function retryHomeTimeZone() {
+    if (snapshot.kind !== 'zone-failed') return;
+    const expectedGeneration = beginOperation();
+    reconcileHomeTimeZone(expectedGeneration, snapshot.preferences);
+  }
+
   async function restore(expectedGeneration: number) {
     try {
       const result = await adapters.restore();
       if (!current(expectedGeneration)) return;
       if (result.kind === 'unavailable') publish({ kind: 'unavailable' });
       else if (result.kind === 'unregistered') publish({ kind: 'untouched' });
-      else if (result.kind === 'pending')
-        publish(
-          result.pendingPreferences === undefined
-            ? { kind: 'retry-pending' }
-            : {
-                kind: 'preferences-failed',
-                preferences: result.pendingPreferences.confirmed,
-                proposedPreferences: result.pendingPreferences.proposed,
-              },
-        );
-      else if (result.kind === 'deleting')
+      else if (result.kind === 'pending') {
+        const preferences =
+          result.pendingPreferences?.confirmed ?? defaultPreferences;
+        const pendingZone = result.pendingHomeTimeZone;
+        // A pending timing write can leave the saved zone unchanged while a
+        // previous selection is already queued. Re-submit the current zone
+        // for every authenticated pending record so that this intent is kept
+        // behind the queued mutation, even when the saved zone matches.
+        if (adapters.updateHomeTimeZone !== undefined) {
+          reconcileHomeTimeZone(expectedGeneration, preferences);
+        } else if (pendingZone?.proposed === homeTimeZone) {
+          publish({ kind: 'zone-failed', preferences });
+        } else if (result.pendingPreferences === undefined) {
+          publish({ kind: 'retry-pending' });
+        } else {
+          publish({
+            kind: 'preferences-failed',
+            preferences: result.pendingPreferences.confirmed,
+            proposedPreferences: result.pendingPreferences.proposed,
+          });
+        }
+      } else if (result.kind === 'deleting')
         publish({
           kind: 'disable-failed',
           preferences: result.preferences,
         });
+      // A delayed pending write can leave the saved zone unchanged while a
+      // previous selection is already queued, so preserve this intent even
+      // when the restored record appears to match the current zone.
+      else if (adapters.updateHomeTimeZone !== undefined)
+        reconcileHomeTimeZone(
+          expectedGeneration,
+          preferencesOf(result.registration),
+          result.notificationPermissionGranted,
+        );
       else if (result.registration.homeTimeZone !== homeTimeZone)
         publish({ kind: 'zone-mismatch' });
       else if (!result.notificationPermissionGranted)
@@ -190,10 +257,7 @@ export function createChangeReminderSession({
             result.kind === 'enabled'
               ? enabledSnapshot(
                   result,
-                  lastConfirmedPreferences ?? {
-                    oneDayEnabled: true,
-                    oneWeekEnabled: true,
-                  },
+                  lastConfirmedPreferences ?? defaultPreferences,
                 )
               : result,
           );
@@ -281,13 +345,22 @@ export function createChangeReminderSession({
       requestRestore(generation);
       return;
     }
+    if (event.type === 'retry-zone') {
+      retryHomeTimeZone();
+      return;
+    }
     if (event.type === 'foreground') {
       if (
         snapshot.kind === 'saving' ||
         snapshot.kind === 'saving-preferences' ||
+        snapshot.kind === 'saving-zone' ||
         snapshot.kind === 'disabling'
       )
         return;
+      if (snapshot.kind === 'zone-failed') {
+        retryHomeTimeZone();
+        return;
+      }
       if (snapshot.kind === 'os-blocked') {
         enable();
         return;

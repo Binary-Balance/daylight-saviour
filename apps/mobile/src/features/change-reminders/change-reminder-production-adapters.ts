@@ -3,6 +3,7 @@ import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
 import { Linking, Platform } from 'react-native';
 import { parseReminderSubscriptionRegistrationResponse } from '@daylight-saviour/contracts';
+import { normalizeAustralianZoneId } from '@daylight-saviour/domain';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
 import { parseReminderRegistrationEndpoint } from './reminder-registration-endpoint.cjs';
@@ -71,6 +72,10 @@ function validStoredBase(candidate: Record<string, unknown>) {
     typeof candidate.homeTimeZone === 'string' &&
     canonicalAustralianZoneId(candidate.homeTimeZone) ===
       candidate.homeTimeZone &&
+    (candidate.confirmedHomeTimeZone === undefined ||
+      (typeof candidate.confirmedHomeTimeZone === 'string' &&
+        canonicalAustralianZoneId(candidate.confirmedHomeTimeZone) ===
+          candidate.confirmedHomeTimeZone)) &&
     typeof candidate.oneDayEnabled === 'boolean' &&
     typeof candidate.oneWeekEnabled === 'boolean' &&
     (candidate.oneDayEnabled || candidate.oneWeekEnabled)
@@ -131,6 +136,8 @@ function parseStoredState(value: string): StoredChangeReminderState {
   const hasConfirmedPreferences =
     typeof candidate.confirmedOneDayEnabled === 'boolean' &&
     typeof candidate.confirmedOneWeekEnabled === 'boolean';
+  const hasConfirmedHomeTimeZone =
+    typeof candidate.confirmedHomeTimeZone === 'string';
   const expectedKeys =
     candidate.state === 'pending' && !isLegacy
       ? [
@@ -149,6 +156,7 @@ function parseStoredState(value: string): StoredChangeReminderState {
             ...(hasConfirmedPreferences
               ? ['confirmedOneDayEnabled', 'confirmedOneWeekEnabled']
               : []),
+            ...(hasConfirmedHomeTimeZone ? ['confirmedHomeTimeZone'] : []),
             'credential',
             'deviceToken',
             'homeTimeZone',
@@ -290,6 +298,9 @@ function parseStoredState(value: string): StoredChangeReminderState {
             confirmedOneDayEnabled: Boolean(candidate.confirmedOneDayEnabled),
             confirmedOneWeekEnabled: Boolean(candidate.confirmedOneWeekEnabled),
           }
+        : {}),
+      ...(hasConfirmedHomeTimeZone
+        ? { confirmedHomeTimeZone: String(candidate.confirmedHomeTimeZone) }
         : {}),
       state: 'pending-update',
     } as StoredChangeReminderPendingUpdate;
@@ -440,6 +451,15 @@ export function createProductionChangeReminderAdapters({
         (saved?.state === 'pending-update' &&
           saved.confirmedOneDayEnabled !== undefined &&
           saved.confirmedOneWeekEnabled !== undefined);
+      const confirmedHomeTimeZone =
+        saved?.state === 'pending-update'
+          ? (saved.confirmedHomeTimeZone ??
+            (saved.homeTimeZone !== homeTimeZone
+              ? saved.homeTimeZone
+              : undefined))
+          : saved?.state === 'registered' && saved.homeTimeZone !== homeTimeZone
+            ? saved.homeTimeZone
+            : undefined;
       const pending =
         saved?.state === 'registered' || saved?.state === 'pending-update'
           ? ({
@@ -457,6 +477,9 @@ export function createProductionChangeReminderAdapters({
                         : saved.oneWeekEnabled,
                   }
                 : {}),
+              ...(confirmedHomeTimeZone === undefined
+                ? {}
+                : { confirmedHomeTimeZone }),
               credential: saved.credential,
               installationId: saved.installationId,
               state: 'pending-update' as const,
@@ -585,9 +608,11 @@ export function createProductionChangeReminderAdapters({
     if (platform === 'web' || !validDeviceToken(token)) return null;
     try {
       const saved = await loadStoredState();
-      if (saved === null || saved.homeTimeZone !== homeTimeZone) {
-        return null;
-      }
+      if (saved === null) return null;
+      const currentHomeTimeZone =
+        latestHomeTimeZoneIntent ??
+        (saved.homeTimeZone === homeTimeZone ? homeTimeZone : null);
+      if (currentHomeTimeZone === null) return null;
       if (saved.state === 'pending-delete') return null;
       if (
         saved.state === 'registered' &&
@@ -598,7 +623,7 @@ export function createProductionChangeReminderAdapters({
       }
       if (
         (
-          await synchronize(homeTimeZone, token, true, {
+          await synchronize(currentHomeTimeZone, token, true, {
             oneDayEnabled: saved.oneDayEnabled,
             oneWeekEnabled: saved.oneWeekEnabled,
           })
@@ -615,7 +640,7 @@ export function createProductionChangeReminderAdapters({
         kind: 'failed',
         retryable:
           (saved?.state === 'pending' || saved?.state === 'pending-update') &&
-          saved.homeTimeZone === homeTimeZone,
+          saved.homeTimeZone === (latestHomeTimeZoneIntent ?? homeTimeZone),
       };
     } catch {
       return { kind: 'failed', retryable: false };
@@ -636,6 +661,7 @@ export function createProductionChangeReminderAdapters({
   let refreshingToken: unknown = null;
   let lastRefreshedToken: unknown = null;
   let tokenListenerGeneration = 0;
+  let latestHomeTimeZoneIntent: string | null = null;
 
   function enqueue<T>(operation: () => Promise<T>) {
     const next = registrationQueue.then(operation, operation);
@@ -690,6 +716,48 @@ export function createProductionChangeReminderAdapters({
     });
   }
 
+  async function performHomeTimeZoneUpdate(
+    homeTimeZone: string,
+  ): Promise<ChangeReminderEnableResult> {
+    if (platform === 'web') return { kind: 'unavailable' };
+    const canonicalZoneId = normalizeAustralianZoneId(homeTimeZone);
+    if (canonicalZoneId === null) return { kind: 'failed' };
+    try {
+      const saved = await loadStoredState();
+      if (saved === null || saved.state === 'pending-delete') {
+        return { kind: 'failed' };
+      }
+      const deviceToken =
+        'deviceToken' in saved
+          ? saved.deviceToken
+          : (await notifications.getDevicePushTokenAsync()).data;
+      if (!validDeviceToken(deviceToken)) return { kind: 'failed' };
+      const preferences = {
+        oneDayEnabled: saved.oneDayEnabled,
+        oneWeekEnabled: saved.oneWeekEnabled,
+      };
+      if (
+        saved.state === 'registered' &&
+        saved.version === 4 &&
+        saved.homeTimeZone === canonicalZoneId
+      ) {
+        return { kind: 'enabled', preferences };
+      }
+      const result = await synchronize(
+        canonicalZoneId,
+        deviceToken,
+        true,
+        preferences,
+        undefined,
+        undefined,
+        true,
+      );
+      return result.kind === 'enabled' ? { ...result, preferences } : result;
+    } catch {
+      return { kind: 'failed' };
+    }
+  }
+
   return {
     async restore() {
       if (platform === 'web') return { kind: 'unavailable' };
@@ -722,6 +790,15 @@ export function createProductionChangeReminderAdapters({
                     oneDayEnabled: saved.oneDayEnabled,
                     oneWeekEnabled: saved.oneWeekEnabled,
                   },
+                },
+              }
+            : {}),
+          ...(saved.state === 'pending-update' &&
+          saved.confirmedHomeTimeZone !== undefined
+            ? {
+                pendingHomeTimeZone: {
+                  confirmed: saved.confirmedHomeTimeZone,
+                  proposed: saved.homeTimeZone,
                 },
               }
             : {}),
@@ -789,11 +866,19 @@ export function createProductionChangeReminderAdapters({
           ? enableInFlight.promise
           : Promise.resolve({ kind: 'failed' });
       }
+      const canonicalZoneId = normalizeAustralianZoneId(homeTimeZone);
+      if (canonicalZoneId !== null) latestHomeTimeZoneIntent = canonicalZoneId;
       const promise = enqueue(() => performEnable(homeTimeZone)).finally(() => {
         if (enableInFlight?.promise === promise) enableInFlight = null;
       });
       enableInFlight = { homeTimeZone, promise };
       return promise;
+    },
+    updateHomeTimeZone(homeTimeZone) {
+      const canonicalZoneId = normalizeAustralianZoneId(homeTimeZone);
+      if (canonicalZoneId === null) return Promise.resolve({ kind: 'failed' });
+      latestHomeTimeZoneIntent = canonicalZoneId;
+      return enqueue(() => performHomeTimeZoneUpdate(canonicalZoneId));
     },
     async updatePreferences(preferences) {
       if (!preferences.oneDayEnabled && !preferences.oneWeekEnabled) {
@@ -859,6 +944,7 @@ export function createProductionChangeReminderAdapters({
           );
           if (response.status !== 204) return { kind: 'failed' as const };
           await secureStore.deleteItemAsync(registrationKey);
+          latestHomeTimeZoneIntent = null;
           return { kind: 'disabled' as const };
         } catch {
           return { kind: 'failed' as const };

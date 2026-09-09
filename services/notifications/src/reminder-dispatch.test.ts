@@ -762,6 +762,57 @@ describe('reminder dispatch operation', () => {
     assert.equal((await fixture.ledger.get(identity))?.status, 'pending');
   });
 
+  it('rejects an old-zone dispatch after a newer registration is observed', async () => {
+    const fixture = operationFixture();
+    let releasePreparation!: () => void;
+    let providerEntered!: () => void;
+    const preparationComplete = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    const providerStarted = new Promise<void>((resolve) => {
+      providerEntered = resolve;
+    });
+    let sends = 0;
+    const operation = createReminderDispatchOperation({
+      ledger: fixture.ledger,
+      provider: {
+        send: async (_request, authorize) => {
+          providerEntered();
+          await preparationComplete;
+          if (!(await authorize())) return { kind: 'not-authorized' as const };
+          sends += 1;
+          return { kind: 'accepted' as const };
+        },
+      },
+      readCurrentContext: async () => fixture.getCurrent(),
+      subscriptionStore: {
+        getSubscriptionSnapshot: async () => fixture.getCurrent().subscription,
+        removeIfDeviceTokenAndGenerationMatches: async () => 'removed',
+      },
+      clock: () => new Date(window.startsAt),
+    });
+    const dispatch = operation.dispatch(context());
+    await providerStarted;
+    fixture.setCurrent(
+      context({
+        delivery: {
+          ...context().delivery,
+          homeTimeZone: 'Australia/Brisbane',
+        },
+        subscription: {
+          ...subscription,
+          attemptGeneration: 2,
+          homeTimeZone: 'Australia/Brisbane',
+        },
+      }),
+    );
+    releasePreparation();
+
+    assert.equal((await dispatch).kind, 'stale');
+    assert.equal(sends, 0);
+    assert.equal((await fixture.ledger.get(identity))?.status, 'pending');
+  });
+
   it('performs ownership reconciliation before the final authorization check', async () => {
     const fixture = operationFixture();
     let delayNextRead = false;
