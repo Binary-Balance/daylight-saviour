@@ -41,7 +41,7 @@ const isAllowedAdvisory = (packageName, vulnerability, advisory) =>
 const hasLockedExpoRouterDecoder = (lock) => {
   const packages = lock?.packages;
   return (
-    packages?.['node_modules/expo-router']?.version === '57.0.19' &&
+    packages?.['node_modules/expo-router']?.version === '57.0.20' &&
     packages?.['node_modules/expo-router']?.dependencies?.['query-string'] ===
       '^7.1.3' &&
     packages['node_modules/query-string']?.version === '7.1.3' &&
