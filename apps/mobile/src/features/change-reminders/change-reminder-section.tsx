@@ -66,11 +66,13 @@ export default function ChangeReminderSection({
   homeTimeZone,
   palette,
   testBuild = false,
+  verifiedNoEvent = false,
 }: {
   readonly adapters: ChangeReminderAdapters;
   readonly homeTimeZone: string;
   readonly palette: DaylightSaviourPalette;
   readonly testBuild?: boolean;
+  readonly verifiedNoEvent?: boolean;
 }) {
   const session = useMemo(
     () => createChangeReminderSession({ adapters, homeTimeZone }),
@@ -218,6 +220,11 @@ export default function ChangeReminderSection({
           </Text>
         </>
       )}
+      {snapshot.kind === 'enabled' && verifiedNoEvent ? (
+        <Text style={[styles.body, { color: palette.ink }]}>
+          {copy.changeReminders.noEvent}
+        </Text>
+      ) : null}
       {snapshot.kind === 'enabled' ||
       snapshot.kind === 'preferences-failed' ||
       snapshot.kind === 'disable-failed' ? (

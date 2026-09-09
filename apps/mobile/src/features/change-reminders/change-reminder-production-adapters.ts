@@ -743,7 +743,7 @@ export function createProductionChangeReminderAdapters({
       ) {
         return { kind: 'enabled', preferences };
       }
-      return synchronize(
+      const result = await synchronize(
         canonicalZoneId,
         deviceToken,
         true,
@@ -752,6 +752,7 @@ export function createProductionChangeReminderAdapters({
         undefined,
         true,
       );
+      return result.kind === 'enabled' ? { ...result, preferences } : result;
     } catch {
       return { kind: 'failed' };
     }

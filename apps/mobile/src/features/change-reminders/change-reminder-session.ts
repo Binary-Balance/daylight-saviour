@@ -206,12 +206,17 @@ export function createChangeReminderSession({
           kind: 'disable-failed',
           preferences: result.preferences,
         });
-      else if (result.registration.homeTimeZone !== homeTimeZone)
+      // A delayed pending write can leave the saved zone unchanged while a
+      // previous selection is already queued, so preserve this intent even
+      // when the restored record appears to match the current zone.
+      else if (adapters.updateHomeTimeZone !== undefined)
         reconcileHomeTimeZone(
           expectedGeneration,
           preferencesOf(result.registration),
           result.notificationPermissionGranted,
         );
+      else if (result.registration.homeTimeZone !== homeTimeZone)
+        publish({ kind: 'zone-mismatch' });
       else if (!result.notificationPermissionGranted)
         publish({ kind: 'permission-revoked' });
       else

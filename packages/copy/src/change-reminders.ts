@@ -54,6 +54,8 @@ export const changeReminders = Object.freeze({
     heading: 'REMINDER STATUS UNAVAILABLE',
     retry: 'Check reminder status again',
   }),
+  noEvent:
+    'No change scheduled. Keep reminders on and we’ll warn you if that changes.',
   notification: changeReminderNotification,
   notificationContext: Object.freeze({
     opened: Object.freeze({

@@ -28,13 +28,18 @@ function adapters(
   };
 }
 
-function renderSection(boundary: ChangeReminderAdapters, testBuild = false) {
+function renderSection(
+  boundary: ChangeReminderAdapters,
+  testBuild = false,
+  verifiedNoEvent = false,
+) {
   return render(
     <ChangeReminderSection
       adapters={boundary}
       homeTimeZone="Australia/Sydney"
       palette={daylightSaviourPalettes.light}
       testBuild={testBuild}
+      verifiedNoEvent={verifiedNoEvent}
     />,
   );
 }
@@ -329,6 +334,73 @@ it('shows a recoverable Home Time Zone update failure', async () => {
     ),
   ).toBeTruthy();
   expect(updateHomeTimeZone).toHaveBeenCalledTimes(2);
+});
+
+it('explains that enabled reminders stay dormant in a verified no-event zone', async () => {
+  const boundary = adapters({
+    restore: jest.fn(async () => ({
+      kind: 'registered' as const,
+      notificationPermissionGranted: true,
+      registration: {
+        attemptGeneration: 1,
+        credential: 'c'.repeat(43),
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        installationId: 'i'.repeat(43),
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered' as const,
+        version: 4 as const,
+      },
+    })),
+  });
+  renderSection(boundary, false, true);
+
+  expect(
+    await screen.findByText(
+      'No change scheduled. Keep reminders on and we’ll warn you if that changes.',
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole('switch', { name: 'One-week Change Reminder' }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole('switch', { name: 'One-day Change Reminder' }),
+  ).toBeTruthy();
+});
+
+it('does not show dormant copy without verified no-event facts', async () => {
+  const boundary = adapters({
+    restore: jest.fn(async () => ({
+      kind: 'registered' as const,
+      notificationPermissionGranted: true,
+      registration: {
+        attemptGeneration: 1,
+        credential: 'c'.repeat(43),
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        installationId: 'i'.repeat(43),
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered' as const,
+        version: 4 as const,
+      },
+    })),
+  });
+  renderSection(boundary);
+
+  expect(
+    await screen.findByText(
+      /one-week and one-day Change Reminders are enabled/i,
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.queryByText(
+      'No change scheduled. Keep reminders on and we’ll warn you if that changes.',
+    ),
+  ).toBeNull();
 });
 
 it('stops token listening and shows retry when a valid refresh fails', async () => {

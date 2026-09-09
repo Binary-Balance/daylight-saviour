@@ -1,6 +1,7 @@
 import { AndroidImportance } from 'expo-notifications';
 
 import { createProductionChangeReminderAdapters } from './change-reminder-production-adapters';
+import { createChangeReminderSession } from './change-reminder-session';
 
 const responseBody = {
   credential: 'c'.repeat(43),
@@ -375,7 +376,10 @@ describe('production Change Reminder adapters', () => {
 
     await expect(
       test.adapters.updateHomeTimeZone!('Australia/Queensland'),
-    ).resolves.toEqual({ kind: 'enabled' });
+    ).resolves.toEqual({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
     expect(
       test.dependencies.notifications.getPermissionsAsync,
     ).not.toHaveBeenCalled();
@@ -406,6 +410,85 @@ describe('production Change Reminder adapters', () => {
       state: 'registered',
       version: 4,
     });
+  });
+
+  it('queues a same-zone restore intent behind an earlier zone selection', async () => {
+    const storage = {
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 4,
+        deviceToken: 'fcm-token:with_valid.characters-123',
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 4,
+      }),
+    };
+    let blockPendingWrite = true;
+    let releasePendingWrite!: () => void;
+    let markPendingWriteStarted!: () => void;
+    const pendingWriteStarted = new Promise<void>((resolve) => {
+      markPendingWriteStarted = resolve;
+    });
+    const test = harness({
+      fetchImplementation: jest.fn(
+        async (_input: URL | RequestInfo) =>
+          new Response(null, { status: 204 }),
+      ) as jest.MockedFunction<typeof fetch>,
+      setItemImplementation: async (_key, value) => {
+        if (blockPendingWrite && JSON.parse(value).state === 'pending-update') {
+          blockPendingWrite = false;
+          markPendingWriteStarted();
+          await new Promise<void>((resolve) => {
+            releasePendingWrite = resolve;
+          });
+        }
+      },
+      storage,
+    });
+
+    const brisbane = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
+    await pendingWriteStarted;
+    const session = createChangeReminderSession({
+      adapters: test.adapters,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(session.getSnapshot()).toMatchObject({ kind: 'saving-zone' });
+
+    releasePendingWrite();
+    await expect(brisbane).resolves.toMatchObject({ kind: 'enabled' });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (session.getSnapshot().kind === 'enabled') break;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(session.getSnapshot()).toMatchObject({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+    });
+    expect(
+      test.dependencies.fetch.mock.calls.map((call) =>
+        JSON.parse(String(call[1]?.body)),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        attemptGeneration: 5,
+        homeTimeZone: 'Australia/Brisbane',
+      }),
+      expect.objectContaining({
+        attemptGeneration: 6,
+        homeTimeZone: 'Australia/Sydney',
+      }),
+    ]);
+    expect(JSON.parse(storage.value ?? '')).toMatchObject({
+      attemptGeneration: 6,
+      homeTimeZone: 'Australia/Sydney',
+      state: 'registered',
+    });
+    stop();
   });
 
   it('keeps a failed zone update durable and exposes its confirmed zone for retry', async () => {
@@ -453,6 +536,45 @@ describe('production Change Reminder adapters', () => {
     });
   });
 
+  it('returns proposed timing preferences after a pending zone update succeeds', async () => {
+    const test = harness({
+      fetchImplementation: jest.fn(
+        async (_input: URL | RequestInfo) =>
+          new Response(null, { status: 204 }),
+      ) as jest.MockedFunction<typeof fetch>,
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 5,
+          confirmedHomeTimeZone: 'Australia/Sydney',
+          confirmedOneDayEnabled: true,
+          confirmedOneWeekEnabled: true,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Brisbane',
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'pending-update',
+          version: 4,
+        }),
+      },
+    });
+
+    await expect(
+      test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+    ).resolves.toEqual({
+      kind: 'enabled',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 6,
+      homeTimeZone: 'Australia/Brisbane',
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+      state: 'registered',
+    });
+  });
+
   it('converges after a zone response is lost and the app restarts', async () => {
     const storage = {
       value: JSON.stringify({
@@ -494,7 +616,7 @@ describe('production Change Reminder adapters', () => {
     const recreated = harness({ fetchImplementation: serverRequest, storage });
     await expect(
       recreated.adapters.updateHomeTimeZone!('Australia/Brisbane'),
-    ).resolves.toEqual({ kind: 'enabled' });
+    ).resolves.toMatchObject({ kind: 'enabled' });
 
     expect(
       attempts.map(({ attemptGeneration, homeTimeZone }) => ({
@@ -558,7 +680,7 @@ describe('production Change Reminder adapters', () => {
     });
     await expect(
       restarted.adapters.updateHomeTimeZone!('Australia/Brisbane'),
-    ).resolves.toEqual({ kind: 'enabled' });
+    ).resolves.toMatchObject({ kind: 'enabled' });
     expect(JSON.parse(storage.value ?? '')).toMatchObject({
       attemptGeneration: 6,
       homeTimeZone: 'Australia/Brisbane',
@@ -601,8 +723,8 @@ describe('production Change Reminder adapters', () => {
     const second = test.adapters.updateHomeTimeZone!('Australia/Adelaide');
     expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
     releaseFirst();
-    await expect(first).resolves.toEqual({ kind: 'enabled' });
-    await expect(second).resolves.toEqual({ kind: 'enabled' });
+    await expect(first).resolves.toMatchObject({ kind: 'enabled' });
+    await expect(second).resolves.toMatchObject({ kind: 'enabled' });
 
     expect(
       test.dependencies.fetch.mock.calls.map((call) =>
@@ -674,7 +796,7 @@ describe('production Change Reminder adapters', () => {
     listener?.({ data: replacement });
     releaseZone();
 
-    await expect(zoneUpdate).resolves.toEqual({ kind: 'enabled' });
+    await expect(zoneUpdate).resolves.toMatchObject({ kind: 'enabled' });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(
@@ -751,7 +873,7 @@ describe('production Change Reminder adapters', () => {
     const latest = test.adapters.updateHomeTimeZone!('Australia/Adelaide');
     releaseFirst();
 
-    await expect(first).resolves.toEqual({ kind: 'enabled' });
+    await expect(first).resolves.toMatchObject({ kind: 'enabled' });
     await expect(latest).resolves.toMatchObject({ kind: 'enabled' });
     expect(
       serverRequest.mock.calls.map((call) => JSON.parse(String(call[1]?.body))),

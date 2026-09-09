@@ -5,16 +5,24 @@ import { activateAustralianTimeZoneDataPack } from '@daylight-saviour/domain';
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
 import { daylightSaviourPalettes } from '../../theme';
+import { productionChangeReminderAdapters } from '../change-reminders/change-reminder-production-adapters';
+import type { ChangeReminderRestoreResult } from '../change-reminders/change-reminder-adapters';
 import RawStatusScreen from './status-screen';
 
 jest.mock('../change-reminders/change-reminder-production-adapters', () => ({
   productionChangeReminderAdapters: {
     enable: jest.fn(),
     openSettings: jest.fn(),
-    restore: jest.fn(() => new Promise(() => undefined)),
+    restore: jest.fn(
+      () => new Promise<ChangeReminderRestoreResult>(() => undefined),
+    ),
     startTokenRefresh: jest.fn(() => () => undefined),
   },
 }));
+
+const mockReminderRestore = jest.mocked(
+  productionChangeReminderAdapters.restore,
+);
 
 const bundledSnapshot = {
   freshness: 'current',
@@ -24,6 +32,25 @@ const bundledSnapshot = {
   remoteEnabled: false,
   source: 'bundled',
 } as const;
+
+function restoredReminderRegistration(homeTimeZone: string) {
+  return {
+    kind: 'registered' as const,
+    notificationPermissionGranted: true,
+    registration: {
+      attemptGeneration: 1,
+      credential: 'c'.repeat(43),
+      deviceToken: 'fcm-token:with_valid.characters-123',
+      homeTimeZone,
+      installationId: 'i'.repeat(43),
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
+      registrationRequestId: 'a'.repeat(64),
+      state: 'registered' as const,
+      version: 4 as const,
+    },
+  };
+}
 
 function StatusScreen(
   props: Omit<
@@ -77,6 +104,9 @@ describe('StatusScreen facade', () => {
     jest.clearAllMocks();
     jest.restoreAllMocks();
     jest.useRealTimers();
+    mockReminderRestore.mockImplementation(
+      () => new Promise<ChangeReminderRestoreResult>(() => undefined),
+    );
   });
 
   it.each(['light', 'dark'] as const)(
@@ -169,6 +199,58 @@ describe('StatusScreen facade', () => {
     expect(screen.getByTestId('expired-civil-time-report')).toBeTruthy();
     expect(screen.getByLabelText(/validity expired/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
+  });
+
+  it('keeps reminders available in verified no-event zones only', async () => {
+    const dormantCopy =
+      'No change scheduled. Keep reminders on and we’ll warn you if that changes.';
+    mockReminderRestore.mockResolvedValue(
+      restoredReminderRegistration('Australia/Brisbane'),
+    );
+    const current = render(
+      <StatusScreen
+        now={new Date('2026-04-04T15:59:59.000Z')}
+        reducedMotion
+        zoneId="Australia/Brisbane"
+      />,
+    );
+    expect(await screen.findByText(dormantCopy)).toBeTruthy();
+    expect(
+      screen.getByRole('switch', { name: 'One-week Change Reminder' }),
+    ).toBeTruthy();
+    current.unmount();
+
+    const expired = render(
+      <StatusScreen
+        now={new Date('2031-01-01T00:00:00.000Z')}
+        reducedMotion
+        zoneId="Australia/Brisbane"
+      />,
+    );
+    expect(screen.getByTestId('expired-civil-time-report')).toBeTruthy();
+    expect(
+      await screen.findByText(
+        /one-week and one-day Change Reminders are enabled/i,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(dormantCopy)).toBeNull();
+    expired.unmount();
+
+    const unavailable = render(
+      <StatusScreen
+        now={new Date('2026-04-04T15:59:59.000Z')}
+        reducedMotion
+        zoneId="Australia/Nowhere"
+      />,
+    );
+    expect(screen.getByTestId('unavailable-civil-time-report')).toBeTruthy();
+    expect(screen.queryByText(dormantCopy)).toBeNull();
+    expect(
+      await screen.findByText(
+        /saved change reminders still follow a different home/i,
+      ),
+    ).toBeTruthy();
+    unavailable.unmount();
   });
 
   it('uses a report-unavailable alert when a tap opens unavailable civil-time data', () => {
