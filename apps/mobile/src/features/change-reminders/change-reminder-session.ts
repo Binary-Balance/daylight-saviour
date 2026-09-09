@@ -183,12 +183,11 @@ export function createChangeReminderSession({
         const preferences =
           result.pendingPreferences?.confirmed ?? defaultPreferences;
         const pendingZone = result.pendingHomeTimeZone;
-        if (
-          adapters.updateHomeTimeZone !== undefined &&
-          ((pendingZone !== undefined &&
-            pendingZone.proposed !== homeTimeZone) ||
-            (pendingZone === undefined && result.homeTimeZone !== homeTimeZone))
-        ) {
+        // A pending timing write can leave the saved zone unchanged while a
+        // previous selection is already queued. Re-submit the current zone
+        // for every authenticated pending record so that this intent is kept
+        // behind the queued mutation, even when the saved zone matches.
+        if (adapters.updateHomeTimeZone !== undefined) {
           reconcileHomeTimeZone(expectedGeneration, preferences);
         } else if (pendingZone?.proposed === homeTimeZone) {
           publish({ kind: 'zone-failed', preferences });

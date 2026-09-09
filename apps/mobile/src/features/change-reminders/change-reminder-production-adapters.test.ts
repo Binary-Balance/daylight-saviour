@@ -412,17 +412,19 @@ describe('production Change Reminder adapters', () => {
     });
   });
 
-  it('queues a same-zone restore intent behind an earlier zone selection', async () => {
+  it('queues a same-zone restore intent behind an earlier zone selection from pending timings', async () => {
     const storage = {
       value: JSON.stringify({
         ...responseBody,
         attemptGeneration: 4,
+        confirmedOneDayEnabled: true,
+        confirmedOneWeekEnabled: true,
         deviceToken: 'fcm-token:with_valid.characters-123',
         homeTimeZone: 'Australia/Sydney',
-        oneDayEnabled: true,
+        oneDayEnabled: false,
         oneWeekEnabled: true,
         registrationRequestId: 'a'.repeat(64),
-        state: 'registered',
+        state: 'pending-update',
         version: 4,
       }),
     };
@@ -467,7 +469,7 @@ describe('production Change Reminder adapters', () => {
     }
     expect(session.getSnapshot()).toMatchObject({
       kind: 'enabled',
-      preferences: { oneDayEnabled: true, oneWeekEnabled: true },
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
     });
     expect(
       test.dependencies.fetch.mock.calls.map((call) =>
@@ -477,15 +479,21 @@ describe('production Change Reminder adapters', () => {
       expect.objectContaining({
         attemptGeneration: 5,
         homeTimeZone: 'Australia/Brisbane',
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
       }),
       expect.objectContaining({
         attemptGeneration: 6,
         homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
       }),
     ]);
     expect(JSON.parse(storage.value ?? '')).toMatchObject({
       attemptGeneration: 6,
       homeTimeZone: 'Australia/Sydney',
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
       state: 'registered',
     });
     stop();
