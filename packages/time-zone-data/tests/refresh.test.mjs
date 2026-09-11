@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { Buffer } from 'node:buffer';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
+import { gzipSync } from 'node:zlib';
 
 import { activateTimeZoneDataPack } from '@daylight-saviour/contracts';
 
 import {
   assertReviewedSemanticDiff,
   generateAustralianCandidate,
+  MAX_UNCOMPRESSED_BYTES,
   parseIanaArchive,
   runConformance,
   semanticDiff,
@@ -43,6 +46,12 @@ const fingerprint = '7E3792A9D8ACF7D633BC1588ED97E90E62AA7E34';
 
 async function fixtureConfiguration() {
   return JSON.parse(await readFile(configurationPath, 'utf8'));
+}
+
+async function fixtureBaseline() {
+  return activateTimeZoneDataPack(
+    JSON.parse(await readFile(baselinePath, 'utf8')),
+  );
 }
 
 async function refreshOptions(outputDirectory, extras = {}) {
@@ -169,6 +178,37 @@ describe('verified IANA Australian candidate refresh', () => {
     );
   });
 
+  it('authenticates and parses the same archive byte snapshot', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'daylight-iana-snapshot-'));
+    const mutableArchivePath = join(root, 'mutable.tar.gz');
+    const archiveBytes = await readFile(archivePath);
+    const alteredArchiveBytes = Uint8Array.from(archiveBytes);
+    alteredArchiveBytes[alteredArchiveBytes.length - 1] ^= 1;
+    await writeFile(mutableArchivePath, archiveBytes);
+    let verifiedArchivePath;
+
+    const result = await refreshAustralianPack(
+      await refreshOptions(join(root, 'candidate'), {
+        archivePath: mutableArchivePath,
+        verifySignature: async (options) => {
+          verifiedArchivePath = options.archivePath;
+          await writeFile(mutableArchivePath, alteredArchiveBytes);
+          return verifyIanaDetachedSignature(options);
+        },
+      }),
+    );
+
+    assert.notEqual(verifiedArchivePath, mutableArchivePath);
+    assert.equal(
+      result.archiveSha256,
+      createHash('sha256').update(archiveBytes).digest('hex'),
+    );
+    const candidate = JSON.parse(
+      await readFile(join(root, 'candidate/candidate.pack.json'), 'utf8'),
+    );
+    assert.equal(candidate.source.archiveSha256, result.archiveSha256);
+  });
+
   it('rejects altered archive bytes and a non-matching signer before output', async () => {
     const root = await mkdtemp(join(tmpdir(), 'daylight-iana-auth-'));
     const alteredArchive = join(root, 'altered.tar.gz');
@@ -208,9 +248,55 @@ describe('verified IANA Australian candidate refresh', () => {
           privateKeyPath: trustedKeyPath,
         }),
       ),
-      /Invalid key object|DECODER routines|bad decrypt|unsupported/i,
+      /Invalid key object|DECODER routines|bad decrypt|requested signing key/i,
     );
     assert.deepEqual(await snapshotFiles(outputDirectory), before);
+  });
+
+  it('verifies requested signing material and existing signatures before no-change', async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), 'daylight-iana-signature-check-'),
+    );
+    const outputDirectory = join(root, 'candidate');
+    const options = await refreshOptions(outputDirectory, {
+      keyId: 'test-only-2026-a',
+      privateKeyPath: signingKeyPath,
+    });
+    await refreshAustralianPack(options);
+    const original = await snapshotFiles(outputDirectory);
+
+    const missingKeyOptions = {
+      ...options,
+      privateKeyPath: join(root, 'missing-private-key.pem'),
+    };
+    await assert.rejects(
+      refreshAustralianPack(missingKeyOptions),
+      /requested signing key is unreadable/,
+    );
+    assert.deepEqual(await snapshotFiles(outputDirectory), original);
+
+    const { privateKey } = generateKeyPairSync('ed25519');
+    const wrongKeyPath = join(root, 'wrong-private-key.pem');
+    await writeFile(
+      wrongKeyPath,
+      privateKey.export({ format: 'pem', type: 'pkcs8' }),
+    );
+    await assert.rejects(
+      refreshAustralianPack({ ...options, privateKeyPath: wrongKeyPath }),
+      /existing signed output signature does not verify/,
+    );
+    assert.deepEqual(await snapshotFiles(outputDirectory), original);
+
+    const manifestPath = join(outputDirectory, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    manifest.signature.value = Buffer.alloc(64).toString('base64');
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const corrupt = await snapshotFiles(outputDirectory);
+    await assert.rejects(
+      refreshAustralianPack(options),
+      /existing signed output signature does not verify/,
+    );
+    assert.deepEqual(await snapshotFiles(outputDirectory), corrupt);
   });
 
   it('publishes and rechecks the optional signed artifact set atomically', async () => {
@@ -239,6 +325,9 @@ describe('verified IANA Australian candidate refresh', () => {
     const outputDirectory = join(root, 'candidate');
     await refreshAustralianPack(await refreshOptions(outputDirectory));
     const before = await readFile(join(outputDirectory, 'provenance.json'));
+    const beforePack = JSON.parse(
+      await readFile(join(outputDirectory, 'candidate.pack.json'), 'utf8'),
+    );
 
     const configuration = await fixtureConfiguration();
     configuration.generation.generatedAt = '2026-07-20T00:00:00.000Z';
@@ -257,6 +346,35 @@ describe('verified IANA Australian candidate refresh', () => {
       await readFile(join(outputDirectory, 'provenance.json')),
       before,
     );
+    const afterPack = JSON.parse(
+      await readFile(join(outputDirectory, 'candidate.pack.json'), 'utf8'),
+    );
+    assert.notEqual(afterPack.packVersion, beforePack.packVersion);
+  });
+
+  it('captures the state at coverage start when the horizon ends in the opposite season', async () => {
+    const configuration = await fixtureConfiguration();
+    configuration.generation.lastYear = 2027;
+    configuration.generation.validUntil = '2027-07-01T00:00:00.000Z';
+    const parsed = parseIanaArchive(
+      await readFile(archivePath),
+      configuration.source.files,
+    );
+    const candidate = generateAustralianCandidate({
+      archive: parsed,
+      archiveSha256: 'a'.repeat(64),
+      configuration,
+    });
+    const sydney = candidate.zones.find(
+      (zone) => zone.id === 'Australia/Sydney',
+    );
+    assert.deepEqual(sydney.initial, {
+      abbreviation: 'AEDT',
+      daylightSaving: true,
+      utcOffsetSeconds: 39600,
+    });
+    assert.equal(sydney.transitions.length, 5);
+    assert.equal(sydney.transitions.at(-1).at, '2027-04-03T16:00:00.000Z');
   });
 
   it('rejects an unsupported future Zone segment before output', async () => {
@@ -321,6 +439,14 @@ describe('verified IANA Australian candidate refresh', () => {
     await assert.rejects(readFile(outputDirectory), { code: 'ENOENT' });
   });
 
+  it('bounds gzip inflation before allocating an oversized archive', () => {
+    const oversized = gzipSync(Buffer.alloc(MAX_UNCOMPRESSED_BYTES + 1));
+    assert.throws(
+      () => parseIanaArchive(oversized),
+      /uncompressed archive exceeds the .*byte limit/,
+    );
+  });
+
   it('does not accept a copied snapshot as the reviewed baseline', async () => {
     const root = await mkdtemp(join(tmpdir(), 'daylight-iana-baseline-'));
     const copiedBaselinePath = join(root, 'copied-baseline.pack.json');
@@ -345,7 +471,12 @@ describe('verified IANA Australian candidate refresh', () => {
       configuration,
     });
     const activated = activateTimeZoneDataPack(candidate);
-    const report = runConformance(activated, configuration, parsed);
+    const report = runConformance(
+      activated,
+      configuration,
+      parsed,
+      await fixtureBaseline(),
+    );
     assert.equal(report.status, 'passed');
     assert.equal(report.zones, 18);
     assert.ok(report.boundaryChecks >= 100);
@@ -358,6 +489,96 @@ describe('verified IANA Australian candidate refresh', () => {
       activated.zones.find((zone) => zone.id === 'Australia/Lord_Howe')
         .transitions[0].utcOffsetSeconds,
       37800,
+    );
+  });
+
+  it('rejects self-consistent shifted transitions against reviewed civil-time values', async () => {
+    const configuration = await fixtureConfiguration();
+    const parsed = parseIanaArchive(
+      await readFile(archivePath),
+      configuration.source.files,
+    );
+    const candidate = generateAustralianCandidate({
+      archive: parsed,
+      archiveSha256: 'a'.repeat(64),
+      configuration,
+    });
+    const shifted = structuredClone(candidate);
+    for (const zone of shifted.zones) {
+      for (const transition of zone.transitions) {
+        transition.at = new Date(
+          Date.parse(transition.at) + 3_600_000,
+        ).toISOString();
+      }
+    }
+    const baseline = await fixtureBaseline();
+    assert.throws(
+      () =>
+        runConformance(
+          activateTimeZoneDataPack(shifted),
+          configuration,
+          parsed,
+          baseline,
+        ),
+      /reviewed baseline or exact reviewed changes/,
+    );
+  });
+
+  it('allows a supported changed rule only with exact reviewed boundary evidence', async () => {
+    const configuration = await fixtureConfiguration();
+    const parsed = parseIanaArchive(
+      await readFile(archivePath),
+      configuration.source.files,
+    );
+    const changedRule = parsed.rules.get('AS').at(-1);
+    changedRule.at = '3:00s';
+    const changedCandidate = generateAustralianCandidate({
+      archive: parsed,
+      archiveSha256: 'a'.repeat(64),
+      configuration,
+    });
+    const baseline = await fixtureBaseline();
+    const diff = semanticDiff(baseline, changedCandidate);
+    assert.ok(diff.differences.length > 0);
+    assert.throws(
+      () =>
+        runConformance(
+          activateTimeZoneDataPack(changedCandidate),
+          configuration,
+          parsed,
+          baseline,
+        ),
+      /reviewed baseline or exact reviewed changes/,
+    );
+    const expected = {
+      archiveSha256: 'a'.repeat(64),
+      differences: diff.differences,
+      evidence: [
+        {
+          url: 'https://www.iana.org/time-zones',
+          description: 'Reviewed source rule boundary evidence',
+          supports: diff.differences.map((_, index) => index),
+        },
+      ],
+      explanation: 'The reviewed source rule moved the civil-time boundary.',
+      sourceVersion: '2026c',
+    };
+    assert.doesNotThrow(() =>
+      assertReviewedSemanticDiff(
+        expected,
+        diff,
+        changedCandidate.source.archiveSha256,
+        changedCandidate.source.version,
+      ),
+    );
+    assert.doesNotThrow(() =>
+      runConformance(
+        activateTimeZoneDataPack(changedCandidate),
+        configuration,
+        parsed,
+        baseline,
+        diff.differences,
+      ),
     );
   });
 

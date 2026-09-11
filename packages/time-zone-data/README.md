@@ -30,18 +30,28 @@ generates the Australian candidate from the reviewed coverage configuration.
 The key is never taken from the archive and a copied digest is never used as
 verification evidence.
 
-The command also activates the candidate through the shared contract, checks
-all 18 zones and transition boundaries, and writes `candidate.pack.json`,
+The command snapshots the archive bytes before verification, then parses and
+hashes that same snapshot. It activates the candidate through the shared
+contract and checks all 18 zones, reviewed civil-time values, transition
+boundaries, and the Validity Horizon before writing `candidate.pack.json`,
 `provenance.json`, and `semantic-diff.txt` together. Use `--private-key` and
 `--key-id` together to call the existing local signing seam and emit a signed
-manifest. Every output is staged in a temporary sibling directory and swapped
-only after all checks pass; a repeated verified input reports `NO CHANGE`.
+manifest. A requested signing key is loaded before a no-change decision, and an
+existing signed pack is verified with its derived public key. Every output is
+staged in a temporary sibling directory and swapped only after all checks pass;
+a repeated verified input reports `NO CHANGE`.
 The provenance records the verified fingerprint and, when a change is
 reviewed, the exact expected differences and their evidence.
-Semantic differences are measured against the committed reviewed baseline;
+Semantic differences and conformance values are measured against the committed
+reviewed baseline (with any exact, evidence-backed expected changes allowed);
 the CLI pins that baseline to SHA-256
-`4bd073d7fa6a442a3f0b1a3f3dcd9dcdb70383eeb4c9827a2092d6d643a086c8` and
+`5f60ca0a183524f4f960820bd8744fc9a56ea97d66c15873849d9d584039be40` and
 rejects copied or otherwise substituted snapshot files.
+
+The generated pack version contains a full SHA-256 revision of canonical pack
+content with `packVersion` excluded, so a changed candidate cannot reuse an
+immutable versioned path. Gzip inflation is bounded before the parser accepts
+an archive.
 
 ```sh
 node packages/time-zone-data/scripts/refresh-australian-pack.mjs \

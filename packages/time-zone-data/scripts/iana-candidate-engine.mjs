@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 
 const MAX_ARCHIVE_BYTES = 16 * 1024 * 1024;
-const MAX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
+export const MAX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
 
 export const DEFAULT_SOURCE_FILES = Object.freeze([
   'antarctica',
@@ -76,6 +77,37 @@ const REVIEWED_ALIASES = Object.freeze({
 
 function fail(problem) {
   throw new Error(`IANA candidate validation failed: ${problem}`);
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(',')}]`;
+  }
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function deterministicPackVersion({
+  archiveVersion,
+  firstYear,
+  lastYear,
+  content,
+}) {
+  // Excluding packVersion avoids a circular hash while keeping every emitted
+  // content field in the immutable version identity.
+  const revision = createHash('sha256')
+    .update(canonicalJson(content))
+    .digest('hex');
+  const version = `${archiveVersion}-australian-${firstYear}-${lastYear}-${revision}`;
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(version)) {
+    fail('generated pack version is not a portable identifier');
+  }
+  return version;
 }
 
 function strictUtf8(bytes, label) {
@@ -249,8 +281,15 @@ export function parseIanaArchive(
 
   let unpacked;
   try {
-    unpacked = gunzipSync(archiveBytes);
-  } catch {
+    unpacked = gunzipSync(archiveBytes, {
+      maxOutputLength: MAX_UNCOMPRESSED_BYTES,
+    });
+  } catch (error) {
+    if (error?.code === 'ERR_BUFFER_TOO_LARGE') {
+      fail(
+        `uncompressed archive exceeds the ${MAX_UNCOMPRESSED_BYTES}-byte limit`,
+      );
+    }
     fail('archive is not valid gzip');
   }
   if (unpacked.byteLength > MAX_UNCOMPRESSED_BYTES) {
@@ -583,7 +622,17 @@ function generateZone(
 
   let saveAfterSeconds = 0;
   let letters = '';
+  let initial;
   const transitions = [];
+  const stateFor = () => ({
+    abbreviation: abbreviation(
+      segment.format,
+      letters,
+      baseOffsetSeconds + saveAfterSeconds,
+    ),
+    daylightSaving: saveAfterSeconds > 0,
+    utcOffsetSeconds: baseOffsetSeconds + saveAfterSeconds,
+  });
   for (const occurrence of occurrences) {
     const { rule } = occurrence;
     const offsetBeforeSeconds = baseOffsetSeconds + saveAfterSeconds;
@@ -600,7 +649,8 @@ function generateZone(
       letters = rule.letters;
       continue;
     }
-    if (instantMs > validityHorizonMs) continue;
+    if (initial === undefined) initial = stateFor();
+    if (instantMs > validityHorizonMs) break;
     transitions.push({
       abbreviation: abbreviation(
         segment.format,
@@ -616,15 +666,11 @@ function generateZone(
     letters = rule.letters;
   }
 
-  const initialOffsetSeconds = baseOffsetSeconds + saveAfterSeconds;
+  initial ??= stateFor();
   return {
     friendlyLabel: configZone.friendlyLabel,
     id: configZone.id,
-    initial: {
-      abbreviation: abbreviation(segment.format, letters, initialOffsetSeconds),
-      daylightSaving: saveAfterSeconds > 0,
-      utcOffsetSeconds: initialOffsetSeconds,
-    },
+    initial,
     transitions,
   };
 }
@@ -651,13 +697,12 @@ export function generateAustralianCandidate({
       validityHorizonMs,
     ),
   );
-  return {
+  const content = {
     coverage: {
       startsAt: configuration.generation.coverageStartsAt,
       validUntil: configuration.generation.validUntil,
     },
     generatedAt: resolvedGeneratedAt,
-    packVersion: `${archive.version}-australian-coverage-${firstYear}-${lastYear}.1`,
     schemaVersion: configuration.generation.schemaVersion,
     source: {
       archiveSha256,
@@ -667,6 +712,20 @@ export function generateAustralianCandidate({
       versionUrl: `https://data.iana.org/time-zones/releases/tzdata${archive.version}.tar.gz`,
     },
     zones,
+  };
+  const packVersion = deterministicPackVersion({
+    archiveVersion: archive.version,
+    content,
+    firstYear,
+    lastYear,
+  });
+  return {
+    coverage: content.coverage,
+    generatedAt: content.generatedAt,
+    packVersion,
+    schemaVersion: content.schemaVersion,
+    source: content.source,
+    zones: content.zones,
   };
 }
 
@@ -687,18 +746,55 @@ function sameState(left, right) {
   );
 }
 
-export function runConformance(pack, configuration, parsed) {
-  validateConfiguration(configuration);
+export function runConformance(
+  pack,
+  configuration,
+  parsed,
+  reviewedExpected,
+  reviewedDifferences = [],
+) {
+  const { coverageStartMs, validityHorizonMs } =
+    validateConfiguration(configuration);
+  if (
+    typeof reviewedExpected !== 'object' ||
+    reviewedExpected === null ||
+    !Array.isArray(reviewedExpected.zones) ||
+    typeof reviewedExpected.coverage !== 'object' ||
+    reviewedExpected.coverage === null
+  ) {
+    fail('an independently reviewed expected pack is required');
+  }
   const failures = [];
   const expectedZones = configuration.zones;
+  // The refresh command supplies the hash-guarded committed baseline here;
+  // generated candidate values never define their own conformance oracle.
+  const reviewedDiff = semanticDiff(reviewedExpected, pack);
+  if (
+    !Array.isArray(reviewedDifferences) ||
+    canonicalJson(reviewedDiff.differences) !==
+      canonicalJson(reviewedDifferences)
+  ) {
+    failures.push(
+      'candidate civil-time values do not match the reviewed baseline or exact reviewed changes',
+    );
+  }
+  if (
+    pack.coverage.startsAt !== configuration.generation.coverageStartsAt ||
+    pack.coverage.validUntil !== configuration.generation.validUntil
+  ) {
+    failures.push(
+      'candidate coverage does not match the reviewed configuration',
+    );
+  }
   if (pack.zones.length !== expectedZones.length) {
     failures.push(
       `expected ${expectedZones.length} zones, got ${pack.zones.length}`,
     );
   }
-  const coverageStartMs = Date.parse(pack.coverage.startsAt);
-  const validityHorizonMs = Date.parse(pack.coverage.validUntil);
   let boundaryChecks = 0;
+  const reviewedZones = new Map(
+    reviewedExpected.zones.map((zone) => [zone.id, zone]),
+  );
   for (const expected of expectedZones) {
     const zone = pack.zones.find((candidate) => candidate.id === expected.id);
     if (zone === undefined) {
@@ -707,6 +803,18 @@ export function runConformance(pack, configuration, parsed) {
     }
     if (zone.friendlyLabel !== expected.friendlyLabel) {
       failures.push(`label changed for ${expected.id}`);
+    }
+    const reviewedZone = reviewedZones.get(expected.id);
+    if (reviewedZone === undefined) {
+      failures.push(`reviewed baseline is missing ${expected.id}`);
+    } else if (
+      reviewedExpected.coverage.validUntil === pack.coverage.validUntil &&
+      !sameState(
+        stateAt(zone, validityHorizonMs),
+        stateAt(reviewedZone, validityHorizonMs),
+      )
+    ) {
+      failures.push(`Validity Horizon state mismatch for ${expected.id}`);
     }
     let previous = zone.initial;
     let previousAt = coverageStartMs;
@@ -784,6 +892,7 @@ export function runConformance(pack, configuration, parsed) {
   if (failures.length > 0) fail(failures.join('; '));
   return {
     boundaryChecks,
+    reviewedCivilTime: true,
     zones: expectedZones.length,
     status: 'passed',
   };
@@ -989,7 +1098,7 @@ export function assertReviewedSemanticDiff(
   }
   if (
     !Array.isArray(expected.differences) ||
-    JSON.stringify(expected.differences) !== JSON.stringify(actual.differences)
+    canonicalJson(expected.differences) !== canonicalJson(actual.differences)
   ) {
     fail(
       'reviewed expected diff does not match generated semantic differences',

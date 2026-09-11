@@ -1,4 +1,9 @@
-import { createHash } from 'node:crypto';
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  verify as verifyEd25519,
+} from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import {
   lstat,
@@ -40,7 +45,7 @@ const defaultBaselinePath = resolve(
   'generated/australian-coverage.pack.json',
 );
 const reviewedBaselineSha256 =
-  '4bd073d7fa6a442a3f0b1a3f3dcd9dcdb70383eeb4c9827a2092d6d643a086c8';
+  '5f60ca0a183524f4f960820bd8744fc9a56ea97d66c15873849d9d584039be40';
 
 function fail(problem) {
   throw new Error(`IANA candidate refresh failed: ${problem}`);
@@ -215,6 +220,46 @@ function reviewArtifact(expected) {
   };
 }
 
+async function loadSigningMaterial(privateKeyPath, keyId) {
+  let privateKeyPem;
+  try {
+    privateKeyPem = await readFile(privateKeyPath, 'utf8');
+  } catch {
+    fail('requested signing key is unreadable');
+  }
+
+  let privateKey;
+  try {
+    privateKey = createPrivateKey(privateKeyPem);
+  } catch {
+    fail('requested signing key is invalid');
+  }
+  if (privateKey.asymmetricKeyType !== 'ed25519') {
+    fail('requested signing key must be Ed25519');
+  }
+  return { keyId, publicKey: createPublicKey(privateKey) };
+}
+
+function verifyExistingSignature(manifest, packBytes, signingMaterial) {
+  const signature = Buffer.from(manifest.signature.value, 'base64');
+  let verified = false;
+  try {
+    verified = verifyEd25519(
+      null,
+      packBytes,
+      signingMaterial.publicKey,
+      signature,
+    );
+  } catch {
+    verified = false;
+  }
+  if (!verified) {
+    fail(
+      'existing signed output signature does not verify with the requested key',
+    );
+  }
+}
+
 function relativeArtifactPath(root, candidate) {
   const value = relative(root, candidate);
   if (
@@ -250,6 +295,7 @@ async function existingOutputIdentity(
   expectedDiff,
   expectedIdentity,
   expectedReview,
+  signingMaterial,
 ) {
   let metadata;
   try {
@@ -330,6 +376,7 @@ async function existingOutputIdentity(
     JSON.stringify(pack.source.files) !==
       JSON.stringify(provenance.sourceFiles) ||
     provenance.conformance?.status !== 'passed' ||
+    provenance.conformance?.reviewedCivilTime !== true ||
     !Array.isArray(provenance.semanticDiff) ||
     provenance.verification?.verifier !== 'gpg' ||
     !/^[A-F0-9]{40}$/.test(provenance.verification?.fingerprint ?? '') ||
@@ -376,6 +423,17 @@ async function existingOutputIdentity(
       manifest.signature.keyId !== provenance.signature.keyId
     ) {
       fail('existing signed output manifest does not match candidate bytes');
+    }
+    if (isExpectedIdentity) {
+      if (
+        signingMaterial === null ||
+        signingMaterial.keyId !== provenance.signature.keyId
+      ) {
+        fail(
+          'requested signing material is required to verify no-change output',
+        );
+      }
+      verifyExistingSignature(manifest, packBytes, signingMaterial);
     }
   }
   const semanticDiffBytes = await readRegularFile(
@@ -456,6 +514,7 @@ export async function refreshAustralianPack({
   privateKeyPath,
   keyId,
   gpgPath,
+  verifySignature = verifyIanaDetachedSignature,
 }) {
   if (!outputDirectory) fail('explicit output directory is required');
   if (
@@ -480,168 +539,211 @@ export async function refreshAustralianPack({
   ) {
     fail('output directory must be a dedicated child directory');
   }
-  const archiveBytes = await readFile(archivePath);
-  const archiveSha256 = sha256(archiveBytes);
-  const verification = await verifyIanaDetachedSignature({
-    archivePath,
-    gpgPath,
-    signaturePath,
-    trustedFingerprint,
-    trustedKeyPath,
-  });
-
-  if (resolve(baselinePath) !== defaultBaselinePath) {
-    fail('baseline must be the committed reviewed candidate');
-  }
-  const [configurationBytes, baselineBytes] = await Promise.all([
-    readFile(configurationPath),
-    readRegularFile(defaultBaselinePath, 'committed baseline is unreadable'),
-  ]);
-  if (sha256(baselineBytes) !== reviewedBaselineSha256) {
-    fail('committed baseline digest is not the reviewed candidate');
-  }
-  let configuration;
-  let baseline;
-  try {
-    configuration = JSON.parse(
-      new TextDecoder('utf-8', { fatal: true }).decode(configurationBytes),
-    );
-  } catch {
-    fail('configuration is not valid UTF-8 JSON');
-  }
-  try {
-    baseline = activateTimeZoneDataPack(
-      JSON.parse(
-        new TextDecoder('utf-8', { fatal: true }).decode(baselineBytes),
-      ),
-    );
-  } catch {
-    fail('baseline is not valid UTF-8 JSON or schema');
-  }
-  const parsed = parseIanaArchive(
-    archiveBytes,
-    configuration.source?.files ?? DEFAULT_SOURCE_FILES,
+  const archiveSnapshotDirectory = await mkdtemp(
+    join(tmpdir(), 'daylight-iana-archive-'),
   );
-  const candidate = generateAustralianCandidate({
-    archive: parsed,
-    archiveSha256,
-    configuration,
-    generatedAt: generatedAt ?? configuration?.generation?.generatedAt,
-  });
-  const activatedCandidate = activateTimeZoneDataPack(candidate);
-  const conformance = runConformance(activatedCandidate, configuration, parsed);
-  const diff = semanticDiff(baseline, activatedCandidate);
-  let expected;
-  if (expectedDiffPath !== undefined) {
+  try {
+    // Verify the private snapshots so a replacement of either supplied path
+    // cannot make the verifier and parser observe different bytes.
+    const archiveBytes = await readFile(archivePath);
+    const archiveSha256 = sha256(archiveBytes);
+    const signatureBytes = await readFile(signaturePath);
+    const archiveSnapshotPath = join(archiveSnapshotDirectory, 'tzdata.tar.gz');
+    const signatureSnapshotPath = join(
+      archiveSnapshotDirectory,
+      'tzdata.tar.gz.asc',
+    );
+    await writeFile(archiveSnapshotPath, archiveBytes, {
+      flag: 'wx',
+      mode: 0o400,
+    });
+    await writeFile(signatureSnapshotPath, signatureBytes, {
+      flag: 'wx',
+      mode: 0o400,
+    });
+    if (typeof verifySignature !== 'function') {
+      fail('signature verification seam is unavailable');
+    }
+    const verification = await verifySignature({
+      archivePath: archiveSnapshotPath,
+      gpgPath,
+      signaturePath: signatureSnapshotPath,
+      trustedFingerprint,
+      trustedKeyPath,
+    });
+    const signingMaterial =
+      privateKeyPath === undefined
+        ? null
+        : await loadSigningMaterial(privateKeyPath, keyId);
+
+    if (resolve(baselinePath) !== defaultBaselinePath) {
+      fail('baseline must be the committed reviewed candidate');
+    }
+    const [configurationBytes, baselineBytes] = await Promise.all([
+      readFile(configurationPath),
+      readRegularFile(defaultBaselinePath, 'committed baseline is unreadable'),
+    ]);
+    if (sha256(baselineBytes) !== reviewedBaselineSha256) {
+      fail('committed baseline digest is not the reviewed candidate');
+    }
+    let configuration;
+    let baseline;
     try {
-      expected = JSON.parse(await readFile(expectedDiffPath, 'utf8'));
+      configuration = JSON.parse(
+        new TextDecoder('utf-8', { fatal: true }).decode(configurationBytes),
+      );
     } catch {
-      fail('reviewed expected diff is not readable JSON');
+      fail('configuration is not valid UTF-8 JSON');
     }
-  }
-  assertReviewedSemanticDiff(expected, diff, archiveSha256, parsed.version);
-
-  const identity = identityFor({
-    archiveSha256,
-    configuration,
-    configurationBytes,
-    generatedAt: activatedCandidate.generatedAt,
-    keyId,
-    verificationFingerprint: verification.fingerprint,
-  });
-  const review = reviewArtifact(expected);
-  const expectedPackBytes = Buffer.from(
-    `${JSON.stringify(candidate, null, 2)}\n`,
-  );
-  await mkdir(dirname(output), { recursive: true });
-  const unlock = await acquireLock(output);
-  try {
-    const existingIdentity = await existingOutputIdentity(
-      output,
-      expectedPackBytes,
-      diff,
-      identity,
-      review,
-    );
-    if (existingIdentity !== null && sameIdentity(existingIdentity, identity)) {
-      return {
-        archiveSha256,
-        conformance,
-        packVersion: activatedCandidate.packVersion,
-        status: 'no-change',
-      };
-    }
-
-    const stagingDirectory = await mkdtemp(
-      join(dirname(output), `.${output.split(sep).at(-1)}.staging-`),
-    );
     try {
-      let packPath = 'candidate.pack.json';
-      if (privateKeyPath !== undefined) {
-        const unsignedPath = await writeStagedPack(stagingDirectory, candidate);
-        const published = await publishSignedPack({
-          keyId,
-          outputDirectory: stagingDirectory,
-          packPath: unsignedPath,
-          privateKeyPath,
-        });
-        await rm(unsignedPath, { force: true });
-        packPath = relativeArtifactPath(stagingDirectory, published.packPath);
-      } else {
-        await writeFile(
-          join(stagingDirectory, packPath),
-          `${JSON.stringify(candidate, null, 2)}\n`,
-          {
-            flag: 'wx',
-          },
-        );
-      }
-      const packBytes = await readFile(join(stagingDirectory, packPath));
-      if (!Buffer.from(packBytes).equals(expectedPackBytes)) {
-        fail('signing seam changed candidate pack bytes');
-      }
-      const provenance = {
-        archive: {
-          sha256: archiveSha256,
-          version: parsed.version,
-        },
-        conformance,
-        generatedAt: activatedCandidate.generatedAt,
-        identity,
-        packPath,
-        packSha256: sha256(packBytes),
-        packVersion: activatedCandidate.packVersion,
-        review,
-        semanticDiff: diff.differences,
-        signature: privateKeyPath === undefined ? null : { keyId },
-        sourceFiles: [...configuration.source.files],
-        verification,
-      };
-      await Promise.all([
-        writeFile(
-          join(stagingDirectory, 'provenance.json'),
-          `${JSON.stringify(provenance, null, 2)}\n`,
-          { flag: 'wx' },
+      baseline = activateTimeZoneDataPack(
+        JSON.parse(
+          new TextDecoder('utf-8', { fatal: true }).decode(baselineBytes),
         ),
-        writeFile(join(stagingDirectory, 'semantic-diff.txt'), diff.text, {
-          flag: 'wx',
-        }),
-      ]);
-      await commitDirectory(stagingDirectory, output);
-      return {
-        archiveSha256,
-        conformance,
-        diff: diff.text,
-        outputDirectory: output,
-        packVersion: activatedCandidate.packVersion,
-        status: 'published',
-      };
-    } catch (error) {
-      await rm(stagingDirectory, { recursive: true, force: true });
-      throw error;
+      );
+    } catch {
+      fail('baseline is not valid UTF-8 JSON or schema');
+    }
+    let expected;
+    if (expectedDiffPath !== undefined) {
+      try {
+        expected = JSON.parse(await readFile(expectedDiffPath, 'utf8'));
+      } catch {
+        fail('reviewed expected diff is not readable JSON');
+      }
+    }
+    const parsed = parseIanaArchive(
+      archiveBytes,
+      configuration.source?.files ?? DEFAULT_SOURCE_FILES,
+    );
+    const candidate = generateAustralianCandidate({
+      archive: parsed,
+      archiveSha256,
+      configuration,
+      generatedAt: generatedAt ?? configuration?.generation?.generatedAt,
+    });
+    const activatedCandidate = activateTimeZoneDataPack(candidate);
+    const diff = semanticDiff(baseline, activatedCandidate);
+    assertReviewedSemanticDiff(expected, diff, archiveSha256, parsed.version);
+    const conformance = runConformance(
+      activatedCandidate,
+      configuration,
+      parsed,
+      baseline,
+      expected?.differences ?? [],
+    );
+
+    const identity = identityFor({
+      archiveSha256,
+      configuration,
+      configurationBytes,
+      generatedAt: activatedCandidate.generatedAt,
+      keyId,
+      verificationFingerprint: verification.fingerprint,
+    });
+    const review = reviewArtifact(expected);
+    const expectedPackBytes = Buffer.from(
+      `${JSON.stringify(candidate, null, 2)}\n`,
+    );
+    await mkdir(dirname(output), { recursive: true });
+    const unlock = await acquireLock(output);
+    try {
+      const existingIdentity = await existingOutputIdentity(
+        output,
+        expectedPackBytes,
+        diff,
+        identity,
+        review,
+        signingMaterial,
+      );
+      if (
+        existingIdentity !== null &&
+        sameIdentity(existingIdentity, identity)
+      ) {
+        return {
+          archiveSha256,
+          conformance,
+          packVersion: activatedCandidate.packVersion,
+          status: 'no-change',
+        };
+      }
+
+      const stagingDirectory = await mkdtemp(
+        join(dirname(output), `.${output.split(sep).at(-1)}.staging-`),
+      );
+      try {
+        let packPath = 'candidate.pack.json';
+        if (privateKeyPath !== undefined) {
+          const unsignedPath = await writeStagedPack(
+            stagingDirectory,
+            candidate,
+          );
+          const published = await publishSignedPack({
+            keyId,
+            outputDirectory: stagingDirectory,
+            packPath: unsignedPath,
+            privateKeyPath,
+          });
+          await rm(unsignedPath, { force: true });
+          packPath = relativeArtifactPath(stagingDirectory, published.packPath);
+        } else {
+          await writeFile(
+            join(stagingDirectory, packPath),
+            `${JSON.stringify(candidate, null, 2)}\n`,
+            {
+              flag: 'wx',
+            },
+          );
+        }
+        const packBytes = await readFile(join(stagingDirectory, packPath));
+        if (!Buffer.from(packBytes).equals(expectedPackBytes)) {
+          fail('signing seam changed candidate pack bytes');
+        }
+        const provenance = {
+          archive: {
+            sha256: archiveSha256,
+            version: parsed.version,
+          },
+          conformance,
+          generatedAt: activatedCandidate.generatedAt,
+          identity,
+          packPath,
+          packSha256: sha256(packBytes),
+          packVersion: activatedCandidate.packVersion,
+          review,
+          semanticDiff: diff.differences,
+          signature: privateKeyPath === undefined ? null : { keyId },
+          sourceFiles: [...configuration.source.files],
+          verification,
+        };
+        await Promise.all([
+          writeFile(
+            join(stagingDirectory, 'provenance.json'),
+            `${JSON.stringify(provenance, null, 2)}\n`,
+            { flag: 'wx' },
+          ),
+          writeFile(join(stagingDirectory, 'semantic-diff.txt'), diff.text, {
+            flag: 'wx',
+          }),
+        ]);
+        await commitDirectory(stagingDirectory, output);
+        return {
+          archiveSha256,
+          conformance,
+          diff: diff.text,
+          outputDirectory: output,
+          packVersion: activatedCandidate.packVersion,
+          status: 'published',
+        };
+      } catch (error) {
+        await rm(stagingDirectory, { recursive: true, force: true });
+        throw error;
+      }
+    } finally {
+      await unlock();
     }
   } finally {
-    await unlock();
+    await rm(archiveSnapshotDirectory, { recursive: true, force: true });
   }
 }
 

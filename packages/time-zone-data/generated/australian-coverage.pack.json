@@ -4,7 +4,7 @@
     "validUntil": "2030-12-31T23:59:59.000Z"
   },
   "generatedAt": "2026-07-19T08:38:40.000Z",
-  "packVersion": "2026c-australian-coverage-2025-2030.1",
+  "packVersion": "2026c-australian-2025-2030-c2ff579f590f92306013abf1e5b681cb0f53e46b71d8c93efebc7cfe87196af7",
   "schemaVersion": 2,
   "source": {
     "archiveSha256": "e4a178a4477f3d0ea77cc31828ff72aa38feff8d61aa13e7e99e142e9d902be4",
