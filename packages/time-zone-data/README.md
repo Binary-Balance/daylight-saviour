@@ -43,8 +43,10 @@ a repeated verified input reports `NO CHANGE`.
 The provenance records the verified fingerprint and, when a change is
 reviewed, the exact expected differences and their evidence.
 Semantic differences and conformance values are measured against the committed
-reviewed baseline (with any exact, evidence-backed expected changes allowed);
-the CLI pins that baseline to SHA-256
+reviewed baseline. An approved change is applied to that baseline as an exact
+structured reference before the shared domain civil-time decision path checks
+states, next events, aliases, transition boundaries, and the unavailable
+coverage and validity boundaries. The CLI pins that baseline to SHA-256
 `5f60ca0a183524f4f960820bd8744fc9a56ea97d66c15873849d9d584039be40` and
 rejects copied or otherwise substituted snapshot files.
 

@@ -582,6 +582,72 @@ describe('verified IANA Australian candidate refresh', () => {
     );
   });
 
+  it('carries an approved final-state change through the horizon conformance check', async () => {
+    const configuration = await fixtureConfiguration();
+    const parsed = parseIanaArchive(
+      await readFile(archivePath),
+      configuration.source.files,
+    );
+    parsed.zones.get('Australia/Darwin').segments.at(-1).gmtoff = '10:00';
+    // This synthetic mutation exercises the review-reference seam. It is not
+    // evidence that the recorded IANA release changed Darwin.
+    const reviewedDifferences = [
+      {
+        after: {
+          abbreviation: 'ACST',
+          daylightSaving: false,
+          utcOffsetSeconds: 36_000,
+        },
+        before: {
+          abbreviation: 'ACST',
+          daylightSaving: false,
+          utcOffsetSeconds: 34_200,
+        },
+        kind: 'initial-state-changed',
+        zone: 'Australia/Darwin',
+      },
+    ];
+    const changedCandidate = generateAustralianCandidate({
+      archive: parsed,
+      archiveSha256: 'a'.repeat(64),
+      configuration,
+    });
+    const baseline = await fixtureBaseline();
+    const diff = semanticDiff(baseline, changedCandidate);
+    assert.deepEqual(diff.differences, reviewedDifferences);
+    const expected = {
+      archiveSha256: 'a'.repeat(64),
+      differences: reviewedDifferences,
+      evidence: [
+        {
+          url: 'https://www.iana.org/time-zones',
+          description: 'Test-only synthetic Darwin final-state evidence',
+          supports: [0],
+        },
+      ],
+      explanation:
+        'Test-only synthetic change exercises a reviewed UTC+10 final state.',
+      sourceVersion: '2026c',
+    };
+    assert.doesNotThrow(() =>
+      assertReviewedSemanticDiff(
+        expected,
+        diff,
+        changedCandidate.source.archiveSha256,
+        changedCandidate.source.version,
+      ),
+    );
+    assert.doesNotThrow(() =>
+      runConformance(
+        activateTimeZoneDataPack(changedCandidate),
+        configuration,
+        parsed,
+        baseline,
+        reviewedDifferences,
+      ),
+    );
+  });
+
   it('requires reviewed structured evidence for every civil-time difference', () => {
     const before = {
       coverage: {

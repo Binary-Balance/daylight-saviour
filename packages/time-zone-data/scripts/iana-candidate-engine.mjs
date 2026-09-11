@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 
+import { activateTimeZoneDataPack } from '@daylight-saviour/contracts';
+import {
+  CivilTimeDecisionUnavailableError,
+  decideCivilTime,
+  normalizeAustralianZoneId,
+} from '@daylight-saviour/domain';
+
 const MAX_ARCHIVE_BYTES = 16 * 1024 * 1024;
 export const MAX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
 
@@ -729,21 +736,172 @@ export function generateAustralianCandidate({
   };
 }
 
-function stateAt(zone, instantMs) {
-  let state = zone.initial;
-  for (const transition of zone.transitions) {
-    if (Date.parse(transition.at) > instantMs) break;
-    state = transition;
-  }
-  return state;
-}
-
 function sameState(left, right) {
   return (
     left.abbreviation === right.abbreviation &&
     left.daylightSaving === right.daylightSaving &&
     left.utcOffsetSeconds === right.utcOffsetSeconds
   );
+}
+
+function zoneForReviewedDifference(pack, difference) {
+  const zone = pack.zones.find((candidate) => candidate.id === difference.zone);
+  if (zone === undefined) {
+    fail(
+      `reviewed civil-time change ${difference.kind} references missing zone ${difference.zone}`,
+    );
+  }
+  return zone;
+}
+
+function applyReviewedDifferences(reviewedExpected, reviewedDifferences) {
+  const reference = structuredClone(reviewedExpected);
+
+  for (const difference of reviewedDifferences) {
+    if (
+      typeof difference !== 'object' ||
+      difference === null ||
+      typeof difference.kind !== 'string'
+    ) {
+      fail('reviewed civil-time changes must be structured objects');
+    }
+
+    switch (difference.kind) {
+      case 'coverage-changed':
+        if (difference.field !== 'startsAt') {
+          fail('reviewed coverage change has an unsupported field');
+        }
+        reference.coverage.startsAt = difference.after;
+        break;
+      case 'validity-changed':
+        if (difference.field !== 'validUntil') {
+          fail('reviewed validity change has an unsupported field');
+        }
+        reference.coverage.validUntil = difference.after;
+        break;
+      case 'zone-label-changed':
+        zoneForReviewedDifference(reference, difference).friendlyLabel =
+          difference.after;
+        break;
+      case 'initial-state-changed':
+        zoneForReviewedDifference(reference, difference).initial = {
+          ...difference.after,
+        };
+        break;
+      case 'transition-added': {
+        const zone = zoneForReviewedDifference(reference, difference);
+        zone.transitions.push({ ...difference.transition });
+        break;
+      }
+      case 'transition-removed': {
+        const zone = zoneForReviewedDifference(reference, difference);
+        const index = zone.transitions.findIndex(
+          (transition) => transition.at === difference.at,
+        );
+        if (index < 0) {
+          fail(
+            `reviewed transition removal has no baseline transition at ${difference.at}`,
+          );
+        }
+        zone.transitions.splice(index, 1);
+        break;
+      }
+      case 'transition-changed': {
+        const zone = zoneForReviewedDifference(reference, difference);
+        const index = zone.transitions.findIndex(
+          (transition) => transition.at === difference.at,
+        );
+        if (index < 0) {
+          fail(
+            `reviewed transition change has no baseline transition at ${difference.at}`,
+          );
+        }
+        zone.transitions[index] = { ...difference.after };
+        break;
+      }
+      case 'zone-added':
+      case 'zone-removed':
+        fail(
+          `reviewed ${difference.kind} requires a complete independently reviewed reference pack`,
+        );
+      default:
+        fail(`unsupported reviewed civil-time change ${difference.kind}`);
+    }
+  }
+
+  for (const zone of reference.zones) {
+    zone.transitions.sort((left, right) =>
+      left.at < right.at ? -1 : left.at > right.at ? 1 : 0,
+    );
+  }
+  return reference;
+}
+
+function civilTimeDecisionSummary(decision) {
+  const event = decision.nextChangeEvent;
+  return {
+    nextChangeEvent:
+      event === null
+        ? null
+        : {
+            at: event.at,
+            direction: event.direction,
+            offsetAfterSeconds: event.offsetAfterSeconds,
+            offsetBeforeSeconds: event.offsetBeforeSeconds,
+            offsetDeltaSeconds: event.offsetDeltaSeconds,
+          },
+    state: {
+      abbreviation: decision.abbreviation,
+      daylightSaving:
+        decision.daylightSavingStatus === 'Daylight saving time applies',
+      utcOffsetSeconds: decision.utcOffsetSeconds,
+    },
+  };
+}
+
+function civilTimeOutcome(pack, requestedZoneId, instantMs) {
+  const zoneId = normalizeAustralianZoneId(requestedZoneId);
+  if (zoneId === null) {
+    throw new Error(`unsupported reviewed Australian zone ${requestedZoneId}`);
+  }
+
+  try {
+    return {
+      kind: 'available',
+      value: civilTimeDecisionSummary(
+        decideCivilTime(pack, zoneId, new Date(instantMs)),
+      ),
+    };
+  } catch (error) {
+    if (error instanceof CivilTimeDecisionUnavailableError) {
+      return { kind: 'unavailable', reason: error.reason };
+    }
+    throw error;
+  }
+}
+
+function compareCivilTimeOutcomes(
+  failures,
+  candidate,
+  reference,
+  zoneId,
+  instantMs,
+  label,
+) {
+  const candidateOutcome = civilTimeOutcome(candidate, zoneId, instantMs);
+  const referenceOutcome = civilTimeOutcome(reference, zoneId, instantMs);
+  if (canonicalJson(candidateOutcome) !== canonicalJson(referenceOutcome)) {
+    failures.push(`${label} mismatch for ${zoneId}`);
+  }
+  return candidateOutcome;
+}
+
+function assertUnavailable(failures, outcome, zoneId, label, reason) {
+  if (outcome.kind !== 'unavailable' || outcome.reason !== reason) {
+    failures.push(
+      `${label} for ${zoneId} must be unavailable with reason ${reason}`,
+    );
+  }
 }
 
 export function runConformance(
@@ -767,7 +925,9 @@ export function runConformance(
   const failures = [];
   const expectedZones = configuration.zones;
   // The refresh command supplies the hash-guarded committed baseline here;
-  // generated candidate values never define their own conformance oracle.
+  // generated candidate values never define their own conformance oracle. The
+  // exact reviewed changes are applied to that baseline below so an approved
+  // change also supplies its independently reviewed horizon state.
   const reviewedDiff = semanticDiff(reviewedExpected, pack);
   if (
     !Array.isArray(reviewedDifferences) ||
@@ -791,10 +951,61 @@ export function runConformance(
       `expected ${expectedZones.length} zones, got ${pack.zones.length}`,
     );
   }
+
+  let expectedReference;
+  if (Array.isArray(reviewedDifferences)) {
+    expectedReference = activateTimeZoneDataPack(
+      applyReviewedDifferences(reviewedExpected, reviewedDifferences),
+    );
+    const remainingDiff = semanticDiff(expectedReference, pack);
+    if (remainingDiff.differences.length > 0) {
+      failures.push(
+        'reviewed civil-time changes do not reconstruct the candidate from the reviewed baseline',
+      );
+    }
+  }
+
   let boundaryChecks = 0;
   const reviewedZones = new Map(
-    reviewedExpected.zones.map((zone) => [zone.id, zone]),
+    (expectedReference ?? reviewedExpected).zones.map((zone) => [
+      zone.id,
+      zone,
+    ]),
   );
+  const aliasesByCanonicalId = new Map();
+  for (const [alias, canonicalId] of Object.entries(REVIEWED_ALIASES)) {
+    const resolvedId = normalizeAustralianZoneId(alias);
+    if (resolvedId !== canonicalId) {
+      failures.push(`domain alias ${alias} does not resolve to ${canonicalId}`);
+      continue;
+    }
+    const aliases = aliasesByCanonicalId.get(canonicalId) ?? [];
+    aliases.push(alias);
+    aliasesByCanonicalId.set(canonicalId, aliases);
+  }
+
+  const compareAt = (zoneId, instantMs, label) => {
+    const outcome = compareCivilTimeOutcomes(
+      failures,
+      pack,
+      expectedReference ?? reviewedExpected,
+      zoneId,
+      instantMs,
+      label,
+    );
+    for (const alias of aliasesByCanonicalId.get(zoneId) ?? []) {
+      compareCivilTimeOutcomes(
+        failures,
+        pack,
+        expectedReference ?? reviewedExpected,
+        alias,
+        instantMs,
+        label,
+      );
+    }
+    return outcome;
+  };
+
   for (const expected of expectedZones) {
     const zone = pack.zones.find((candidate) => candidate.id === expected.id);
     if (zone === undefined) {
@@ -807,14 +1018,6 @@ export function runConformance(
     const reviewedZone = reviewedZones.get(expected.id);
     if (reviewedZone === undefined) {
       failures.push(`reviewed baseline is missing ${expected.id}`);
-    } else if (
-      reviewedExpected.coverage.validUntil === pack.coverage.validUntil &&
-      !sameState(
-        stateAt(zone, validityHorizonMs),
-        stateAt(reviewedZone, validityHorizonMs),
-      )
-    ) {
-      failures.push(`Validity Horizon state mismatch for ${expected.id}`);
     }
     let previous = zone.initial;
     let previousAt = coverageStartMs;
@@ -838,32 +1041,42 @@ export function runConformance(
           `Daylight Saving Status did not change for ${expected.id} at ${transition.at}`,
         );
       }
-      if (!sameState(stateAt(zone, at - 1), previous)) {
-        failures.push(
-          `before boundary mismatch for ${expected.id} at ${transition.at}`,
-        );
-      }
-      if (!sameState(stateAt(zone, at), transition)) {
-        failures.push(
-          `exact boundary mismatch for ${expected.id} at ${transition.at}`,
-        );
-      }
-      if (!sameState(stateAt(zone, at + 1), transition)) {
-        failures.push(
-          `after boundary mismatch for ${expected.id} at ${transition.at}`,
-        );
+      if (Number.isFinite(at)) {
+        compareAt(expected.id, at - 1, `before boundary`);
+        compareAt(expected.id, at, `exact boundary`);
+        compareAt(expected.id, at + 1, `after boundary`);
       }
       boundaryChecks += 3;
       previous = transition;
       previousAt = at;
     }
-    if (!sameState(stateAt(zone, coverageStartMs), zone.initial)) {
-      failures.push(`coverage start mismatch for ${expected.id}`);
-    }
-    if (!sameState(stateAt(zone, validityHorizonMs), previous)) {
-      failures.push(`Validity Horizon mismatch for ${expected.id}`);
-    }
-    boundaryChecks += 2;
+    const beforeCoverage = compareAt(
+      expected.id,
+      coverageStartMs - 1,
+      'before coverage',
+    );
+    assertUnavailable(
+      failures,
+      beforeCoverage,
+      expected.id,
+      'before coverage',
+      'before-coverage',
+    );
+    compareAt(expected.id, coverageStartMs, 'coverage start');
+    compareAt(expected.id, validityHorizonMs, 'Validity Horizon');
+    const afterValidity = compareAt(
+      expected.id,
+      validityHorizonMs + 1,
+      'after Validity Horizon',
+    );
+    assertUnavailable(
+      failures,
+      afterValidity,
+      expected.id,
+      'after Validity Horizon',
+      'validity-expired',
+    );
+    boundaryChecks += 4;
   }
 
   if (parsed !== undefined) {

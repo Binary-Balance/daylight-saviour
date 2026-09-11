@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@daylight-saviour/contracts": "*"
+    "@daylight-saviour/contracts": "*",
+    "@daylight-saviour/domain": "*"
   }
 }
