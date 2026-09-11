@@ -2,6 +2,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { deterministicPackVersion } from './iana-candidate-engine.mjs';
+
 const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const defaultSourcePath = resolve(
   packageDirectory,
@@ -69,13 +71,12 @@ function generateTransitions(source, zone) {
 }
 
 export function generateAustralianPack(source) {
-  return {
+  const content = {
     coverage: {
       startsAt: source.generation.coverageStartsAt,
       validUntil: source.generation.validUntil,
     },
     generatedAt: source.generation.generatedAt,
-    packVersion: source.generation.packVersion,
     schemaVersion: source.generation.schemaVersion,
     source: source.source,
     zones: source.zones.map((zone) => {
@@ -96,6 +97,20 @@ export function generateAustralianPack(source) {
         transitions: generateTransitions(source, zone),
       };
     }),
+  };
+  const packVersion = deterministicPackVersion({
+    archiveVersion: source.source.version,
+    content,
+    firstYear: source.generation.firstYear,
+    lastYear: source.generation.lastYear,
+  });
+  return {
+    coverage: content.coverage,
+    generatedAt: content.generatedAt,
+    packVersion,
+    schemaVersion: content.schemaVersion,
+    source: content.source,
+    zones: content.zones,
   };
 }
 
