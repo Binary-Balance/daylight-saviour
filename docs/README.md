@@ -8,7 +8,7 @@ This index is the canonical entry point for public Daylight Saviour documentatio
 2. [Project README](../README.md) — product summary, repository scope, and common validation.
 3. [Product brief](product-brief.md) — accepted product direction and MVP scope.
 4. [UI design brief](ui-design-brief.md) — accepted interaction, visual, motion, state, and accessibility direction.
-5. [Domain glossary](../CONTEXT.md) — canonical terms used across code, documentation, and issues; not an implementation-status ledger.
+5. [Domain glossary](../GLOSSARY.md) — canonical terms used across code, documentation, and issues; not an implementation-status ledger.
 6. [Architecture decisions](#architecture-decisions) — accepted technical and product constraints relevant to planned work.
 7. [Development guide](development.md) — pinned toolchain, dependency policy, builds, and validation commands.
 
