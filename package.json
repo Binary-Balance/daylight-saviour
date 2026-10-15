@@ -57,9 +57,12 @@
     "web:export": "npm exec --workspace=@daylight-saviour/mobile -- expo export --platform web"
   },
   "devDependencies": {
+    "@binary-balance/seshat": "0.5.0",
     "eslint": "9.39.2",
     "eslint-config-expo": "57.0.0",
     "expo-doctor": "1.20.0",
+    "istanbul-lib-coverage": "3.2.2",
+    "istanbul-lib-instrument": "6.0.3",
     "prettier": "3.8.1",
     "react-native-reanimated": "4.5.1",
     "react-native-worklets": "0.10.1",

@@ -1,16 +1,16 @@
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
-import {
-  type ReminderDispatchCleanupStatus,
-  type ReminderDispatchCompletionOutcome,
-  type ReminderDispatchIdentity,
-  type ReminderDispatchLedgerRecord,
-  type ReminderDispatchLedgerStore,
-} from './reminder-dispatch-ledger.js';
+import type {
+  ReminderDispatchCleanupStatus,
+  ReminderDispatchCompletionOutcome,
+  ReminderDispatchIdentity,
+  ReminderDispatchLedgerRecord,
+  ReminderDispatchLedgerStore,
+} from './reminder-dispatch-ledger.ts';
 import type {
   ReminderSubscriptionStore,
   ReminderSubscriptionSnapshot,
-} from './reminder-subscriptions.js';
+} from './reminder-subscriptions.ts';
 
 export type ReminderDispatchDirection = 'forward' | 'backward';
 export type ReminderDispatchTiming = 'one-week' | 'one-day';

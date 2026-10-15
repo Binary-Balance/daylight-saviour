@@ -2,7 +2,7 @@ import { changeReminderNotification } from '@daylight-saviour/copy/change-remind
 import type { ChangeReminderNotification } from '@daylight-saviour/contracts/reminder-subscription-runtime';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
-import type { ReviewedChangeReminderFacts } from './fcm-change-reminder-sender.js';
+import type { ReviewedChangeReminderFacts } from './fcm-change-reminder-sender.ts';
 
 const apnsOrigins = {
   production: 'https://api.push.apple.com',

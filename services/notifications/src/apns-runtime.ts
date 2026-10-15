@@ -6,7 +6,7 @@ import type {
   ApnsHttpResponse,
   ApnsHttpTransport,
   ApnsProviderTokenProvider,
-} from './apns-change-reminder-sender.js';
+} from './apns-change-reminder-sender.ts';
 
 const providerTokenCacheMs = 50 * 60 * 1000;
 const maxResponseBytes = 64 * 1024;

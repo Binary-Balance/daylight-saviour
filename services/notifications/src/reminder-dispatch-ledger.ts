@@ -5,7 +5,7 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 import {
   hashOpaqueValue,
   opaqueRandomValue,
-} from './reminder-subscriptions.js';
+} from './reminder-subscriptions.ts';
 
 export const reminderDispatchLedgerTableName = 'ReminderDispatchLedger';
 const ledgerPartitionPrefix = 'reminder-dispatch-v1-';

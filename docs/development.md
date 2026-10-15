@@ -38,6 +38,8 @@ Add each dependency to its consuming workspace. Keep React, React DOM, and React
 
 Keep React Native Reanimated 4.5.1 and React Native Worklets 0.10.1 aligned across app dependencies, root overrides, and root development hoisting constraints: npm 11 otherwise materializes incompatible optional-peer copies.
 
+Keep `jest-expo` at 57.0.5, the only version Seshat's Jest integration accepts (see [Code assurance](#code-assurance)). `expo.install.exclude` in `apps/mobile/package.json` stops Expo's version check from requiring a newer patch. Remove the exclusion when Seshat supports one ([Binary-Balance/seshat#170](https://github.com/Binary-Balance/seshat/issues/170)).
+
 Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycle-script approvals to suppress dependency problems. Resolve conflicts explicitly, document accepted advisories, and verify dependency shape with `npm run dependencies:check`.
 
 `npm run audit` fails closed for moderate, high, and critical advisories.
@@ -275,3 +277,49 @@ configuration or native dependency changes. All Android validation compiles only
 architecture.
 
 Production identifier `au.com.binarybalance.daylightsaviour` applies to both the Android application ID and iOS bundle identifier. Signing and environment-specific release configuration remain private operations concerns.
+
+## Code assurance
+
+[Seshat](https://github.com/Binary-Balance/seshat) measures how well the
+TypeScript is tested. For each function it reports:
+
+- **CRAP**: complexity weighted by missing branch coverage. A fully covered
+  function scores its complexity, so a high CRAP means complex, untested code.
+- **Cognitive complexity**: how hard the function is to follow.
+- **Mutation score**: the share of small code changes (mutants), such as `<`
+  to `<=`, that make a test fail. Surviving mutants show untested behaviour.
+- **Pseudo-tested functions**: covered functions whose body can be removed
+  without any test failing.
+
+Each area has its own configuration, so a mutant reruns only that area's tests:
+`seshat.packages.json`, `seshat.notifications.json` and `seshat.mobile.json`.
+All three set the same thresholds: CRAP at most 30, cognitive complexity at
+most 15 and mutation score at least 80%. They are report-only until each area
+meets them.
+
+Run from root after `npm ci`:
+
+```sh
+npm run build --workspace @daylight-saviour/copy
+npx --no-install seshat crap --config seshat.packages.json --json > seshat-packages.json
+node scripts/seshat-summary.mjs seshat-packages.json
+```
+
+Use `check` instead of `crap` to add mutation testing. It is slow: about 15
+minutes for packages on a four-core CI runner, and hours for mobile. Exit
+status 0 means complete with thresholds met, 1 means a threshold was missed and
+2 means the run was incomplete or invalid.
+
+The Code assurance workflow runs `check` for packages and `crap` for
+notifications and mobile on each change, and `check` for every area weekly. The
+summary appears on the workflow run, and the JSON report is kept as an
+artifact.
+
+Seshat must be able to resolve every mutant, so keep tests and modules in this
+shape:
+
+- Call product code inside tests, not while a test file or module loads. Seshat
+  cannot attribute an implicit error thrown during loading, and it stops the
+  run.
+- Make a test fail, not hang, when awaited work never settles. Seshat treats a
+  timeout as unresolved and withholds the mutation score.

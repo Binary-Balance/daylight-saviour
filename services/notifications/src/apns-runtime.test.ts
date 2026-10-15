@@ -6,8 +6,8 @@ import { describe, it } from 'node:test';
 import {
   createApnsProviderTokenProvider,
   createNodeApnsHttpTransport,
-} from './apns-runtime.js';
-import type { ApnsHttpRequest } from './apns-change-reminder-sender.js';
+} from './apns-runtime.ts';
+import type { ApnsHttpRequest } from './apns-change-reminder-sender.ts';
 
 const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const privateKey = keys.privateKey

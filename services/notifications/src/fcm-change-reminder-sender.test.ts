@@ -10,7 +10,7 @@ import {
   type FcmHttpResponse,
   type FcmChangeReminderSubscription,
   type FcmSubscriptionRemovalResult,
-} from './fcm-change-reminder-sender.js';
+} from './fcm-change-reminder-sender.ts';
 
 const now = new Date('2026-07-26T00:00:00.000Z');
 const fullDeviceToken = 'fcm-token:with_valid.characters-123';

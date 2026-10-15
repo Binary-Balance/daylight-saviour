@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
-import { health, healthOptions } from './health.js';
+import { health, healthOptions } from './health.ts';
 
 const originalBuildVersion = process.env.BUILD_VERSION;
 

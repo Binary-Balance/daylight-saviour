@@ -5,7 +5,7 @@ import {
   createKeylessFcmAccessTokenProvider,
   type KeylessFcmFetch,
   type KeylessFcmLogEvent,
-} from './keyless-fcm-access-token.js';
+} from './keyless-fcm-access-token.ts';
 
 const now = new Date('2026-07-28T01:00:00.000Z');
 const entraAssertion = 'sensitive-entra-assertion';

@@ -9,7 +9,7 @@ import {
   type ApnsHttpRequest,
   type ApnsHttpResponse,
   type ApnsSubscriptionRemovalResult,
-} from './apns-change-reminder-sender.js';
+} from './apns-change-reminder-sender.ts';
 
 const deviceToken = 'a'.repeat(64);
 const providerToken = 'header.payload.signature';

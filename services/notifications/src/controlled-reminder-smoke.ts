@@ -8,22 +8,22 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 import {
   createApnsChangeReminderSender,
   type ApnsChangeReminderSender,
-} from './apns-change-reminder-sender.js';
+} from './apns-change-reminder-sender.ts';
 import {
   createApnsProviderTokenProvider,
   createNodeApnsHttpTransport,
-} from './apns-runtime.js';
+} from './apns-runtime.ts';
 import {
   createFcmChangeReminderSender,
   createFetchFcmHttpTransport,
   type FcmChangeReminderSender,
   type ReviewedChangeReminderFacts,
-} from './fcm-change-reminder-sender.js';
-import { createKeylessFcmAccessTokenProvider } from './keyless-fcm-access-token.js';
+} from './fcm-change-reminder-sender.ts';
+import { createKeylessFcmAccessTokenProvider } from './keyless-fcm-access-token.ts';
 import {
   createAzureReminderSubscriptionStore,
   type ReminderSubscriptionStore,
-} from './reminder-subscriptions.js';
+} from './reminder-subscriptions.ts';
 
 const maxRequestBytes = 1024;
 const installationIdPattern = /^[A-Za-z0-9_-]{43}$/;

@@ -1,0 +1,78 @@
+{
+  "source": {
+    "include": [
+      "apps/mobile/app/**/*.tsx",
+      "apps/mobile/components/**/*.tsx",
+      "apps/mobile/src/**/*.ts",
+      "apps/mobile/src/**/*.tsx"
+    ],
+    "exclude": [
+      "apps/mobile/**/*.test.ts",
+      "apps/mobile/**/*.test.tsx",
+      "apps/mobile/**/*.d.ts"
+    ]
+  },
+  "capture": [
+    "package.json",
+    "package-lock.json",
+    "tsconfig.base.json",
+    "apps",
+    "packages",
+    "services",
+    "node_modules"
+  ],
+  "workers": 4,
+  "setups": [
+    {
+      "name": "mobile",
+      "runner": "jest",
+      "cwd": "apps/mobile",
+      "timeoutMs": 120000,
+      "typecheck": [
+        "node",
+        "../../node_modules/typescript/bin/tsc",
+        "--project",
+        "tsconfig.json",
+        "--noEmit"
+      ],
+      "test": [
+        "node",
+        "../../node_modules/jest/bin/jest.js",
+        "--runInBand",
+        "--reporters=default",
+        "--reporters={seshatReporter}",
+        "--env={seshatEnvironment}"
+      ],
+      "coverage": {
+        "command": [
+          "node",
+          "../../node_modules/jest/bin/jest.js",
+          "--runInBand",
+          "--reporters=default",
+          "--reporters={seshatReporter}",
+          "--env={seshatEnvironment}",
+          "--coverage",
+          "--coverageProvider=babel",
+          "--coverageReporters=json",
+          "--coverageDirectory=coverage/seshat",
+          "--collectCoverageFrom",
+          "app/**/*.tsx",
+          "--collectCoverageFrom",
+          "components/**/*.tsx",
+          "--collectCoverageFrom",
+          "src/**/*.{ts,tsx}",
+          "--collectCoverageFrom",
+          "!**/*.test.{ts,tsx}",
+          "--collectCoverageFrom",
+          "!**/*.d.ts"
+        ],
+        "report": "coverage/seshat/coverage-final.json"
+      }
+    }
+  ],
+  "thresholds": {
+    "maxCrap": 30,
+    "maxCognitiveComplexity": 15,
+    "minMutationScore": 80
+  }
+}

@@ -12,7 +12,7 @@ import {
   registerReminderSubscription,
   updateReminderSubscription,
   type ReminderSubscriptionStore,
-} from './reminder-subscriptions.js';
+} from './reminder-subscriptions.ts';
 
 const validRegistration = {
   attemptGeneration: 1,

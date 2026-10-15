@@ -17,7 +17,11 @@ const packJson = JSON.parse(
     'utf8',
   ),
 );
-const pack = activateAustralianTimeZoneDataPack(packJson);
+// Activate inside tests, so a mutant that breaks activation fails a test
+// instead of crashing this file while it loads.
+let activatedPack;
+const pack = () =>
+  (activatedPack ??= activateAustralianTimeZoneDataPack(packJson));
 const eventMs = Date.parse('2026-10-03T16:00:00.000Z');
 const atSecondsBefore = (seconds) => new Date(eventMs - seconds * 1_000);
 const atSecondsAfter = (seconds) => new Date(eventMs + seconds * 1_000);
@@ -26,7 +30,7 @@ describe('createCivilTimeReport', () => {
   it('owns exact reminder event direction and aftermath classification', () => {
     const resolve = (now, direction = 'Forward Change') =>
       resolveCivilTimeReportEvent(
-        pack,
+        pack(),
         'Australia/Sydney',
         '2026-10-03T16:00:00.000Z',
         direction,
@@ -45,7 +49,7 @@ describe('createCivilTimeReport', () => {
     );
     assert.equal(
       resolveCivilTimeReportEvent(
-        pack,
+        pack(),
         'Australia/Sydney',
         '2028-10-03T16:00:00.000Z',
         'Forward Change',
@@ -67,7 +71,7 @@ describe('createCivilTimeReport', () => {
     it(description, () => {
       assert.equal(
         createCivilTimeReport(
-          pack,
+          pack(),
           'Australia/Sydney',
           atSecondsBefore(secondsBefore),
         ).phase,
@@ -78,12 +82,12 @@ describe('createCivilTimeReport', () => {
 
   it('replaces facts atomically and begins aftermath at the event instant', () => {
     const before = createCivilTimeReport(
-      pack,
+      pack(),
       'Australia/Sydney',
       atSecondsBefore(0.001),
     );
     const exact = createCivilTimeReport(
-      pack,
+      pack(),
       'Australia/Sydney',
       atSecondsAfter(0),
     );
@@ -106,18 +110,18 @@ describe('createCivilTimeReport', () => {
   it('shows aftermath only for the first unacknowledged opening', () => {
     const instant = atSecondsAfter(3_600);
     const firstOpening = createCivilTimeReport(
-      pack,
+      pack(),
       'Australia/Sydney',
       instant,
     );
     const repeatOpening = createCivilTimeReport(
-      pack,
+      pack(),
       'Australia/Sydney',
       instant,
       { acknowledgedEventAt: '2026-10-03T16:00:00.000Z' },
     );
     const staleAcknowledgement = createCivilTimeReport(
-      pack,
+      pack(),
       'Australia/Sydney',
       instant,
       { acknowledgedEventAt: '2026-04-04T16:00:00.000Z' },
@@ -133,7 +137,7 @@ describe('createCivilTimeReport', () => {
   it('keeps aftermath inside 48 hours and resumes normal report at 48 hours', () => {
     assert.equal(
       createCivilTimeReport(
-        pack,
+        pack(),
         'Australia/Sydney',
         atSecondsAfter(48 * 3_600 - 0.001),
       ).phase,
@@ -141,7 +145,7 @@ describe('createCivilTimeReport', () => {
     );
     assert.equal(
       createCivilTimeReport(
-        pack,
+        pack(),
         'Australia/Sydney',
         atSecondsAfter(48 * 3_600),
       ).phase,
@@ -153,7 +157,7 @@ describe('createCivilTimeReport', () => {
     const context = { requestedEventAt: '2026-10-03T16:00:00.000Z' };
     assert.equal(
       createCivilTimeReport(
-        pack,
+        pack(),
         'Australia/Sydney',
         atSecondsAfter(48 * 3_600 - 0.001),
         context,
@@ -162,7 +166,7 @@ describe('createCivilTimeReport', () => {
     );
     assert.equal(
       createCivilTimeReport(
-        pack,
+        pack(),
         'Australia/Sydney',
         atSecondsAfter(48 * 3_600),
         context,
@@ -171,7 +175,7 @@ describe('createCivilTimeReport', () => {
     );
     assert.equal(
       createCivilTimeReport(
-        pack,
+        pack(),
         'Australia/Sydney',
         atSecondsAfter(48 * 3_600 + 0.001),
         context,
@@ -182,22 +186,22 @@ describe('createCivilTimeReport', () => {
 
   it('derives Forward, Backward, Lord Howe, and no-event phases from pack data', () => {
     const forward = createCivilTimeReport(
-      pack,
+      pack(),
       'Australia/Sydney',
       atSecondsBefore(86_400),
     );
     const backward = createCivilTimeReport(
-      pack,
+      pack(),
       'Australia/Sydney',
       new Date('2026-04-03T16:00:00.000Z'),
     );
     const lordHowe = createCivilTimeReport(
-      pack,
+      pack(),
       'Australia/Lord_Howe',
       new Date('2026-10-02T15:30:00.000Z'),
     );
     const noEvent = createCivilTimeReport(
-      pack,
+      pack(),
       'Australia/Brisbane',
       new Date('2026-07-19T00:00:00.000Z'),
     );
