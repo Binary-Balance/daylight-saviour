@@ -1,0 +1,53 @@
+{
+  "source": {
+    "include": ["packages/*/src/**/*.ts"],
+    "exclude": ["packages/*/src/**/*.d.ts"]
+  },
+  "capture": [
+    "package.json",
+    "package-lock.json",
+    "tsconfig.base.json",
+    "scripts/seshat-collect-node.mjs",
+    "apps",
+    "packages",
+    "services",
+    "node_modules"
+  ],
+  "workers": 4,
+  "setups": [
+    {
+      "name": "packages",
+      "runner": "node",
+      "cwd": ".",
+      "timeoutMs": 60000,
+      "typecheck": [
+        "npm",
+        "run",
+        "typecheck",
+        "--workspace",
+        "@daylight-saviour/contracts",
+        "--workspace",
+        "@daylight-saviour/copy",
+        "--workspace",
+        "@daylight-saviour/domain",
+        "--workspace",
+        "@daylight-saviour/time-zone-data"
+      ],
+      "test": [
+        "node",
+        "--test",
+        "--test-concurrency=1",
+        "--test-reporter={seshatReporter}",
+        "packages/*/tests/*.test.mjs"
+      ],
+      "coverage": {
+        "command": [
+          "node",
+          "scripts/seshat-collect-node.mjs",
+          "packages/*/tests/*.test.mjs"
+        ],
+        "report": "coverage/seshat-packages.json"
+      }
+    }
+  ]
+}
