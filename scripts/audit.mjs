@@ -3,30 +3,26 @@ import { spawnSync } from 'node:child_process';
 
 // ponytail: temporary exceptions for advisories without a compatible patched
 // release; docs/development.md records why each is acceptable. Each lists the
-// only lockfile packages that may depend on the affected package, so a new
-// route to it fails the audit. Remove an exception once a patch is available.
+// only lockfile packages that may depend directly on the affected package, so
+// a new direct dependent fails the audit, as does a change in severity.
+// Remove an exception once a patch is available.
 const exceptions = [
   {
-    name: 'image-size',
-    urls: [
-      'https://github.com/advisories/GHSA-w3rx-r6r6-pgpr',
-      'https://github.com/advisories/GHSA-5p2g-fcmc-qvqq',
-    ],
-    dependents: ['node_modules/metro'],
-  },
-  {
     name: 'decode-uri-component',
-    urls: ['https://github.com/advisories/GHSA-vcc3-ghjq-m6fr'],
+    url: 'https://github.com/advisories/GHSA-vcc3-ghjq-m6fr',
+    severity: 'moderate',
     dependents: ['node_modules/query-string'],
   },
   {
     name: 'braces',
-    urls: ['https://github.com/advisories/GHSA-vfj7-8cjw-p6xm'],
+    url: 'https://github.com/advisories/GHSA-vfj7-8cjw-p6xm',
+    severity: 'high',
     dependents: ['node_modules/micromatch'],
   },
   {
     name: 'node-forge',
-    urls: ['https://github.com/advisories/GHSA-86w9-cpqp-85rv'],
+    url: 'https://github.com/advisories/GHSA-86w9-cpqp-85rv',
+    severity: 'high',
     dependents: [
       'node_modules/@expo/cli',
       'node_modules/@expo/code-signing-certificates',
@@ -34,7 +30,8 @@ const exceptions = [
   },
   {
     name: 'sprintf-js',
-    urls: ['https://github.com/advisories/GHSA-hp3w-g68c-fv3c'],
+    url: 'https://github.com/advisories/GHSA-hp3w-g68c-fv3c',
+    severity: 'moderate',
     dependents: [
       'node_modules/@istanbuljs/load-nyc-config/node_modules/argparse',
     ],
@@ -50,10 +47,13 @@ const hasExactValues = (actual, expected) =>
 
 const dependentsOf = (packageName, lock) =>
   Object.entries(lock?.packages ?? {})
-    .filter(
-      ([, entry]) =>
-        entry.dependencies?.[packageName] ||
-        entry.optionalDependencies?.[packageName],
+    .filter(([, entry]) =>
+      [
+        entry.dependencies,
+        entry.devDependencies,
+        entry.optionalDependencies,
+        entry.peerDependencies,
+      ].some((dependencies) => dependencies?.[packageName]),
     )
     .map(([path]) => path)
     .sort();
@@ -62,11 +62,15 @@ const isAllowedAdvisory = (packageName, vulnerability, advisory, lock) => {
   const exception = exceptions.find(({ name }) => name === packageName);
   return (
     exception !== undefined &&
-    exception.urls.includes(advisory.url) &&
+    advisory.url === exception.url &&
+    advisory.severity === exception.severity &&
     advisory.name === packageName &&
     advisory.dependency === packageName &&
     hasExactValues(vulnerability.nodes, [`node_modules/${packageName}`]) &&
-    hasExactValues(dependentsOf(packageName, lock), exception.dependents)
+    hasExactValues(
+      dependentsOf(packageName, lock),
+      exception.dependents.toSorted(),
+    )
   );
 };
 
@@ -199,7 +203,6 @@ export function validateAudit(audit, lock) {
   // External navigation text risks CPU exhaustion only if core fallback or query-string.parse is used.
   // Remove when Router adopts a compatible patched parser.
   if (
-    audit.vulnerabilities['decode-uri-component'].severity !== 'moderate' ||
     !hasExactValues(dependentsOf('query-string', lock), [
       'node_modules/expo-router',
     ]) ||

@@ -38,22 +38,13 @@ Add each dependency to its consuming workspace. Keep React, React DOM, and React
 
 Keep React Native Reanimated 4.5.1 and React Native Worklets 0.10.1 aligned across app dependencies, root overrides, and root development hoisting constraints: npm 11 otherwise materializes incompatible optional-peer copies.
 
-Keep `jest-expo` at 57.0.5, the only version [Seshat](https://github.com/Binary-Balance/seshat)'s Jest integration accepts. `expo.install.exclude` in `apps/mobile/package.json` stops Expo's version check from requiring a newer patch. Remove the exclusion when Seshat supports one.
-
 Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycle-script approvals to suppress dependency problems. Resolve conflicts explicitly, document accepted advisories, and verify dependency shape with `npm run dependencies:check`.
 
 `npm run audit` fails closed for moderate, high, and critical advisories.
-`scripts/audit.mjs` lists each temporary exception with the only installed
-packages allowed to depend on it, so a new route to an excepted package fails
-the audit. It also fails when an exception no longer matches an advisory, so a
-patched release forces its removal.
-
-Until a compatible patched `image-size` release is published, the audit command
-allows only [GHSA-w3rx-r6r6-pgpr](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr)
-and [GHSA-5p2g-fcmc-qvqq](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq).
-They apply only to the installed Metro build tool at build time, not the shipped
-application. Remove this temporary exception immediately when that compatible
-patched release is available.
+`scripts/audit.mjs` lists each temporary exception with its advisory, severity
+and the only installed packages allowed to depend directly on it. A new direct
+dependent or a changed severity fails the audit. So does an exception that no
+longer matches an advisory, so a patched release forces its removal.
 
 The shipped `expo-router` 57.0.27 → `query-string` 7.1.3 →
 `decode-uri-component` 0.2.2 chain is temporarily accepted but dormant under
@@ -64,7 +55,7 @@ unresponsiveness only if future app or upstream routing uses the included React
 Navigation core fallback or otherwise calls `query-string.parse`. Remove this
 exception when Router adopts a compatible patched parser.
 
-Three more advisories have no patched release yet. Each affects only build and
+Three more advisories have no patched release. Each affects only build and
 test tooling, and none of these packages appears in the exported web or Android
 bundle:
 
@@ -73,9 +64,10 @@ bundle:
   Metro and Jest match only patterns from repository configuration.
 - `node-forge` 1.4.0 ([GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv)),
   through `@expo/cli` and `@expo/code-signing-certificates`: RSA PKCS#1 v1.5
-  signature verification accepts extra nested digest elements. The Expo CLI
-  only parses local iOS signing certificates with it, and verifies signatures
-  only for Expo Updates code signing, which this app does not use.
+  signature verification accepts extra nested digest elements, which can let
+  signatures be forged for low-exponent RSA keys. The Expo CLI only verifies
+  signatures it has just made or a local certificate's own signature, never
+  one supplied by another party.
 - `sprintf-js` 1.0.3 ([GHSA-hp3w-g68c-fv3c](https://github.com/advisories/GHSA-hp3w-g68c-fv3c)),
   through `argparse`: unbounded precision specifiers can exhaust resources.
   Only js-yaml's command-line tool loads `argparse`; Jest's coverage

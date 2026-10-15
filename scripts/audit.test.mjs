@@ -3,50 +3,49 @@ import { test } from 'node:test';
 
 import { validateAudit } from './audit.mjs';
 
-const allowedAdvisory = (url) => ({
+const bracesUrl = 'https://github.com/advisories/GHSA-vfj7-8cjw-p6xm';
+
+const advisory = (name, url, severity) => ({
   source: 1,
-  name: 'image-size',
-  dependency: 'image-size',
-  severity: 'high',
+  name,
+  dependency: name,
+  severity,
   url,
 });
 
-const decoderAdvisory = (overrides = {}) => ({
-  source: 2,
-  name: 'decode-uri-component',
-  dependency: 'decode-uri-component',
-  severity: 'moderate',
-  url: 'https://github.com/advisories/GHSA-vcc3-ghjq-m6fr',
-  ...overrides,
-});
-
-const toolingAdvisory = (name, url, severity = 'high') => ({
+const leaf = (name, url, severity) => ({
   severity,
-  via: [{ source: 3, name, dependency: name, severity, url }],
+  via: [advisory(name, url, severity)],
   effects: [],
   nodes: [`node_modules/${name}`],
 });
 
-const audit = (via, options = {}) => ({
-  metadata: { vulnerabilities: { high: 1 } },
+const audit = () => ({
+  metadata: { vulnerabilities: { high: 2, moderate: 5 } },
   vulnerabilities: {
-    'image-size': {
+    braces: {
       severity: 'high',
-      via,
-      effects: options.imageEffects ?? ['metro'],
-      nodes: options.imageNodes ?? ['node_modules/image-size'],
+      via: [advisory('braces', bracesUrl, 'high')],
+      effects: ['micromatch'],
+      nodes: ['node_modules/braces'],
     },
-    metro: {
+    micromatch: {
       severity: 'high',
-      via: ['image-size'],
+      via: ['braces'],
       effects: [],
-      nodes: ['node_modules/metro'],
+      nodes: ['node_modules/micromatch'],
     },
     'decode-uri-component': {
-      severity: options.decoderSeverity ?? 'moderate',
-      via: [decoderAdvisory(options.decoderAdvisory)],
+      severity: 'moderate',
+      via: [
+        advisory(
+          'decode-uri-component',
+          'https://github.com/advisories/GHSA-vcc3-ghjq-m6fr',
+          'moderate',
+        ),
+      ],
       effects: ['query-string'],
-      nodes: options.decoderNodes ?? ['node_modules/decode-uri-component'],
+      nodes: ['node_modules/decode-uri-component'],
     },
     'query-string': {
       severity: 'moderate',
@@ -60,15 +59,12 @@ const audit = (via, options = {}) => ({
       effects: [],
       nodes: ['node_modules/expo-router'],
     },
-    braces: toolingAdvisory(
-      'braces',
-      'https://github.com/advisories/GHSA-vfj7-8cjw-p6xm',
-    ),
-    'node-forge': toolingAdvisory(
+    'node-forge': leaf(
       'node-forge',
       'https://github.com/advisories/GHSA-86w9-cpqp-85rv',
+      'high',
     ),
-    'sprintf-js': toolingAdvisory(
+    'sprintf-js': leaf(
       'sprintf-js',
       'https://github.com/advisories/GHSA-hp3w-g68c-fv3c',
       'moderate',
@@ -78,8 +74,7 @@ const audit = (via, options = {}) => ({
 
 const lock = {
   packages: {
-    'node_modules/image-size': { version: '1.2.1' },
-    'node_modules/metro': { dependencies: { 'image-size': '^1.0.2' } },
+    'node_modules/micromatch': { dependencies: { braces: '^3.0.3' } },
     'node_modules/expo-router': {
       version: '57.0.27',
       dependencies: { 'query-string': '^7.1.3' },
@@ -89,7 +84,6 @@ const lock = {
       dependencies: { 'decode-uri-component': '^0.2.2' },
     },
     'node_modules/decode-uri-component': { version: '0.2.2' },
-    'node_modules/micromatch': { dependencies: { braces: '^3.0.3' } },
     'node_modules/@expo/cli': { dependencies: { 'node-forge': '^1.3.3' } },
     'node_modules/@expo/code-signing-certificates': {
       dependencies: { 'node-forge': '^1.3.3' },
@@ -100,40 +94,20 @@ const lock = {
   },
 };
 
-const withDependent = (path, name) => ({
-  packages: {
-    ...lock.packages,
-    [path]: { dependencies: { [name]: '*' } },
-  },
+const withPackage = (path, entry) => ({
+  packages: { ...lock.packages, [path]: entry },
 });
 
 test('allows only the temporary exceptions', () => {
-  assert.doesNotThrow(() =>
-    validateAudit(
-      audit([
-        allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-        allowedAdvisory('https://github.com/advisories/GHSA-5p2g-fcmc-qvqq'),
-      ]),
-      lock,
-    ),
-  );
+  assert.doesNotThrow(() => validateAudit(audit(), lock));
 });
 
 test('rejects an unexpected moderate-or-higher advisory', () => {
-  assert.throws(
-    () =>
-      validateAudit(
-        audit([
-          allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-          {
-            ...allowedAdvisory('https://github.com/advisories/GHSA-other'),
-            name: 'other',
-          },
-        ]),
-        lock,
-      ),
-    /unexpected advisories/i,
+  const report = audit();
+  report.vulnerabilities.braces.via.push(
+    advisory('braces', 'https://github.com/advisories/GHSA-other', 'high'),
   );
+  assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
 });
 
 test('rejects malformed audit output and audit endpoint errors', () => {
@@ -145,11 +119,8 @@ test('rejects malformed audit output and audit endpoint errors', () => {
 });
 
 test('rejects unresolved audit references', () => {
-  const report = audit([
-    allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-    allowedAdvisory('https://github.com/advisories/GHSA-5p2g-fcmc-qvqq'),
-  ]);
-  report.vulnerabilities.metro = { severity: 'high', via: ['missing'] };
+  const report = audit();
+  report.vulnerabilities.micromatch.via = ['missing'];
   assert.throws(
     () => validateAudit(report, lock),
     /unresolved npm audit references/i,
@@ -157,9 +128,7 @@ test('rejects unresolved audit references', () => {
 });
 
 test('rejects an audit edge missing its reciprocal effect', () => {
-  const report = audit([
-    allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-  ]);
+  const report = audit();
   report.vulnerabilities.evil = {
     severity: 'critical',
     via: ['decode-uri-component'],
@@ -173,10 +142,8 @@ test('rejects an audit edge missing its reciprocal effect', () => {
 });
 
 test('rejects an audit effect missing its reciprocal reference', () => {
-  const report = audit([
-    allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-  ]);
-  report.vulnerabilities['image-size'].effects = ['metro', 'evil'];
+  const report = audit();
+  report.vulnerabilities.braces.effects = ['micromatch', 'evil'];
   assert.throws(
     () => validateAudit(report, lock),
     /unreciprocated npm audit effects/i,
@@ -184,9 +151,7 @@ test('rejects an audit effect missing its reciprocal reference', () => {
 });
 
 test('rejects a moderate-or-higher record without an advisory chain', () => {
-  const report = audit([
-    allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-  ]);
+  const report = audit();
   report.vulnerabilities.evil = { severity: 'critical', via: [] };
   assert.throws(
     () => validateAudit(report, lock),
@@ -195,10 +160,8 @@ test('rejects a moderate-or-higher record without an advisory chain', () => {
 });
 
 test('rejects a vulnerability record without a valid severity', () => {
-  const report = audit([
-    allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-  ]);
-  report.vulnerabilities.evil = { severity: 'urgent', via: ['image-size'] };
+  const report = audit();
+  report.vulnerabilities.evil = { severity: 'urgent', via: ['braces'] };
   assert.throws(
     () => validateAudit(report, lock),
     /invalid npm audit vulnerabilities/i,
@@ -206,10 +169,12 @@ test('rejects a vulnerability record without a valid severity', () => {
 });
 
 test('rejects an advisory without a valid severity', () => {
-  const report = audit([
-    allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-    { name: 'other', dependency: 'other', url: 'https://example.test/other' },
-  ]);
+  const report = audit();
+  report.vulnerabilities.braces.via.push({
+    name: 'other',
+    dependency: 'other',
+    url: 'https://example.test/other',
+  });
   assert.throws(
     () => validateAudit(report, lock),
     /invalid npm audit advisories/i,
@@ -217,112 +182,64 @@ test('rejects an advisory without a valid severity', () => {
 });
 
 test('requires every temporary exception to still apply', () => {
+  const report = audit();
+  delete report.vulnerabilities.braces;
+  delete report.vulnerabilities.micromatch;
   assert.throws(
-    () => validateAudit(audit([]), lock),
-    /no longer apply: image-size/i,
+    () => validateAudit(report, lock),
+    /no longer apply: braces; remove them/i,
   );
 });
 
-test('rejects an excepted package reached through another dependent', () => {
-  assert.throws(
-    () =>
-      validateAudit(
-        audit([
-          allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-        ]),
-        withDependent('node_modules/other', 'braces'),
-      ),
-    /unexpected advisories/i,
-  );
-});
-
-test('rejects the exception outside the installed Metro path', () => {
-  const report = audit(
-    [allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr')],
-    {
-      imageEffects: ['other'],
-      imageNodes: ['node_modules/other/image-size'],
-    },
-  );
-  report.vulnerabilities.other = {
-    severity: 'high',
-    via: ['image-size'],
-    effects: [],
-    nodes: ['node_modules/other'],
-  };
-  delete report.vulnerabilities.metro;
+test('rejects an excepted advisory whose severity changed', () => {
+  const report = audit();
+  report.vulnerabilities.braces.severity = 'critical';
+  report.vulnerabilities.braces.via[0].severity = 'critical';
   assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
 });
 
-test('allows only the exact temporary Expo Router decoder chain', () => {
-  assert.doesNotThrow(() =>
-    validateAudit(
-      audit([
-        allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-      ]),
-      lock,
-    ),
-  );
+test('rejects a second installed copy of an excepted package', () => {
+  const report = audit();
+  report.vulnerabilities.braces.nodes.push('node_modules/other/braces');
+  assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
 });
 
-test('rejects a changed decoder advisory, path, node, or lockfile version', () => {
-  for (const [report, selectedLock] of [
-    [
-      audit(
-        [allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr')],
-        {
-          decoderAdvisory: { url: 'https://github.com/advisories/GHSA-other' },
-        },
-      ),
-      lock,
-    ],
-    [
-      audit(
-        [allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr')],
-        {
-          decoderNodes: ['node_modules/other/decode-uri-component'],
-        },
-      ),
-      lock,
-    ],
-    [
-      audit([
-        allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-      ]),
-      withDependent('node_modules/other', 'query-string'),
-    ],
-    [
-      audit([
-        allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-      ]),
-      {
-        packages: {
-          ...lock.packages,
-          'node_modules/query-string': {
-            ...lock.packages['node_modules/query-string'],
-            version: '7.1.4',
-          },
-        },
-      },
-    ],
-    [
-      audit([
-        allowedAdvisory('https://github.com/advisories/GHSA-w3rx-r6r6-pgpr'),
-      ]),
-      {
-        packages: {
-          ...lock.packages,
-          'node_modules/expo-router': {
-            ...lock.packages['node_modules/expo-router'],
-            version: '57.0.19',
-          },
-        },
-      },
-    ],
+test('rejects an excepted package with a new direct dependent', () => {
+  for (const field of [
+    'dependencies',
+    'devDependencies',
+    'optionalDependencies',
+    'peerDependencies',
   ]) {
     assert.throws(
-      () => validateAudit(report, selectedLock),
-      /temporary decode-uri-component exception changed|unexpected advisories/i,
+      () =>
+        validateAudit(
+          audit(),
+          withPackage('node_modules/other', { [field]: { braces: '*' } }),
+        ),
+      /unexpected advisories/i,
+      field,
+    );
+  }
+});
+
+test('rejects a changed decoder chain or lockfile version', () => {
+  for (const selectedLock of [
+    withPackage('node_modules/other', {
+      dependencies: { 'query-string': '*' },
+    }),
+    withPackage('node_modules/query-string', {
+      ...lock.packages['node_modules/query-string'],
+      version: '7.1.4',
+    }),
+    withPackage('node_modules/expo-router', {
+      ...lock.packages['node_modules/expo-router'],
+      version: '57.0.28',
+    }),
+  ]) {
+    assert.throws(
+      () => validateAudit(audit(), selectedLock),
+      /temporary decode-uri-component exception changed/i,
     );
   }
 });
