@@ -19,11 +19,15 @@ const packJson = JSON.parse(
     'utf8',
   ),
 );
-const pack = activateAustralianTimeZoneDataPack(packJson);
+// Activate inside tests, so a mutant that breaks activation fails a test
+// instead of crashing this file while it loads.
+let activatedPack;
+const pack = () =>
+  (activatedPack ??= activateAustralianTimeZoneDataPack(packJson));
 const enabled = { oneDayEnabled: true, oneWeekEnabled: true };
 const dayMilliseconds = 24 * 60 * 60 * 1_000;
 
-function plan(homeTimeZone, now, preferences = enabled, dataPack = pack) {
+function plan(homeTimeZone, now, preferences = enabled, dataPack = pack()) {
   return planChangeReminderDeliveries(
     dataPack,
     homeTimeZone,
@@ -46,7 +50,7 @@ describe('planChangeReminderDeliveries', () => {
         assert.equal(normalizeAustralianZoneId(alias), zone.id);
       }
 
-      const packedZone = pack.zones.find(
+      const packedZone = pack().zones.find(
         (candidate) => candidate.id === zone.id,
       );
       assert.ok(packedZone);
@@ -80,7 +84,7 @@ describe('planChangeReminderDeliveries', () => {
 
           const startsAt = Date.parse(reminder.deliveryWindow.startsAt);
           const endsAt = Date.parse(reminder.deliveryWindow.endsAt);
-          assert.ok(endsAt <= Date.parse(pack.coverage.validUntil));
+          assert.ok(endsAt <= Date.parse(pack().coverage.validUntil));
           assert.equal(
             reminderFor(plan(zone.id, startsAt - 1), event.at, timing),
             undefined,
@@ -231,7 +235,7 @@ describe('planChangeReminderDeliveries', () => {
 
   it('fails closed before and after coverage, including invalid instants', () => {
     assert.doesNotThrow(() =>
-      plan('Australia/Sydney', pack.coverage.validUntil),
+      plan('Australia/Sydney', pack().coverage.validUntil),
     );
 
     for (const [now, reason] of [

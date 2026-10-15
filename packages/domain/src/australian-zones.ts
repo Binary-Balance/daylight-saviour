@@ -165,19 +165,20 @@ export const australianZones: readonly AustralianZone[] = [
   },
 ];
 
-const zonesById = new Map(australianZones.map((zone) => [zone.id, zone]));
+const zonesById = new Map<string, AustralianZone>();
+const canonicalIdsByAcceptedId = new Map<string, string>();
+for (const zone of australianZones) {
+  zonesById.set(zone.id, zone);
+  canonicalIdsByAcceptedId.set(zone.id, zone.id);
+  for (const alias of zone.aliases) {
+    canonicalIdsByAcceptedId.set(alias, zone.id);
+  }
+}
 if (
   canonicalAustralianZoneIds.length !== zonesById.size ||
   canonicalAustralianZoneIds.some((zoneId) => !zonesById.has(zoneId))
 ) {
   throw new Error('Australian zone runtime catalogue is out of sync');
-}
-const canonicalIdsByAcceptedId = new Map<string, string>();
-for (const zone of australianZones) {
-  canonicalIdsByAcceptedId.set(zone.id, zone.id);
-  for (const alias of zone.aliases) {
-    canonicalIdsByAcceptedId.set(alias, zone.id);
-  }
 }
 
 export function normalizeAustralianZoneId(candidate: string) {
