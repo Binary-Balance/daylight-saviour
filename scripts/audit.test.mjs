@@ -215,7 +215,7 @@ test('rejects an excepted package with a new direct dependent', () => {
       () =>
         validateAudit(
           audit(),
-          withPackage('node_modules/other', { [field]: { braces: '*' } }),
+          withPackage('node_modules/other', { [field]: { braces: '' } }),
         ),
       /unexpected advisories/i,
       field,

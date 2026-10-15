@@ -53,7 +53,7 @@ const dependentsOf = (packageName, lock) =>
         entry.devDependencies,
         entry.optionalDependencies,
         entry.peerDependencies,
-      ].some((dependencies) => dependencies?.[packageName]),
+      ].some((dependencies) => Object.hasOwn(dependencies ?? {}, packageName)),
     )
     .map(([path]) => path)
     .sort();
@@ -188,7 +188,7 @@ export function validateAudit(audit, lock) {
 
   if (unexpected.length) {
     throw new Error(
-      `Unexpected advisories: ${unexpected.map(({ url, name }) => url ?? name).join(', ')}`,
+      `Unexpected advisories, or exceptions outside their allowed packages or severity: ${unexpected.map(({ url, name }) => url ?? name).join(', ')}`,
     );
   }
   const stale = exceptions
