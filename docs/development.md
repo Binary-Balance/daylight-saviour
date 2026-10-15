@@ -4,10 +4,10 @@
 
 | Tool                  | Version           |
 | --------------------- | ----------------- |
-| Node.js               | 24.18.0           |
-| npm                   | 11.16.0           |
-| Expo                  | 57.0.21           |
-| Expo Router           | 57.0.20           |
+| Node.js               | 24.21.0           |
+| npm                   | 11.19.0           |
+| Expo                  | 57.0.29           |
+| Expo Router           | 57.0.27           |
 | React                 | 19.2.3            |
 | React Native          | 0.86.3            |
 | TypeScript            | 6.0.3             |
@@ -41,15 +41,12 @@ Keep React Native Reanimated 4.5.1 and React Native Worklets 0.10.1 aligned acro
 Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycle-script approvals to suppress dependency problems. Resolve conflicts explicitly, document accepted advisories, and verify dependency shape with `npm run dependencies:check`.
 
 `npm run audit` fails closed for moderate, high, and critical advisories.
+`scripts/audit.mjs` lists each temporary exception with its advisory, severity
+and the only installed packages allowed to depend directly on it. A new direct
+dependent or a changed severity fails the audit. So does an exception that no
+longer matches an advisory, so a patched release forces its removal.
 
-Until a compatible patched `image-size` release is published, the audit command
-allows only [GHSA-w3rx-r6r6-pgpr](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr)
-and [GHSA-5p2g-fcmc-qvqq](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq).
-They apply only to the installed Metro build tool at build time, not the shipped
-application. Remove this temporary exception immediately when that compatible
-patched release is available.
-
-The shipped `expo-router` 57.0.20 → `query-string` 7.1.3 →
+The shipped `expo-router` 57.0.27 → `query-string` 7.1.3 →
 `decode-uri-component` 0.2.2 chain is temporarily accepted but dormant under
 standard routing: its active `getStateFromPath` fork uses `URL` and
 `URLSearchParams`, while `query-string` is used to stringify paths. Externally
@@ -57,6 +54,26 @@ supplied navigation or deep-link query text can cause CPU exhaustion and client
 unresponsiveness only if future app or upstream routing uses the included React
 Navigation core fallback or otherwise calls `query-string.parse`. Remove this
 exception when Router adopts a compatible patched parser.
+
+Three more advisories have no patched release. Each affects only build and
+test tooling, and none of these packages appears in the exported web or Android
+bundle:
+
+- `braces` 3.0.3 ([GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)),
+  through `micromatch`: deeply nested glob patterns can exhaust the stack.
+  Metro and Jest match only patterns from repository configuration.
+- `node-forge` 1.4.0 ([GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv)),
+  through `@expo/cli` and `@expo/code-signing-certificates`: RSA PKCS#1 v1.5
+  signature verification accepts extra nested digest elements, which can let
+  signatures be forged for low-exponent RSA keys. The Expo CLI only verifies
+  signatures it has just made or a local certificate's own signature, never
+  one supplied by another party.
+- `sprintf-js` 1.0.3 ([GHSA-hp3w-g68c-fv3c](https://github.com/advisories/GHSA-hp3w-g68c-fv3c)),
+  through `argparse`: unbounded precision specifiers can exhaust resources.
+  Only js-yaml's command-line tool loads `argparse`; Jest's coverage
+  configuration loader uses js-yaml's parser, so this code never runs.
+
+Remove each exception when its package publishes a fix.
 
 Portable signed-pack verification pins `@noble/ed25519` 3.1.0 and
 `@noble/hashes` 2.2.0 in `@daylight-saviour/contracts`. Both are MIT,
