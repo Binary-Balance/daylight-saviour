@@ -17,3 +17,6 @@ local.settings.json
 # Editors and operating systems.
 .DS_Store
 *.swp
+
+# Local Seshat reports
+/seshat-*.json
