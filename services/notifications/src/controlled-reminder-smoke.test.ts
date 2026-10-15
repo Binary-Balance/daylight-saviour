@@ -5,16 +5,16 @@ import {
   controlledReminderSmokeOptions,
   createControlledReminderSmokeHandler,
   createControlledReminderSmokeRuntime,
-} from './controlled-reminder-smoke.js';
+} from './controlled-reminder-smoke.ts';
 import type {
   ApnsChangeReminderResult,
   ApnsChangeReminderSubscription,
-} from './apns-change-reminder-sender.js';
+} from './apns-change-reminder-sender.ts';
 import type {
   FcmChangeReminderResult,
   FcmChangeReminderSubscription,
   ReviewedChangeReminderFacts,
-} from './fcm-change-reminder-sender.js';
+} from './fcm-change-reminder-sender.ts';
 
 const installationId = 'a'.repeat(43);
 const deviceToken = 'fcm-token:with_valid.characters-123';

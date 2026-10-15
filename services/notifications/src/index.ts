@@ -1,13 +1,13 @@
 import { app } from '@azure/functions';
 
-import { controlledReminderSmokeOptions } from './controlled-reminder-smoke.js';
-import { healthOptions } from './health.js';
+import { controlledReminderSmokeOptions } from './controlled-reminder-smoke.ts';
+import { healthOptions } from './health.ts';
 import {
   reminderSubscriptionDeleteOptions,
   reminderSubscriptionOptions,
   reminderSubscriptionUpdateOptions,
   reminderThrottleCleanupOptions,
-} from './reminder-subscriptions.js';
+} from './reminder-subscriptions.ts';
 
 app.http('health', healthOptions);
 app.http('controlled-reminder-smoke', controlledReminderSmokeOptions);

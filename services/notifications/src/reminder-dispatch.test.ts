@@ -5,17 +5,17 @@ import {
   createTableReminderDispatchLedgerStore,
   type ReminderDispatchIdentity,
   type ReminderDispatchLedgerTable,
-} from './reminder-dispatch-ledger.js';
+} from './reminder-dispatch-ledger.ts';
 import {
   createReminderDispatchOperation,
   type ReminderDispatchContext,
   type ReminderDispatchProviderRequest,
   type ReminderDispatchProviderResult,
-} from './reminder-dispatch.js';
+} from './reminder-dispatch.ts';
 import type {
   ReminderSubscriptionSnapshot,
   ReminderSubscriptionStore,
-} from './reminder-subscriptions.js';
+} from './reminder-subscriptions.ts';
 
 const identity: ReminderDispatchIdentity = {
   changeEventAt: '2026-10-04T16:00:00.000Z',

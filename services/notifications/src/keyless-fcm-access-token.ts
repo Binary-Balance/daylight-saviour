@@ -3,7 +3,7 @@ import { ManagedIdentityCredential } from '@azure/identity';
 import type {
   FcmAccessToken,
   FcmAccessTokenProvider,
-} from './fcm-change-reminder-sender.js';
+} from './fcm-change-reminder-sender.ts';
 
 const googleStsEndpoint = 'https://sts.googleapis.com/v1/token';
 const googleIamCredentialsOrigin = 'https://iamcredentials.googleapis.com';
@@ -94,8 +94,11 @@ export interface KeylessFcmDependencies {
 }
 
 export class KeylessFcmAccessTokenError extends Error {
-  constructor(readonly kind: KeylessFcmFailure) {
+  readonly kind: KeylessFcmFailure;
+
+  constructor(kind: KeylessFcmFailure) {
     super(`FCM credential acquisition failed: ${kind}`);
+    this.kind = kind;
   }
 }
 

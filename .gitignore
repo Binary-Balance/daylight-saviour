@@ -2,7 +2,6 @@ node_modules/
 .expo/
 dist/
 coverage/
-.test-dist/
 infra/tests/*.generated.json
 
 # Generated native projects are disposable Expo prebuild output.
