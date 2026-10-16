@@ -6,8 +6,8 @@
 | --------------------- | ----------------- |
 | Node.js               | 24.21.0           |
 | npm                   | 11.19.0           |
-| Expo                  | 57.0.29           |
-| Expo Router           | 57.0.27           |
+| Expo                  | 57.0.30           |
+| Expo Router           | 57.0.28           |
 | React                 | 19.2.3            |
 | React Native          | 0.86.3            |
 | TypeScript            | 6.0.3             |
@@ -48,7 +48,7 @@ and the only installed packages allowed to depend directly on it. A new direct
 dependent or a changed severity fails the audit. So does an exception that no
 longer matches an advisory, so a patched release forces its removal.
 
-The shipped `expo-router` 57.0.27 → `query-string` 7.1.3 →
+The shipped `expo-router` 57.0.28 → `query-string` 7.1.3 →
 `decode-uri-component` 0.2.2 chain is temporarily accepted but dormant under
 standard routing: its active `getStateFromPath` fork uses `URL` and
 `URLSearchParams`, while `query-string` is used to stringify paths. Externally
