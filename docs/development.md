@@ -299,8 +299,9 @@ TypeScript is tested. For each function it reports:
 Each area has its own configuration, so a mutant reruns only that area's tests:
 `seshat.packages.json`, `seshat.notifications.json` and `seshat.mobile.json`.
 All three set the same thresholds: CRAP at most 30, cognitive complexity at
-most 15 and mutation score at least 80%. They are report-only until each area
-meets them.
+most 15 and mutation score at least 80%. An area's job only warns when these
+are missed until the area meets them and its `blocking` entry in the Code
+assurance workflow matrix is set to true.
 
 Each configuration also sets `maxTypeEscapes` to 0 and `maxInferredAny` to that
 area's current count of inferred `any` sites. These limits block the Code
@@ -327,8 +328,9 @@ node scripts/seshat-summary.mjs seshat-packages.json
 Use `check` instead of `crap` to add mutation testing. It is slow: about 15
 minutes for packages on a four-core CI runner, and hours for mobile. Exit
 status 0 means complete with thresholds met, 1 means a threshold was missed and
-2 means the run was incomplete or invalid. The workflow fails a status of 1
-only when a type-safety limit is missed and warns for the other thresholds.
+2 means the run was incomplete or invalid. For an area that is not yet
+blocking, the workflow fails a status of 1 only when a type-safety limit is
+missed and warns for the other thresholds.
 
 The Code assurance workflow runs `check` for packages and `crap` for
 notifications and mobile on each change, and `check` for every area weekly. The
