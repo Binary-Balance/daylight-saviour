@@ -100,6 +100,16 @@ describe('decideCivilTime', () => {
     );
   });
 
+  it('decides civil time from the first instant of coverage', () => {
+    const decision = decideCivilTime(
+      pack(),
+      'Australia/Sydney',
+      new Date(packJson.coverage.startsAt),
+    );
+
+    assert.equal(decision.zoneId, 'Australia/Sydney');
+  });
+
   it('types unavailable reasons independently from freshness expiry', () => {
     assert.throws(
       () =>

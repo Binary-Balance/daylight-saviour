@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import {
   createHash,
   createPrivateKey,
@@ -198,6 +199,14 @@ describe('signed Time-Zone Data Pack contract', () => {
       'unknown manifest fields',
       (fixture) => (fixture.manifest.surprise = true),
       /expected keys/,
+    ],
+    [
+      'renamed manifest fields',
+      (fixture) => {
+        fixture.manifest.signatures = fixture.manifest.signature;
+        delete fixture.manifest.signature;
+      },
+      /expected keys manifestVersion, pack, signature/,
     ],
     [
       'missing manifest fields',

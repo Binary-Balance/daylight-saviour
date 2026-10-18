@@ -58,6 +58,11 @@ function clonePack() {
   return structuredClone(validPack);
 }
 
+function renameKey(object, from, to) {
+  object[to] = object[from];
+  delete object[from];
+}
+
 describe('activateTimeZoneDataPack', () => {
   it('activates and freezes valid content', () => {
     const pack = activateTimeZoneDataPack(clonePack());
@@ -77,43 +82,123 @@ describe('activateTimeZoneDataPack', () => {
     );
   });
 
-  for (const [name, mutate] of [
-    ['unknown fields', (pack) => (pack.surprise = true)],
-    ['unsupported schema', (pack) => (pack.schemaVersion = 3)],
-    ['invalid instants', (pack) => (pack.coverage.startsAt = '2025-01-01')],
+  it('accepts offsets, deltas and transitions at their limits', () => {
+    const pack = clonePack();
+    pack.coverage.validUntil = '2025-04-05T16:00:00.000Z';
+    pack.zones[1].initial.utcOffsetSeconds = -86_400;
+    pack.zones[0].initial.utcOffsetSeconds = 46_800;
+    pack.zones[0].transitions[0].offsetBeforeSeconds = 46_800;
+    pack.source.files = ['australasia', 'northamerica'];
+
+    const activated = activateTimeZoneDataPack(pack);
+
+    assert.equal(activated.zones[1].initial.utcOffsetSeconds, -86_400);
+    assert.equal(activated.zones[0].transitions[0].offsetBeforeSeconds, 46_800);
+    assert.deepEqual(activated.source.files, ['australasia', 'northamerica']);
+  });
+
+  it('rejects packs that are not objects', () => {
+    for (const value of [null, []]) {
+      assert.throws(
+        () => activateTimeZoneDataPack(value),
+        (error) =>
+          error instanceof TimeZoneDataPackValidationError &&
+          /\$: expected an object/.test(error.message),
+      );
+    }
+  });
+
+  for (const [name, mutate, expected] of [
+    ['unknown fields', (pack) => (pack.surprise = true), /expected keys/],
+    [
+      'renamed fields',
+      (pack) => renameKey(pack, 'zones', 'zone'),
+      /expected keys/,
+    ],
+    ['missing fields', (pack) => delete pack.zones, /expected keys/],
+    [
+      'unsupported schema',
+      (pack) => (pack.schemaVersion = 3),
+      /unsupported version 3/,
+    ],
+    [
+      'fractional schema',
+      (pack) => (pack.schemaVersion = 2.5),
+      /expected a safe integer/,
+    ],
+    [
+      'invalid instants',
+      (pack) => (pack.coverage.startsAt = '2025-01-01'),
+      /canonical ISO 8601/,
+    ],
     [
       'invalid offsets',
-      (pack) => (pack.zones[0].initial.utcOffsetSeconds = 100_000),
+      (pack) => (pack.zones[0].initial.utcOffsetSeconds = 86_401),
+      /offset must be between/,
     ],
     [
       'discontinuous transitions',
       (pack) => (pack.zones[0].transitions[0].offsetBeforeSeconds = 36_000),
+      /does not continue previous offset/,
     ],
     [
       'unordered transitions',
       (pack) => (pack.zones[0].transitions[0].at = pack.coverage.startsAt),
+      /strictly ordered/,
     ],
     [
       'transitions beyond the Validity Horizon',
-      (pack) => (pack.zones[0].transitions[0].at = '2028-01-01T00:00:00.000Z'),
+      (pack) => (pack.coverage.validUntil = '2025-04-05T15:59:59.999Z'),
+      /exceeds Validity Horizon/,
+    ],
+    [
+      'offset deltas over 3 hours',
+      (pack) => {
+        pack.zones[0].initial.utcOffsetSeconds = 46_801;
+        pack.zones[0].transitions[0].offsetBeforeSeconds = 46_801;
+      },
+      /offset delta exceeds 3 hours/,
     ],
     [
       'wrong coverage bounds',
       (pack) => (pack.coverage.validUntil = pack.coverage.startsAt),
+      /Validity Horizon must follow coverage start/,
     ],
-    ['empty labels', (pack) => (pack.zones[0].friendlyLabel = '')],
-    ['identifier without region', (pack) => (pack.zones[0].id = 'Sydney')],
+    [
+      'empty labels',
+      (pack) => (pack.zones[0].friendlyLabel = ''),
+      /non-empty string/,
+    ],
+    [
+      'missing source files',
+      (pack) => (pack.source.files = []),
+      /at least one IANA source file/,
+    ],
+    [
+      'unsorted source files',
+      (pack) => (pack.source.files = ['northamerica', 'australasia']),
+      /must be sorted/,
+    ],
+    ['missing zones', (pack) => (pack.zones = []), /at least one zone/],
+    [
+      'identifier without region',
+      (pack) => (pack.zones[0].id = 'Sydney'),
+      /IANA-style/,
+    ],
     [
       'identifier with empty segment',
       (pack) => (pack.zones[0].id = 'Australia//Sydney'),
+      /IANA-style/,
     ],
     [
       'identifier with traversal segment',
       (pack) => (pack.zones[0].id = 'Australia/../Sydney'),
+      /IANA-style/,
     ],
     [
       'duplicate zones',
       (pack) => pack.zones.push(structuredClone(pack.zones[0])),
+      /must be unique/,
     ],
   ]) {
     it(`rejects ${name}`, () => {
@@ -122,7 +207,9 @@ describe('activateTimeZoneDataPack', () => {
 
       assert.throws(
         () => activateTimeZoneDataPack(pack),
-        TimeZoneDataPackValidationError,
+        (error) =>
+          error instanceof TimeZoneDataPackValidationError &&
+          expected.test(error.message),
       );
     });
   }
