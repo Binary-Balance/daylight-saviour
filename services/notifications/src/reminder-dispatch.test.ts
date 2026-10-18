@@ -44,6 +44,18 @@ function settled<T>(work: Promise<T>): Promise<T> {
   return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
 }
 
+// Waits until a dispatch reaches a test barrier. A dispatch that settles
+// first fails the test, rather than leaving its rejection unhandled: Seshat
+// counts an unhandled rejection as an execution error and stops the run.
+function reached(barrier: Promise<void>, dispatch: Promise<unknown>) {
+  return settled(
+    Promise.race([
+      barrier,
+      dispatch.then(() => assert.fail('Dispatch settled before the barrier')),
+    ]),
+  );
+}
+
 function azureError(statusCode: number) {
   return Object.assign(new Error(`Azure ${statusCode}`), { statusCode });
 }
@@ -766,7 +778,7 @@ describe('reminder dispatch operation', () => {
       clock: () => new Date(window.startsAt),
     });
     const dispatch = operation.dispatch(context());
-    await settled(providerStarted);
+    await reached(providerStarted, dispatch);
     fixture.setCurrent(
       context({ subscription: { ...subscription, attemptGeneration: 2 } }),
     );
@@ -807,7 +819,7 @@ describe('reminder dispatch operation', () => {
       clock: () => new Date(window.startsAt),
     });
     const dispatch = operation.dispatch(context());
-    await settled(providerStarted);
+    await reached(providerStarted, dispatch);
     fixture.setCurrent(
       context({
         delivery: {
@@ -870,7 +882,7 @@ describe('reminder dispatch operation', () => {
       clock: () => now,
     });
     const dispatch = operation.dispatch(context());
-    await settled(ledgerReadEntered);
+    await reached(ledgerReadEntered, dispatch);
     fixture.setCurrent(
       context({ subscription: { ...subscription, attemptGeneration: 2 } }),
     );
