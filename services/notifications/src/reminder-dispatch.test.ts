@@ -29,6 +29,21 @@ const window = {
   startsAt: '2026-09-28T09:00:00.000Z',
 };
 
+// Fails a test whose awaited work never settles, instead of letting it hang.
+// Seshat treats a hang, or node:test's own timeout, as an unresolved mutant
+// and then withholds the mutation score.
+function settled<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(new assert.AssertionError({ message: 'Work did not settle' })),
+      1000,
+    );
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
 function azureError(statusCode: number) {
   return Object.assign(new Error(`Azure ${statusCode}`), { statusCode });
 }
@@ -751,7 +766,7 @@ describe('reminder dispatch operation', () => {
       clock: () => new Date(window.startsAt),
     });
     const dispatch = operation.dispatch(context());
-    await providerStarted;
+    await settled(providerStarted);
     fixture.setCurrent(
       context({ subscription: { ...subscription, attemptGeneration: 2 } }),
     );
@@ -792,7 +807,7 @@ describe('reminder dispatch operation', () => {
       clock: () => new Date(window.startsAt),
     });
     const dispatch = operation.dispatch(context());
-    await providerStarted;
+    await settled(providerStarted);
     fixture.setCurrent(
       context({
         delivery: {
@@ -855,7 +870,7 @@ describe('reminder dispatch operation', () => {
       clock: () => now,
     });
     const dispatch = operation.dispatch(context());
-    await ledgerReadEntered;
+    await settled(ledgerReadEntered);
     fixture.setCurrent(
       context({ subscription: { ...subscription, attemptGeneration: 2 } }),
     );

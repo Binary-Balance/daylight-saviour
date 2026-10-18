@@ -23,6 +23,21 @@ interface RecordedRequest {
   readonly method: 'POST';
 }
 
+// Fails a test whose awaited work never settles, instead of letting it hang.
+// Seshat treats a hang, or node:test's own timeout, as an unresolved mutant
+// and then withholds the mutation score.
+function settled<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(new assert.AssertionError({ message: 'Work did not settle' })),
+      1000,
+    );
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
 function response(status: number, body: unknown) {
   return {
     status,
@@ -317,7 +332,7 @@ describe('keyless FCM access-token provider', () => {
       },
     );
 
-    await assert.rejects(provider.getAccessToken(), /timeout/);
+    await assert.rejects(settled(provider.getAccessToken()), /timeout/);
 
     assert.deepEqual(events, ['fcm-credential-timeout']);
     assert.doesNotMatch(JSON.stringify(events), /sensitive-/);
