@@ -24,9 +24,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        area: [packages, notifications, mobile]
+        # Set blocking to true once an area meets every threshold (#148).
+        include:
+          - area: packages
+            blocking: false # #152
+          - area: notifications
+            blocking: false # #153
+          - area: mobile
+            blocking: false # #154
     env:
       AREA: ${{ matrix.area }}
+      BLOCKING: ${{ matrix.blocking }}
       # Mutation testing notifications and mobile takes too long for every
       # change, so they get CRAP analysis here and full checks weekly.
       COMMAND: ${{ (matrix.area == 'packages' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'check' || 'crap' }}
@@ -53,11 +61,11 @@ jobs:
           status=$?
           set -e
           node scripts/seshat-summary.mjs "seshat-$AREA.json" | tee -a "$GITHUB_STEP_SUMMARY"
-          # Seshat exits 1 for any missed threshold. Type-safety limits are
-          # met today, so they block. CRAP, complexity and mutation stay
-          # report-only until each area meets them (#148). Incomplete runs,
-          # including an unknown inferred-any count, exit 2 and still fail.
-          if [ "$status" = 1 ]; then
+          # Seshat exits 1 for any missed threshold. Type-safety limits always
+          # block. CRAP, complexity and mutation only warn until the area is
+          # blocking. Incomplete runs, including an unknown inferred-any count,
+          # exit 2 and always fail.
+          if [ "$status" = 1 ] && [ "$BLOCKING" != true ]; then
             if jq -e '[.quality.checks[] | select((.metric == "maxInferredAny" or .metric == "maxTypeEscapes") and .state == "failed")] | length > 0' "seshat-$AREA.json" > /dev/null; then
               echo "::error::Seshat type-safety limits exceeded for $AREA"
               exit 1
