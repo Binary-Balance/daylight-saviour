@@ -9,6 +9,30 @@ const responseBody = {
 };
 const iosDeviceToken = 'a'.repeat(64);
 const refreshedIosDeviceToken = 'b'.repeat(64);
+// Seshat counts a Jest timeout as unresolved rather than as a detected
+// mutant. A mutant can skip a gated call, or block on one, so tests bound
+// those waits and fail with a message instead.
+const settleTimeoutMs = 1_000;
+// Emptying the stored-state save makes a lost-registration replay retry
+// forever against the fake server, until Jest runs out of memory.
+const maximumRequests = 10;
+
+async function settled<T>(promise: Promise<T>, description: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${description} did not settle`)),
+          settleTimeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function harness({
   createRegistrationRequestId = async () => 'a'.repeat(64),
@@ -45,6 +69,7 @@ function harness({
   readonly timeoutMs?: number;
 } = {}) {
   const calls: string[] = [];
+  let requests = 0;
   const secureSet = jest.fn(async (key: string, value: string) => {
     calls.push(`store:${key}`);
     await setItemImplementation(key, value);
@@ -52,6 +77,10 @@ function harness({
   });
   const request = jest.fn(async (...args: Parameters<typeof fetch>) => {
     calls.push('fetch');
+    requests += 1;
+    if (requests > maximumRequests) {
+      throw new Error('Too many registration requests');
+    }
     return fetchImplementation(...args);
   }) as jest.MockedFunction<typeof fetch>;
   const dependencies = {
@@ -238,9 +267,9 @@ describe('production Change Reminder adapters', () => {
         Response.json(responseBody),
       ) as jest.MockedFunction<typeof fetch>;
     const test = harness({ fetchImplementation, timeoutMs: 1 });
-    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
-      kind: 'failed',
-    });
+    await expect(
+      settled(test.adapters.enable('Australia/Sydney'), 'Timed-out enablement'),
+    ).resolves.toEqual({ kind: 'failed' });
     expect(captured.signal?.aborted).toBe(true);
     const pending = JSON.parse(test.stored() ?? '');
     expect(pending).toMatchObject({
@@ -282,12 +311,11 @@ describe('production Change Reminder adapters', () => {
     const test = harness({ fetchImplementation });
     const first = test.adapters.enable('Australia/Sydney');
     const second = test.adapters.enable('Australia/Sydney');
-    await started;
+    await settled(started, 'Registration request');
     resolve(Response.json(responseBody));
-    await expect(Promise.all([first, second])).resolves.toEqual([
-      { kind: 'enabled' },
-      { kind: 'enabled' },
-    ]);
+    await expect(
+      settled(Promise.all([first, second]), 'Shared enablement'),
+    ).resolves.toEqual([{ kind: 'enabled' }, { kind: 'enabled' }]);
     expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -305,13 +333,20 @@ describe('production Change Reminder adapters', () => {
     }) as jest.MockedFunction<typeof fetch>;
     const test = harness({ fetchImplementation });
     const sydney = test.adapters.enable('Australia/Sydney');
-    await started;
+    await settled(started, 'Sydney registration request');
 
-    await expect(test.adapters.enable('Australia/Brisbane')).resolves.toEqual({
+    await expect(
+      settled(
+        test.adapters.enable('Australia/Brisbane'),
+        'Brisbane enablement',
+      ),
+    ).resolves.toEqual({
       kind: 'failed',
     });
     resolve(Response.json(responseBody));
-    await expect(sydney).resolves.toEqual({ kind: 'enabled' });
+    await expect(settled(sydney, 'Sydney enablement')).resolves.toEqual({
+      kind: 'enabled',
+    });
     expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
     expect(
       JSON.parse(String(test.dependencies.fetch.mock.calls[0]?.[1]?.body)),
@@ -452,7 +487,7 @@ describe('production Change Reminder adapters', () => {
     });
 
     const brisbane = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
-    await pendingWriteStarted;
+    await settled(pendingWriteStarted, 'Pending Brisbane write');
     const session = createChangeReminderSession({
       adapters: test.adapters,
       homeTimeZone: 'Australia/Sydney',
@@ -462,7 +497,9 @@ describe('production Change Reminder adapters', () => {
     expect(session.getSnapshot()).toMatchObject({ kind: 'saving-zone' });
 
     releasePendingWrite();
-    await expect(brisbane).resolves.toMatchObject({ kind: 'enabled' });
+    await expect(settled(brisbane, 'Brisbane update')).resolves.toMatchObject({
+      kind: 'enabled',
+    });
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if (session.getSnapshot().kind === 'enabled') break;
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -727,12 +764,16 @@ describe('production Change Reminder adapters', () => {
     const test = harness({ fetchImplementation: serverRequest, storage });
 
     const first = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
-    await firstStarted;
+    await settled(firstStarted, 'Brisbane request');
     const second = test.adapters.updateHomeTimeZone!('Australia/Adelaide');
     expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
     releaseFirst();
-    await expect(first).resolves.toMatchObject({ kind: 'enabled' });
-    await expect(second).resolves.toMatchObject({ kind: 'enabled' });
+    await expect(settled(first, 'Brisbane update')).resolves.toMatchObject({
+      kind: 'enabled',
+    });
+    await expect(settled(second, 'Adelaide update')).resolves.toMatchObject({
+      kind: 'enabled',
+    });
 
     expect(
       test.dependencies.fetch.mock.calls.map((call) =>
@@ -800,11 +841,13 @@ describe('production Change Reminder adapters', () => {
     test.adapters.startTokenRefresh('Australia/Sydney');
 
     const zoneUpdate = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
-    await zoneStarted;
+    await settled(zoneStarted, 'Brisbane request');
     listener?.({ data: replacement });
     releaseZone();
 
-    await expect(zoneUpdate).resolves.toMatchObject({ kind: 'enabled' });
+    await expect(settled(zoneUpdate, 'Brisbane update')).resolves.toMatchObject(
+      { kind: 'enabled' },
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(
@@ -876,13 +919,17 @@ describe('production Change Reminder adapters', () => {
     test.adapters.startTokenRefresh('Australia/Sydney');
 
     const first = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
-    await firstStarted;
+    await settled(firstStarted, 'Brisbane request');
     listener?.({ data: replacement });
     const latest = test.adapters.updateHomeTimeZone!('Australia/Adelaide');
     releaseFirst();
 
-    await expect(first).resolves.toMatchObject({ kind: 'enabled' });
-    await expect(latest).resolves.toMatchObject({ kind: 'enabled' });
+    await expect(settled(first, 'Brisbane update')).resolves.toMatchObject({
+      kind: 'enabled',
+    });
+    await expect(settled(latest, 'Adelaide update')).resolves.toMatchObject({
+      kind: 'enabled',
+    });
     expect(
       serverRequest.mock.calls.map((call) => JSON.parse(String(call[1]?.body))),
     ).toEqual([
@@ -1836,12 +1883,14 @@ describe('production Change Reminder adapters', () => {
       oneDayEnabled: false,
       oneWeekEnabled: true,
     });
-    await preferenceRequestStarted;
+    await settled(preferenceRequestStarted, 'Preference request');
     test.adapters.startTokenRefresh('Australia/Sydney');
     listener?.({ data: replacement });
     releasePreferenceRequest();
 
-    await expect(preferenceUpdate).resolves.toEqual({ kind: 'failed' });
+    await expect(
+      settled(preferenceUpdate, 'Preference update'),
+    ).resolves.toEqual({ kind: 'failed' });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(attempts).toEqual([
@@ -2098,11 +2147,11 @@ describe('production Change Reminder adapters', () => {
       );
     const restoring = test.adapters.restore();
     await Promise.resolve();
-    await expect(test.adapters.disable()).resolves.toEqual({
+    await expect(settled(test.adapters.disable(), 'Disable')).resolves.toEqual({
       kind: 'disabled',
     });
     resolveToken({ data: 'fcm-token:replacement_valid.characters-456' });
-    await expect(restoring).resolves.toMatchObject({
+    await expect(settled(restoring, 'Restore')).resolves.toMatchObject({
       homeTimeZone: 'Australia/Sydney',
       kind: 'pending',
     });
@@ -2177,16 +2226,19 @@ describe('production Change Reminder adapters', () => {
       );
 
     const restoring = test.adapters.restore();
-    await tokenRequested;
+    await settled(tokenRequested, 'Restore token request');
     await expect(
-      test.adapters.updatePreferences({
-        oneDayEnabled: false,
-        oneWeekEnabled: true,
-      }),
+      settled(
+        test.adapters.updatePreferences({
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+        }),
+        'Preference update',
+      ),
     ).resolves.toEqual({ kind: 'enabled' });
     releaseToken();
 
-    await expect(restoring).resolves.toMatchObject({
+    await expect(settled(restoring, 'Restore')).resolves.toMatchObject({
       kind: 'registered',
       registration: {
         attemptGeneration: 6,
