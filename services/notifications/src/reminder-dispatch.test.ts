@@ -29,6 +29,33 @@ const window = {
   startsAt: '2026-09-28T09:00:00.000Z',
 };
 
+// Fails a test whose awaited work never settles, instead of letting it hang.
+// Seshat treats a hang, or node:test's own timeout, as an unresolved mutant
+// and then withholds the mutation score.
+function settled<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(new assert.AssertionError({ message: 'Work did not settle' })),
+      1000,
+    );
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
+// Waits until a dispatch reaches a test barrier. A dispatch that settles
+// first fails the test, rather than leaving its rejection unhandled: Seshat
+// counts an unhandled rejection as an execution error and stops the run.
+function reached(barrier: Promise<void>, dispatch: Promise<unknown>) {
+  return settled(
+    Promise.race([
+      barrier,
+      dispatch.then(() => assert.fail('Dispatch settled before the barrier')),
+    ]),
+  );
+}
+
 function azureError(statusCode: number) {
   return Object.assign(new Error(`Azure ${statusCode}`), { statusCode });
 }
@@ -751,7 +778,7 @@ describe('reminder dispatch operation', () => {
       clock: () => new Date(window.startsAt),
     });
     const dispatch = operation.dispatch(context());
-    await providerStarted;
+    await reached(providerStarted, dispatch);
     fixture.setCurrent(
       context({ subscription: { ...subscription, attemptGeneration: 2 } }),
     );
@@ -792,7 +819,7 @@ describe('reminder dispatch operation', () => {
       clock: () => new Date(window.startsAt),
     });
     const dispatch = operation.dispatch(context());
-    await providerStarted;
+    await reached(providerStarted, dispatch);
     fixture.setCurrent(
       context({
         delivery: {
@@ -855,7 +882,7 @@ describe('reminder dispatch operation', () => {
       clock: () => now,
     });
     const dispatch = operation.dispatch(context());
-    await ledgerReadEntered;
+    await reached(ledgerReadEntered, dispatch);
     fixture.setCurrent(
       context({ subscription: { ...subscription, attemptGeneration: 2 } }),
     );

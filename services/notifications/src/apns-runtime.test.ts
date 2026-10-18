@@ -15,6 +15,21 @@ const privateKey = keys.privateKey
   .toString();
 const fixedNow = new Date('2026-08-25T01:02:03.000Z');
 
+// Fails a test whose awaited work never settles, instead of letting it hang.
+// Seshat treats a hang, or node:test's own timeout, as an unresolved mutant
+// and then withholds the mutation score.
+function settled<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(new assert.AssertionError({ message: 'Work did not settle' })),
+      1000,
+    );
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
 function decode(value: string) {
   return JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
 }
@@ -139,7 +154,7 @@ describe('APNs runtime', () => {
     });
     const apnsRequest = request();
 
-    assert.deepEqual(await transport.post(apnsRequest), {
+    assert.deepEqual(await settled(transport.post(apnsRequest)), {
       body: '',
       apnsId: '12345678-1234-1234-1234-123456789abc',
       status: 200,
@@ -155,6 +170,11 @@ describe('APNs runtime', () => {
   });
 
   it('rejects bounded transport failures and closes the session', async () => {
+    const failures = {
+      error: { message: 'transport failure' },
+      oversized: { message: 'APNs response body exceeded limit' },
+      timeout: { message: 'APNs transport timeout' },
+    };
     for (const event of ['oversized', 'error', 'timeout'] as const) {
       const stream = Object.assign(new EventEmitter(), {
         close() {
@@ -184,7 +204,11 @@ describe('APNs runtime', () => {
         timeoutMs: 1,
       });
 
-      await assert.rejects(transport.post(request()));
+      await assert.rejects(
+        settled(transport.post(request())),
+        failures[event],
+        event,
+      );
       assert.equal(sessionClosed, 1, event);
       assert.equal(streamClosed, 1, event);
     }
