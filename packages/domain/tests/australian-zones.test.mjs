@@ -6,6 +6,7 @@ import {
   activateAustralianTimeZoneDataPack,
   AustralianCoverageValidationError,
   australianZones,
+  getAustralianZone,
   normalizeAustralianZoneId,
   searchAustralianZones,
 } from '../src/index.ts';
@@ -54,6 +55,12 @@ describe('Australian zone catalogue', () => {
     for (const zone of australianZones) {
       assert.equal(new Set(zone.searchTerms).size, zone.searchTerms.length);
     }
+  });
+
+  it('gets zones by canonical identifier or alias', () => {
+    assert.equal(getAustralianZone('Australia/Sydney').id, 'Australia/Sydney');
+    assert.equal(getAustralianZone('Australia/NSW').id, 'Australia/Sydney');
+    assert.equal(getAustralianZone('Europe/London'), null);
   });
 
   it('normalizes every current supported backward alias', () => {

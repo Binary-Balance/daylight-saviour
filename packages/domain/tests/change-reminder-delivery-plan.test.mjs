@@ -125,6 +125,10 @@ describe('planChangeReminderDeliveries', () => {
     assert.ok(Object.isFrozen(day[0].deliveryWindow));
     assert.equal(forward[0].changeDirection, 'Forward Change');
     assert.equal(forward[0].changeEventAt, '2026-10-03T16:00:00.000Z');
+    assert.deepEqual(forward[0].deliveryWindow, {
+      endsAt: '2026-10-03T11:00:00.000Z',
+      startsAt: '2026-10-02T23:00:00.000Z',
+    });
   });
 
   it('keeps timing preferences independent and never catches up stale windows', () => {

@@ -184,6 +184,49 @@ describe('createCivilTimeReport', () => {
     );
   });
 
+  it('reopens a requested reminder event in aftermath after acknowledgement', () => {
+    const context = {
+      acknowledgedEventAt: '2026-10-03T16:00:00.000Z',
+      requestedEventAt: '2026-10-03T16:00:00.000Z',
+    };
+
+    for (const secondsAfter of [0, 3_600]) {
+      const report = createCivilTimeReport(
+        pack(),
+        'Australia/Sydney',
+        atSecondsAfter(secondsAfter),
+        context,
+      );
+      assert.equal(report.phase, 'aftermath');
+      assert.equal(report.featuredEvent.at, '2026-10-03T16:00:00.000Z');
+    }
+  });
+
+  it('features a requested later event instead of the next event', () => {
+    const report = createCivilTimeReport(
+      pack(),
+      'Australia/Sydney',
+      atSecondsBefore(86_400),
+      { requestedEventAt: '2027-04-03T16:00:00.000Z' },
+    );
+
+    assert.equal(report.phase, 'ordinary');
+    assert.equal(report.featuredEvent.at, '2027-04-03T16:00:00.000Z');
+    assert.equal(report.featuredEvent.direction, 'Backward Change');
+  });
+
+  it('ignores a requested event missing from the pack', () => {
+    const report = createCivilTimeReport(
+      pack(),
+      'Australia/Sydney',
+      atSecondsBefore(86_400),
+      { requestedEventAt: '2028-10-03T16:00:00.000Z' },
+    );
+
+    assert.equal(report.phase, 'reminder-day');
+    assert.equal(report.featuredEvent.at, '2026-10-03T16:00:00.000Z');
+  });
+
   it('derives Forward, Backward, Lord Howe, and no-event phases from pack data', () => {
     const forward = createCivilTimeReport(
       pack(),

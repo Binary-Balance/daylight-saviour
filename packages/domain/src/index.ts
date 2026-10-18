@@ -202,61 +202,40 @@ export function createCivilTimeReport(
   const zone = pack.zones.find(
     (candidate) => candidate.id === civilTime.zoneId,
   )!;
-  const previousTransition = [...zone.transitions]
-    .reverse()
-    .find((transition) => Date.parse(transition.at) <= instantMilliseconds);
 
-  const requestedTransition =
-    context.requestedEventAt === undefined || context.requestedEventAt === null
-      ? undefined
-      : zone.transitions.find(
-          (transition) => transition.at === context.requestedEventAt,
-        );
-
+  const requestedTransition = zone.transitions.find(
+    (transition) => transition.at === context.requestedEventAt,
+  );
   if (requestedTransition !== undefined) {
     const requestedEvent = changeEventFromTransition(
       requestedTransition,
       instantMilliseconds,
     );
-    if (
-      requestedEvent.secondsUntil > -aftermathSeconds &&
-      requestedEvent.secondsUntil <= 0
-    ) {
+    if (requestedEvent.secondsUntil > 0) {
       return {
         civilTime,
         featuredEvent: requestedEvent,
-        phase: 'aftermath',
+        phase: upcomingPhase(requestedEvent.secondsUntil),
       };
     }
-    if (requestedEvent.secondsUntil > 0) {
-      const phase: CivilTimeReportPhase =
-        requestedEvent.secondsUntil <= daySeconds
-          ? 'reminder-day'
-          : requestedEvent.secondsUntil <= reminderWeekSeconds
-            ? 'reminder-week'
-            : requestedEvent.secondsUntil <= approachingSeconds
-              ? 'approaching'
-              : 'ordinary';
-      return { civilTime, featuredEvent: requestedEvent, phase };
+    if (requestedEvent.secondsUntil > -aftermathSeconds) {
+      return { civilTime, featuredEvent: requestedEvent, phase: 'aftermath' };
     }
   }
 
-  if (previousTransition !== undefined) {
-    const elapsedSeconds =
-      (instantMilliseconds - Date.parse(previousTransition.at)) / 1_000;
-    if (
-      elapsedSeconds >= 0 &&
-      elapsedSeconds < aftermathSeconds &&
-      context.acknowledgedEventAt !== previousTransition.at
-    ) {
-      return {
-        civilTime,
-        featuredEvent: changeEventFromTransition(
-          previousTransition,
-          instantMilliseconds,
-        ),
-        phase: 'aftermath',
-      };
+  const previousTransition = [...zone.transitions]
+    .reverse()
+    .find((transition) => Date.parse(transition.at) <= instantMilliseconds);
+  if (
+    previousTransition !== undefined &&
+    previousTransition.at !== context.acknowledgedEventAt
+  ) {
+    const previousEvent = changeEventFromTransition(
+      previousTransition,
+      instantMilliseconds,
+    );
+    if (previousEvent.secondsUntil > -aftermathSeconds) {
+      return { civilTime, featuredEvent: previousEvent, phase: 'aftermath' };
     }
   }
 
@@ -264,15 +243,16 @@ export function createCivilTimeReport(
   if (event === null) {
     return { civilTime, featuredEvent: null, phase: 'no-event' };
   }
+  return {
+    civilTime,
+    featuredEvent: event,
+    phase: upcomingPhase(event.secondsUntil),
+  };
+}
 
-  const phase: CivilTimeReportPhase =
-    event.secondsUntil <= daySeconds
-      ? 'reminder-day'
-      : event.secondsUntil <= reminderWeekSeconds
-        ? 'reminder-week'
-        : event.secondsUntil <= approachingSeconds
-          ? 'approaching'
-          : 'ordinary';
-
-  return { civilTime, featuredEvent: event, phase };
+function upcomingPhase(secondsUntil: number): CivilTimeReportPhase {
+  if (secondsUntil <= daySeconds) return 'reminder-day';
+  if (secondsUntil <= reminderWeekSeconds) return 'reminder-week';
+  if (secondsUntil <= approachingSeconds) return 'approaching';
+  return 'ordinary';
 }

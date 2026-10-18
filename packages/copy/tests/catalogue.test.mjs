@@ -172,6 +172,8 @@ describe('Australian-English copy catalogue', () => {
       '2:00 am → 2:30 am',
     );
     assert.equal(clock.utcOffset(37_800), 'UTC+10:30');
+    assert.equal(clock.utcOffset(0), 'UTC+00:00');
+    assert.equal(clock.utcOffset(-34_200), 'UTC-09:30');
     assert.equal(
       changeEvent.offsetChange({
         afterSeconds: 39_600,
@@ -193,6 +195,10 @@ describe('Australian-English copy catalogue', () => {
       'Clocks move 30 minutes · Home Time Zone',
     );
     assert.equal(
+      changeEvent.clocksMove(-3_600),
+      'Clocks move 1 hour · Home Time Zone',
+    );
+    assert.equal(
       accessibility.countdown(7_200),
       'Countdown, 2 hours until Change Event',
     );
@@ -212,6 +218,21 @@ describe('Australian-English copy catalogue', () => {
     for (const [phase, label] of Object.entries(expected)) {
       assert.equal(phaseLabel(phase), label);
     }
+  });
+
+  it('labels Change Event direction, relation, and unavailable freshness', () => {
+    const { changeEvent, decisionUnavailable } =
+      australianEnglish.civilTimeReport;
+
+    assert.equal(changeEvent.directionArrow('Forward Change'), '→');
+    assert.equal(changeEvent.directionArrow('Backward Change'), '←');
+    assert.equal(changeEvent.heading('completed'), 'RECENT CHANGE EVENT');
+    assert.equal(changeEvent.heading('upcoming'), 'NEXT CHANGE EVENT');
+    assert.equal(decisionUnavailable.label('expired'), 'REFRESH REQUIRED');
+    assert.equal(
+      decisionUnavailable.label('decision-unavailable'),
+      'DECISION UNAVAILABLE',
+    );
   });
 
   it('maps every known unavailable reason and unknown runtime values safely', () => {

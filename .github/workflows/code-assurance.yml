@@ -27,7 +27,7 @@ jobs:
         # Set blocking to true once an area meets every threshold (#148).
         include:
           - area: packages
-            blocking: false # #152
+            blocking: true # #152
           - area: notifications
             blocking: false # #153
           - area: mobile
