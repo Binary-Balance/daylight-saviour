@@ -74,6 +74,9 @@ function safeIntegerAt(value: unknown, path: string): number {
   return value;
 }
 
+const base64Digits =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
 function canonicalBase64BytesAt(
   value: unknown,
   path: string,
@@ -81,7 +84,6 @@ function canonicalBase64BytesAt(
 ): Uint8Array {
   const encoded = nonEmptyStringAt(value, path);
   if (
-    encoded.length % 4 !== 0 ||
     !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
       encoded,
     )
@@ -89,44 +91,28 @@ function canonicalBase64BytesAt(
     return fail(path, 'expected canonical base64');
   }
 
-  const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
-  const decodedLength = (encoded.length / 4) * 3 - padding;
+  const digits = encoded.replace(/=+$/, '');
+  const decodedLength = Math.floor((digits.length * 3) / 4);
   if (decodedLength !== expectedLength) {
     return fail(path, `expected ${expectedLength} decoded bytes`);
   }
 
-  const valueOf = (character: string) => {
-    const code = character.charCodeAt(0);
-    if (code >= 65 && code <= 90) return code - 65;
-    if (code >= 97 && code <= 122) return code - 71;
-    if (code >= 48 && code <= 57) return code + 4;
-    return character === '+' ? 62 : 63;
-  };
-  if (
-    (padding === 2 &&
-      (valueOf(encoded.charAt(encoded.length - 3)) & 15) !== 0) ||
-    (padding === 1 && (valueOf(encoded.charAt(encoded.length - 2)) & 3) !== 0)
-  ) {
-    return fail(path, 'expected canonical base64');
-  }
-
   const bytes = new Uint8Array(decodedLength);
   let outputIndex = 0;
-  for (let index = 0; index < encoded.length; index += 4) {
-    const first = valueOf(encoded.charAt(index));
-    const second = valueOf(encoded.charAt(index + 1));
-    const third =
-      encoded.charAt(index + 2) === '='
-        ? 0
-        : valueOf(encoded.charAt(index + 2));
-    const fourth =
-      encoded.charAt(index + 3) === '='
-        ? 0
-        : valueOf(encoded.charAt(index + 3));
-    const value = (first << 18) | (second << 12) | (third << 6) | fourth;
-    if (outputIndex < decodedLength) bytes[outputIndex++] = value >>> 16;
-    if (outputIndex < decodedLength) bytes[outputIndex++] = value >>> 8;
-    if (outputIndex < decodedLength) bytes[outputIndex++] = value;
+  let buffer = 0;
+  let bufferedBits = 0;
+  for (const digit of digits) {
+    buffer = (buffer << 6) | base64Digits.indexOf(digit);
+    bufferedBits += 6;
+    if (bufferedBits >= 8) {
+      bufferedBits -= 8;
+      bytes[outputIndex++] = buffer >>> bufferedBits;
+      buffer &= (1 << bufferedBits) - 1;
+    }
+  }
+  // Canonical base64 leaves the unused bits before padding as zero.
+  if (buffer !== 0) {
+    return fail(path, 'expected canonical base64');
   }
   return bytes;
 }
@@ -137,70 +123,59 @@ function hex(bytes: Uint8Array) {
   );
 }
 
+// Well-formed UTF-8 from RFC 3629. Each lead-byte range fixes the sequence
+// width and the second-byte range, which excludes overlong encodings, UTF-16
+// surrogates and code points above U+10FFFF. Later bytes are continuations.
+const utf8Sequences = [
+  { lead: [0xc2, 0xdf], second: [0x80, 0xbf], width: 2 },
+  { lead: [0xe0, 0xe0], second: [0xa0, 0xbf], width: 3 },
+  { lead: [0xe1, 0xec], second: [0x80, 0xbf], width: 3 },
+  { lead: [0xed, 0xed], second: [0x80, 0x9f], width: 3 },
+  { lead: [0xee, 0xef], second: [0x80, 0xbf], width: 3 },
+  { lead: [0xf0, 0xf0], second: [0x90, 0xbf], width: 4 },
+  { lead: [0xf1, 0xf3], second: [0x80, 0xbf], width: 4 },
+  { lead: [0xf4, 0xf4], second: [0x80, 0x8f], width: 4 },
+] as const;
+const utf8Continuation = [0x80, 0xbf] as const;
+
+function byteIn(
+  byte: number | undefined,
+  [low, high]: readonly [number, number],
+): byte is number {
+  return byte !== undefined && byte >= low && byte <= high;
+}
+
+function utf8CodePointAt(bytes: Uint8Array, index: number) {
+  const first = bytes[index]!;
+  if (first <= 0x7f) return { codePoint: first, width: 1 };
+
+  const sequence = utf8Sequences.find(({ lead }) => byteIn(first, lead));
+  if (sequence === undefined) return undefined;
+  let codePoint = first & (0xff >> (sequence.width + 1));
+  for (let offset = 1; offset < sequence.width; offset += 1) {
+    const next = bytes[index + offset];
+    if (!byteIn(next, offset === 1 ? sequence.second : utf8Continuation)) {
+      return undefined;
+    }
+    codePoint = (codePoint << 6) | (next & 0x3f);
+  }
+  return { codePoint, width: sequence.width };
+}
+
 function strictUtf8(bytes: Uint8Array, path: string) {
   const chunks: string[] = [];
   let chunk = '';
   for (let index = 0; index < bytes.length; ) {
-    const first = bytes[index]!;
-    let codePoint: number;
-    let width: number;
-    if (first <= 0x7f) {
-      codePoint = first;
-      width = 1;
-    } else if (first >= 0xc2 && first <= 0xdf) {
-      const second = bytes[index + 1];
-      if (second === undefined || (second & 0xc0) !== 0x80) {
-        return fail(path, 'expected UTF-8 JSON');
-      }
-      codePoint = ((first & 0x1f) << 6) | (second & 0x3f);
-      width = 2;
-    } else if (first >= 0xe0 && first <= 0xef) {
-      const second = bytes[index + 1];
-      const third = bytes[index + 2];
-      if (
-        second === undefined ||
-        third === undefined ||
-        (second & 0xc0) !== 0x80 ||
-        (third & 0xc0) !== 0x80 ||
-        (first === 0xe0 && second < 0xa0) ||
-        (first === 0xed && second >= 0xa0)
-      ) {
-        return fail(path, 'expected UTF-8 JSON');
-      }
-      codePoint =
-        ((first & 0x0f) << 12) | ((second & 0x3f) << 6) | (third & 0x3f);
-      width = 3;
-    } else if (first >= 0xf0 && first <= 0xf4) {
-      const second = bytes[index + 1];
-      const third = bytes[index + 2];
-      const fourth = bytes[index + 3];
-      if (
-        second === undefined ||
-        third === undefined ||
-        fourth === undefined ||
-        (second & 0xc0) !== 0x80 ||
-        (third & 0xc0) !== 0x80 ||
-        (fourth & 0xc0) !== 0x80 ||
-        (first === 0xf0 && second < 0x90) ||
-        (first === 0xf4 && second >= 0x90)
-      ) {
-        return fail(path, 'expected UTF-8 JSON');
-      }
-      codePoint =
-        ((first & 0x07) << 18) |
-        ((second & 0x3f) << 12) |
-        ((third & 0x3f) << 6) |
-        (fourth & 0x3f);
-      width = 4;
-    } else {
+    const decoded = utf8CodePointAt(bytes, index);
+    if (decoded === undefined) {
       return fail(path, 'expected UTF-8 JSON');
     }
-    chunk += String.fromCodePoint(codePoint);
+    chunk += String.fromCodePoint(decoded.codePoint);
     if (chunk.length >= 4_096) {
       chunks.push(chunk);
       chunk = '';
     }
-    index += width;
+    index += decoded.width;
   }
   chunks.push(chunk);
   return chunks.join('');
