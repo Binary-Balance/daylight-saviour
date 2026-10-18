@@ -21,17 +21,10 @@
       "cwd": ".",
       "timeoutMs": 60000,
       "typecheck": [
-        "npm",
-        "run",
-        "typecheck",
-        "--workspace",
-        "@daylight-saviour/contracts",
-        "--workspace",
-        "@daylight-saviour/copy",
-        "--workspace",
-        "@daylight-saviour/domain",
-        "--workspace",
-        "@daylight-saviour/time-zone-data"
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "--project",
+        "packages/tsconfig.json"
       ],
       "test": [
         "node",
@@ -53,6 +46,8 @@
   "thresholds": {
     "maxCrap": 30,
     "maxCognitiveComplexity": 15,
-    "minMutationScore": 80
+    "minMutationScore": 80,
+    "maxInferredAny": 7,
+    "maxTypeEscapes": 0
   }
 }

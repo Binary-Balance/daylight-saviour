@@ -53,9 +53,15 @@ jobs:
           status=$?
           set -e
           node scripts/seshat-summary.mjs "seshat-$AREA.json" | tee -a "$GITHUB_STEP_SUMMARY"
-          # Thresholds are report-only until each area meets them (#148).
-          # Incomplete runs and invalid input still fail.
+          # Seshat exits 1 for any missed threshold. Type-safety limits are
+          # met today, so they block. CRAP, complexity and mutation stay
+          # report-only until each area meets them (#148). Incomplete runs,
+          # including an unknown inferred-any count, exit 2 and still fail.
           if [ "$status" = 1 ]; then
+            if jq -e '[.quality.checks[] | select((.metric == "maxInferredAny" or .metric == "maxTypeEscapes") and .state == "failed")] | length > 0' "seshat-$AREA.json" > /dev/null; then
+              echo "::error::Seshat type-safety limits exceeded for $AREA"
+              exit 1
+            fi
             echo "::warning::Seshat thresholds not met for $AREA"
             exit 0
           fi

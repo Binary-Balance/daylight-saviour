@@ -290,12 +290,31 @@ TypeScript is tested. For each function it reports:
   to `<=`, that make a test fail. Surviving mutants show untested behaviour.
 - **Pseudo-tested functions**: covered functions whose body can be removed
   without any test failing.
+- **Inferred `any`**: expression sites whose type TypeScript infers as `any`,
+  for example a `JSON.parse` result, so the compiler does not check them.
+- **Type escapes**: `any` written in the code and `@ts-ignore`,
+  `@ts-expect-error` or `@ts-nocheck` comments. Type assertions (`as`) and
+  non-null assertions (`!`) are not counted.
 
 Each area has its own configuration, so a mutant reruns only that area's tests:
 `seshat.packages.json`, `seshat.notifications.json` and `seshat.mobile.json`.
 All three set the same thresholds: CRAP at most 30, cognitive complexity at
 most 15 and mutation score at least 80%. They are report-only until each area
 meets them.
+
+Each configuration also sets `maxTypeEscapes` to 0 and `maxInferredAny` to that
+area's current count of inferred `any` sites. These limits block the Code
+assurance job, so new `any` cannot be added. When you remove sites, lower the
+area's `maxInferredAny` to the new count in the same change. Seshat keeps no
+baseline, so a new site offset by a removed one still passes. The summary lists
+every function with a site.
+
+Seshat counts inferred `any` only when a setup's `typecheck` runs the compiler
+directly, as `node node_modules/typescript/bin/tsc --project <config>`.
+`packages/tsconfig.json` covers the four shared packages for this. An `unknown`
+count, for example from a failed typecheck, makes the run incomplete. Keep
+counts independent of generated files: the mobile `tsconfig.json` lists
+`expo/types` in `types` instead of relying on the git-ignored `expo-env.d.ts`.
 
 Run from root after `npm ci`:
 
@@ -308,7 +327,8 @@ node scripts/seshat-summary.mjs seshat-packages.json
 Use `check` instead of `crap` to add mutation testing. It is slow: about 15
 minutes for packages on a four-core CI runner, and hours for mobile. Exit
 status 0 means complete with thresholds met, 1 means a threshold was missed and
-2 means the run was incomplete or invalid.
+2 means the run was incomplete or invalid. The workflow fails a status of 1
+only when a type-safety limit is missed and warns for the other thresholds.
 
 The Code assurance workflow runs `check` for packages and `crap` for
 notifications and mobile on each change, and `check` for every area weekly. The
