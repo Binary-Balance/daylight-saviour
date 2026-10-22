@@ -38,7 +38,7 @@ Add each dependency to its consuming workspace. Keep React, React DOM, and React
 
 Keep React Native Reanimated 4.5.1 and React Native Worklets 0.10.1 aligned across app dependencies, root overrides, and root development hoisting constraints: npm 11 otherwise materializes incompatible optional-peer copies.
 
-Seshat's Jest integration accepts only `jest-expo` versions it has verified, currently 57.0.5 and 57.0.6 (see [Code assurance](#code-assurance)). Before taking a newer `jest-expo`, check that Seshat's release notes list it.
+Seshat accepts only the `jest-expo` versions in its [runner compatibility guide](https://github.com/Binary-Balance/seshat/blob/main/docs/runner-compatibility.md#jestexpo-versions), currently 57.0.5 and 57.0.6. Check it before updating `jest-expo`.
 
 Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycle-script approvals to suppress dependency problems. Resolve conflicts explicitly, document accepted advisories, and verify dependency shape with `npm run dependencies:check`.
 
