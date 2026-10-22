@@ -6,8 +6,8 @@
 | --------------------- | ----------------- |
 | Node.js               | 24.21.0           |
 | npm                   | 11.19.0           |
-| Expo                  | 57.0.30           |
-| Expo Router           | 57.0.28           |
+| Expo                  | 57.0.31           |
+| Expo Router           | 57.0.29           |
 | React                 | 19.2.3            |
 | React Native          | 0.86.3            |
 | TypeScript            | 6.0.3             |
@@ -48,7 +48,7 @@ and the only installed packages allowed to depend directly on it. A new direct
 dependent or a changed severity fails the audit. So does an exception that no
 longer matches an advisory, so a patched release forces its removal.
 
-The shipped `expo-router` 57.0.28 → `query-string` 7.1.3 →
+The shipped `expo-router` 57.0.29 → `query-string` 7.1.3 →
 `decode-uri-component` 0.2.2 chain is temporarily accepted but dormant under
 standard routing: its active `getStateFromPath` fork uses `URL` and
 `URLSearchParams`, while `query-string` is used to stringify paths. Externally
@@ -82,8 +82,6 @@ Portable signed-pack verification pins `@noble/ed25519` 3.1.0 and
 zero-runtime-dependency modules. Verification wires pure JavaScript SHA
 functions, so React Native needs no randomness or crypto polyfill. Node's
 built-in crypto performs deterministic artifact signing.
-
-Root override `uuid@11.1.1` patches the version requested by Expo's transitive `xcode@3.0.1` tooling. `xcode` uses the retained `uuid.v4()` API. Keep native generation in validation and remove this override when Expo's dependency chain adopts a patched version directly.
 
 The root `allowScripts` policy denies the optional `unrs-resolver@1.12.2` postinstall inherited through `eslint-config-expo`; repository linting works without it. The exact `fsevents@2.3.3` install script is approved for optional native macOS file watching. `strict-allow-scripts=true` makes clean installs fail before any future unreviewed lifecycle script runs. Review and pin a script before approving it.
 

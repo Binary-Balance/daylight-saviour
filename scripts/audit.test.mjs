@@ -76,7 +76,7 @@ const lock = {
   packages: {
     'node_modules/micromatch': { dependencies: { braces: '^3.0.3' } },
     'node_modules/expo-router': {
-      version: '57.0.28',
+      version: '57.0.29',
       dependencies: { 'query-string': '^7.1.3' },
     },
     'node_modules/query-string': {
@@ -234,7 +234,7 @@ test('rejects a changed decoder chain or lockfile version', () => {
     }),
     withPackage('node_modules/expo-router', {
       ...lock.packages['node_modules/expo-router'],
-      version: '57.0.29',
+      version: '57.0.30',
     }),
   ]) {
     assert.throws(
