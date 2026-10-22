@@ -38,7 +38,7 @@ Add each dependency to its consuming workspace. Keep React, React DOM, and React
 
 Keep React Native Reanimated 4.5.1 and React Native Worklets 0.10.1 aligned across app dependencies, root overrides, and root development hoisting constraints: npm 11 otherwise materializes incompatible optional-peer copies.
 
-Router's drawer layout requires the native module `react-native-gesture-handler`. The mobile workspace lists it directly so `expo-doctor` keeps it at the Expo SDK version. Otherwise npm installs the latest release as a peer dependency.
+Router's drawer layout requires the native module `react-native-gesture-handler`. The mobile workspace lists it directly so `expo-doctor` checks it against the Expo SDK version. Otherwise npm installs the latest release as a peer dependency.
 
 Seshat accepts only the `jest-expo` versions in its [runner compatibility guide](https://github.com/Binary-Balance/seshat/blob/main/docs/runner-compatibility.md#jestexpo-versions), currently 57.0.5 and 57.0.6. Check it before updating `jest-expo`.
 
