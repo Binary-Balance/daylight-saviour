@@ -38,7 +38,7 @@ Add each dependency to its consuming workspace. Keep React, React DOM, and React
 
 Keep React Native Reanimated 4.5.1 and React Native Worklets 0.10.1 aligned across app dependencies, root overrides, and root development hoisting constraints: npm 11 otherwise materializes incompatible optional-peer copies.
 
-Keep `jest-expo` at 57.0.5, the only version Seshat's Jest integration accepts (see [Code assurance](#code-assurance)). `expo.install.exclude` in `apps/mobile/package.json` stops Expo's version check from requiring a newer patch. Remove the exclusion when Seshat supports one ([Binary-Balance/seshat#170](https://github.com/Binary-Balance/seshat/issues/170)).
+Seshat accepts only the `jest-expo` versions in its [runner compatibility guide](https://github.com/Binary-Balance/seshat/blob/main/docs/runner-compatibility.md#jestexpo-versions), currently 57.0.5 and 57.0.6. Check it before updating `jest-expo`.
 
 Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycle-script approvals to suppress dependency problems. Resolve conflicts explicitly, document accepted advisories, and verify dependency shape with `npm run dependencies:check`.
 
@@ -343,3 +343,10 @@ shape:
   run.
 - Make a test fail, not hang, when awaited work never settles. Seshat treats a
   timeout as unresolved and withholds the mutation score.
+
+Some mutants hang no matter how the tests are written. Removing
+`index += decoded.width;` from `strictUtf8` in the contracts package makes its
+loop endless. Seshat stops a run after any job timeout, so
+`seshat.packages.json` leaves out Seshat's `statement` mutants, which remove
+whole statements. Restore them once Seshat can count timeouts as detected
+([#181](https://github.com/Binary-Balance/daylight-saviour/issues/181)).
