@@ -64,11 +64,6 @@ const audit = () => ({
       'https://github.com/advisories/GHSA-86w9-cpqp-85rv',
       'high',
     ),
-    'sprintf-js': leaf(
-      'sprintf-js',
-      'https://github.com/advisories/GHSA-hp3w-g68c-fv3c',
-      'moderate',
-    ),
   },
 });
 
@@ -87,9 +82,6 @@ const lock = {
     'node_modules/@expo/cli': { dependencies: { 'node-forge': '^1.3.3' } },
     'node_modules/@expo/code-signing-certificates': {
       dependencies: { 'node-forge': '^1.3.3' },
-    },
-    'node_modules/@istanbuljs/load-nyc-config/node_modules/argparse': {
-      dependencies: { 'sprintf-js': '~1.0.2' },
     },
   },
 };

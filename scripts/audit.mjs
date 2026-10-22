@@ -28,14 +28,6 @@ const exceptions = [
       'node_modules/@expo/code-signing-certificates',
     ],
   },
-  {
-    name: 'sprintf-js',
-    url: 'https://github.com/advisories/GHSA-hp3w-g68c-fv3c',
-    severity: 'moderate',
-    dependents: [
-      'node_modules/@istanbuljs/load-nyc-config/node_modules/argparse',
-    ],
-  },
 ];
 const severities = new Set(['moderate', 'high', 'critical']);
 const validSeverities = new Set(['info', 'low', ...severities]);
