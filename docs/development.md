@@ -343,3 +343,10 @@ shape:
   run.
 - Make a test fail, not hang, when awaited work never settles. Seshat treats a
   timeout as unresolved and withholds the mutation score.
+
+Some mutants hang no matter how the tests are written. Removing
+`index += decoded.width;` from `strictUtf8` in the contracts package makes its
+loop endless. Seshat stops a run after any job timeout, so
+`seshat.packages.json` leaves out Seshat's `statement` mutants, which remove
+whole statements. Restore them once Seshat can count timeouts as detected
+([#181](https://github.com/Binary-Balance/daylight-saviour/issues/181)).
