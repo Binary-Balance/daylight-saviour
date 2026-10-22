@@ -57,7 +57,7 @@ unresponsiveness only if future app or upstream routing uses the included React
 Navigation core fallback or otherwise calls `query-string.parse`. Remove this
 exception when Router adopts a compatible patched parser.
 
-Three more advisories have no patched release. Each affects only build and
+Two more advisories have no patched release. Each affects only build and
 test tooling, and none of these packages appears in the exported web or Android
 bundle:
 
@@ -70,10 +70,6 @@ bundle:
   signatures be forged for low-exponent RSA keys. The Expo CLI only verifies
   signatures it has just made or a local certificate's own signature, never
   one supplied by another party.
-- `sprintf-js` 1.0.3 ([GHSA-hp3w-g68c-fv3c](https://github.com/advisories/GHSA-hp3w-g68c-fv3c)),
-  through `argparse`: unbounded precision specifiers can exhaust resources.
-  Only js-yaml's command-line tool loads `argparse`; Jest's coverage
-  configuration loader uses js-yaml's parser, so this code never runs.
 
 Remove each exception when its package publishes a fix.
 
