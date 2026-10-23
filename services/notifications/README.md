@@ -83,22 +83,28 @@ live-send or deployment evidence.
 
 ## Stored data and retention
 
-| Record                  | Table                          | Contents                                                                                                                     | Kept until                                                       |
-| ----------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Subscription            | `ReminderSubscriptions`        | Installation ID, credential hash, push token, platform, Home Time Zone, timing preferences, generation and registration time | Disable, deletion or a permanent invalid-token response          |
-| Retired-identity marker | `ReminderSubscriptions`        | Installation ID, generation and retirement time                                                                              | 30 days after the subscription is removed                        |
-| Registration throttle   | `ReminderRegistrationThrottle` | Hashed request source or installation, ten-minute window and request count                                                   | 30 days after its window starts                                  |
-| Dispatch ledger         | `ReminderDispatchLedger`       | Installation ID, Home Time Zone, Change Event, timing, delivery window, pack horizon, status and timestamps                  | 30 days after its last update, and never before its Change Event |
+| Record                                                 | Purpose                                                   | Contents                                                                                                                                                  | Kept until                                              |
+| ------------------------------------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Subscription (`ReminderSubscriptions`)                 | Send reminders and authorise changes to them              | Installation ID, credential hash, push token, platform, Home Time Zone, timing preferences, generation and registration time                              | Disable, deletion or a permanent invalid-token response |
+| Retired-identity marker (`ReminderSubscriptions`)      | Stop a delayed registration recreating a removed identity | Installation ID, generation and retirement time                                                                                                           | 30 days after the subscription is removed               |
+| Registration throttle (`ReminderRegistrationThrottle`) | Limit registration requests                               | Hashed client IP address or installation ID, ten-minute window and request count                                                                          | 30 days after its window starts                         |
+| Dispatch ledger (`ReminderDispatchLedger`)             | Send each reminder at most once and record its outcome    | Installation ID, Home Time Zone, Change Event, timing, generation, delivery window, pack horizon, status, claim, expiry and cleanup state, and timestamps | 30 days after its last update                           |
 
 Removing a subscription replaces its row with the marker at once. The daily
-`reminder-throttle-cleanup` timer deletes the other expired rows, so a row
-can outlive its limit by up to a day. A ledger row whose Change Event is still
-ahead is kept: deleting it would let a later dispatch send that reminder again.
+`reminder-throttle-cleanup` timer deletes the other expired rows, so a row can
+outlive its limit by up to a day. Each run makes one pass over rows already
+past their limit. Marker and ledger deletes carry the row's ETag, so a row that
+changed is skipped; a row already gone is skipped too, so overlapping runs are
+safe.
 
-Each run makes one pass over rows already past their limit. Each delete
-carries the row's ETag; a row that changed or is already gone is skipped, so
-overlapping runs are safe. A storage error, or a function timeout, ends the
-run and the next day's run continues.
+As a safeguard, the purge also keeps a ledger row until its Change Event has
+passed, because a deleted row no longer stops that reminder being sent again.
+Dispatch writes rows only during the delivery window, at most about eight days
+before the event, so this does not arise in practice.
+
+A storage error or function timeout ends the run, and the next day's run
+continues. A malformed ledger row fails every run at that row until it is
+repaired.
 
 ## Deployment settings
 

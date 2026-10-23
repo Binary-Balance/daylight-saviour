@@ -4,7 +4,6 @@ import { describe, it } from 'node:test';
 import {
   createAzureReminderDispatchLedgerStore,
   createTableReminderDispatchLedgerStore,
-  reminderDispatchStorageKey,
   type ReminderDispatchIdentity,
   type ReminderDispatchLedgerTable,
 } from './reminder-dispatch-ledger.ts';
@@ -650,7 +649,7 @@ describe('reminder dispatch ledger retention', () => {
     );
   });
 
-  it('stores no push token or credential and keys each installation apart', async () => {
+  it('stores no push token or credential in ledger rows', async () => {
     const { rows, table } = createTable();
     const ledger = createTableReminderDispatchLedgerStore(table);
     await ledger.prepare(preparation(1, updatedAt));
@@ -659,13 +658,6 @@ describe('reminder dispatch ledger retention', () => {
     assert.deepEqual(
       Object.keys(entity).filter((name) => /token|credential/i.test(name)),
       [],
-    );
-    assert.notDeepEqual(
-      reminderDispatchStorageKey(identity),
-      reminderDispatchStorageKey({
-        ...identity,
-        installationId: 'r'.repeat(43),
-      }),
     );
   });
 

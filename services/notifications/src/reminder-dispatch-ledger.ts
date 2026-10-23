@@ -144,7 +144,10 @@ export interface ReminderDispatchLedgerStore {
   readonly prepare: (
     preparation: ReminderDispatchPreparation,
   ) => Promise<ReminderDispatchLedgerRecord>;
-  /** Deletes records last updated more than 30 days ago in one pass. */
+  /**
+   * Deletes, in one pass, records last updated more than 30 days ago whose
+   * Change Event has passed.
+   */
   readonly purgeExpired: (now: Date) => Promise<void>;
   readonly release: (
     claim: ReminderDispatchClaim,
