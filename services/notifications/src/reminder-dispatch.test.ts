@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  createAzureReminderDispatchLedgerStore,
   createTableReminderDispatchLedgerStore,
   type ReminderDispatchIdentity,
   type ReminderDispatchLedgerTable,
@@ -67,6 +68,8 @@ function createTable() {
     | ((entity: Record<string, unknown>) => Promise<void>)
     | undefined;
   let loseNextReplaceAcknowledgement = false;
+  let deletes = 0;
+  let failingDelete: number | undefined;
   const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
   const key = (partitionKey: string, rowKey: string) =>
     `${partitionKey}/${rowKey}`;
@@ -77,11 +80,29 @@ function createTable() {
       if (rows.has(rowKey)) throw azureError(409);
       rows.set(rowKey, { ...entity, etag: String(++etag) });
     },
+    async delete(partitionKey, rowKey, expectedEtag) {
+      await pause();
+      deletes += 1;
+      if (deletes === failingDelete) throw azureError(503);
+      const id = key(partitionKey, rowKey);
+      const row = rows.get(id);
+      if (row === undefined) throw azureError(404);
+      if (row.etag !== expectedEtag) throw azureError(412);
+      rows.delete(id);
+    },
     async get(partitionKey, rowKey) {
       await pause();
       const row = rows.get(key(partitionKey, rowKey));
       if (row === undefined) throw azureError(404);
       return { ...row };
+    },
+    // Lists every row, not only old ones: the store must apply the retention
+    // boundary itself rather than trust the server-side filter.
+    async *listUpdatedBefore() {
+      for (const row of [...rows.values()]) {
+        await pause();
+        yield { ...row };
+      }
     },
     async replace(entity, expectedEtag) {
       await pause();
@@ -100,6 +121,9 @@ function createTable() {
     },
   };
   return {
+    failDelete: (call: number) => {
+      failingDelete = deletes + call;
+    },
     loseNextReplaceAcknowledgement: () => {
       loseNextReplaceAcknowledgement = true;
     },
@@ -507,6 +531,185 @@ describe('reminder dispatch ledger', () => {
     const lateFailure = await ledger.updateCleanup(identity, 1, 'failed', now);
     assert.equal(lateFailure.kind, 'updated');
     assert.equal(lateFailure.record.cleanupStatus, 'removed');
+  });
+});
+
+describe('reminder dispatch ledger retention', () => {
+  const day = 24 * 60 * 60 * 1000;
+  const updatedAt = new Date(window.startsAt);
+  const retentionEnds = new Date(updatedAt.getTime() + 30 * day);
+  const purgedAt = new Date(retentionEnds.getTime() + 1);
+
+  function installation(letter: string) {
+    return { ...preparation(1, updatedAt), installationId: letter.repeat(43) };
+  }
+
+  it('keeps a record until more than 30 days after its last update', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    await ledger.prepare(preparation(1, updatedAt));
+    await ledger.purgeExpired(retentionEnds);
+    assert.equal(rows.size, 1);
+    await ledger.purgeExpired(purgedAt);
+    assert.equal(rows.size, 0);
+  });
+
+  it('measures retention from the last update, not creation', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    await ledger.prepare(preparation(1, updatedAt));
+    const laterUpdate = new Date(updatedAt.getTime() + 5 * day);
+    await ledger.invalidate(identity, 1, laterUpdate);
+    await ledger.purgeExpired(purgedAt);
+    assert.equal(rows.size, 1);
+    await ledger.purgeExpired(new Date(laterUpdate.getTime() + 30 * day + 1));
+    assert.equal(rows.size, 0);
+  });
+
+  it('keeps an old record until its Change Event', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    const changeEventAt = new Date(identity.changeEventAt);
+    await ledger.prepare(
+      preparation(1, new Date(changeEventAt.getTime() - 45 * day)),
+    );
+    await ledger.purgeExpired(new Date(changeEventAt.getTime() - 1));
+    assert.equal(rows.size, 1);
+    await ledger.purgeExpired(changeEventAt);
+    assert.equal(rows.size, 0);
+  });
+
+  it('does not resend an accepted reminder after its record is purged', async () => {
+    const { table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    await ledger.prepare(preparation(1, updatedAt));
+    const claim = await ledger.claim(identity, updatedAt);
+    assert.ok(claim);
+    await ledger.beginSend(claim, updatedAt);
+    await ledger.complete(claim, { kind: 'accepted' }, updatedAt);
+    await ledger.purgeExpired(purgedAt);
+    assert.equal(await ledger.get(identity), null);
+
+    await ledger.prepare(preparation(1, purgedAt));
+    assert.equal(await ledger.claim(identity, purgedAt), null);
+    const record = await ledger.get(identity);
+    assert.equal(record?.status, 'expired');
+    assert.equal(record?.expiryReason, 'event');
+  });
+
+  it('keeps a record that a dispatch changes during the purge', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    await ledger.prepare(preparation(1, updatedAt));
+    const racing = createTableReminderDispatchLedgerStore({
+      ...table,
+      async *listUpdatedBefore(cutoff) {
+        for await (const entity of table.listUpdatedBefore(cutoff)) {
+          await ledger.invalidate(identity, 1, purgedAt);
+          yield entity;
+        }
+      },
+    });
+    await racing.purgeExpired(purgedAt);
+    assert.equal(rows.size, 1);
+    assert.deepEqual((await ledger.get(identity))?.updatedAt, purgedAt);
+  });
+
+  it('stops at a storage failure and resumes on the next run', async () => {
+    const { failDelete, rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    for (const letter of ['a', 'b', 'c']) {
+      await ledger.prepare(installation(letter));
+    }
+    failDelete(2);
+    await assert.rejects(ledger.purgeExpired(purgedAt), /Azure 503/);
+    assert.equal(rows.size, 2);
+    await ledger.purgeExpired(purgedAt);
+    assert.equal(rows.size, 0);
+  });
+
+  it('lets overlapping runs finish without double deletion errors', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    for (const letter of ['a', 'b', 'c']) {
+      await ledger.prepare(installation(letter));
+    }
+    await settled(
+      Promise.all([
+        ledger.purgeExpired(purgedAt),
+        ledger.purgeExpired(purgedAt),
+      ]),
+    );
+    assert.equal(rows.size, 0);
+  });
+
+  it('handles an empty ledger and leaves recent partitions alone', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    await ledger.purgeExpired(purgedAt);
+    assert.equal(rows.size, 0);
+
+    await ledger.prepare(preparation(1, updatedAt));
+    await ledger.prepare({
+      ...preparation(1, purgedAt),
+      homeTimeZone: 'Australia/Perth',
+    });
+    await ledger.purgeExpired(purgedAt);
+    assert.deepEqual(
+      [...rows.values()].map((row) => row.homeTimeZone),
+      ['Australia/Perth'],
+    );
+  });
+
+  it('stores no push token or credential in ledger rows', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    await ledger.prepare(preparation(1, updatedAt));
+    const [entity] = rows.values();
+    assert.ok(entity);
+    assert.deepEqual(
+      Object.keys(entity).filter((name) => /token|credential/i.test(name)),
+      [],
+    );
+  });
+
+  it('queries Azure for old records and deletes them conditionally', async () => {
+    let filter = '';
+    const deleted: unknown[] = [];
+    const ledger = createAzureReminderDispatchLedgerStore(
+      {
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      },
+      {
+        createCredential: () => ({
+          getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+        }),
+        createTableClient: () =>
+          ({
+            deleteEntity: async (...args: unknown[]) => {
+              deleted.push(args);
+            },
+            listEntities: (options: {
+              readonly queryOptions?: { readonly filter?: unknown };
+            }) => {
+              filter = String(options.queryOptions?.filter);
+              return (async function* () {
+                yield {
+                  changeEventAt: identity.changeEventAt,
+                  etag: 'old',
+                  partitionKey: 'zone',
+                  rowKey: 'delivery',
+                  updatedAt,
+                };
+              })();
+            },
+          }) as never,
+      },
+    );
+    await ledger.purgeExpired(purgedAt);
+    assert.equal(filter, "updatedAt lt datetime'2026-09-28T09:00:00.001Z'");
+    assert.deepEqual(deleted, [['zone', 'delivery', { etag: 'old' }]]);
   });
 });
 

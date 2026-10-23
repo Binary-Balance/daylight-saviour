@@ -14,7 +14,7 @@ export const changeReminders = Object.freeze({
     heading: 'CHANGE REMINDERS DISABLED',
   }),
   disableConfirmation: Object.freeze({
-    body: 'Turning off both timings deletes this installation’s Change Reminder registration. This cannot be undone, but you can enable reminders again later.',
+    body: 'Turning off both timings deletes this installation’s Change Reminder registration and push token. Remaining records are deleted after 30 days. This cannot be undone, but you can enable reminders again later.',
     cancel: 'Keep reminders',
     confirm: 'Disable and delete reminders',
     heading: 'DISABLE CHANGE REMINDERS?',
@@ -38,7 +38,7 @@ export const changeReminders = Object.freeze({
     heading: 'CHANGE REMINDERS ENABLED',
   }),
   explainer: Object.freeze({
-    body: 'One week and one day before a Change Event, following your Home Time Zone while you travel. Delivery is best effort. No account is needed; only this installation, its push token, zone, and timing preferences are stored.',
+    body: 'One week and one day before a Change Event, following your Home Time Zone while you travel. Delivery is best effort. No account is needed. Only this installation, its push token, zone, timing preferences, and 30 days of delivery and rate-limit records are stored.',
     confirm: 'Enable reminders',
     heading: 'WARN ME BEFORE TIME MISBEHAVES',
   }),

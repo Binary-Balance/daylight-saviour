@@ -1,10 +1,11 @@
 import { ManagedIdentityCredential } from '@azure/identity';
-import { TableClient } from '@azure/data-tables';
+import { odata, TableClient } from '@azure/data-tables';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
 import {
   hashOpaqueValue,
   opaqueRandomValue,
+  operationalRetentionMs,
 } from './reminder-subscriptions.ts';
 
 export const reminderDispatchLedgerTableName = 'ReminderDispatchLedger';
@@ -103,10 +104,18 @@ export type ReminderDispatchMutationResult =
 /** The adapter is deliberately tiny so deterministic tests do not need Azure. */
 export interface ReminderDispatchLedgerTable {
   readonly create: (entity: Record<string, unknown>) => Promise<void>;
+  readonly delete: (
+    partitionKey: string,
+    rowKey: string,
+    etag: string,
+  ) => Promise<void>;
   readonly get: (
     partitionKey: string,
     rowKey: string,
   ) => Promise<Record<string, unknown>>;
+  readonly listUpdatedBefore: (
+    cutoff: Date,
+  ) => AsyncIterable<Record<string, unknown>>;
   readonly replace: (
     entity: Record<string, unknown>,
     etag: string,
@@ -135,6 +144,11 @@ export interface ReminderDispatchLedgerStore {
   readonly prepare: (
     preparation: ReminderDispatchPreparation,
   ) => Promise<ReminderDispatchLedgerRecord>;
+  /**
+   * Deletes, in one pass, records last updated more than 30 days ago whose
+   * Change Event has passed.
+   */
+  readonly purgeExpired: (now: Date) => Promise<void>;
   readonly release: (
     claim: ReminderDispatchClaim,
     now: Date,
@@ -1109,12 +1123,43 @@ export function createTableReminderDispatchLedgerStore(
     );
   }
 
+  async function purgeExpired(nowInput: Date) {
+    const now = nowDate(nowInput);
+    const cutoff = now.getTime() - operationalRetentionMs;
+    for await (const entity of table.listUpdatedBefore(new Date(cutoff))) {
+      const updatedAt = dateValue(entity.updatedAt, 'updatedAt');
+      const changeEventAt = instant(
+        entity.changeEventAt,
+        'Change Event instant',
+      );
+      // A deleted record no longer fences its delivery identity. Keep it while
+      // its Change Event is ahead so a later dispatch cannot send it again.
+      if (
+        updatedAt.getTime() >= cutoff ||
+        changeEventAt.getTime() > now.getTime()
+      ) {
+        continue;
+      }
+      try {
+        await table.delete(
+          requiredString(entity.partitionKey, 'partition key'),
+          requiredString(entity.rowKey, 'row key'),
+          requiredString(entity.etag, 'ETag'),
+        );
+      } catch (error) {
+        // A newer write or an overlapping run wins; the next run reconsiders.
+        if (statusCode(error) !== 404 && !conflict(error)) throw error;
+      }
+    }
+  }
+
   return {
     claim,
     complete,
     get,
     invalidate,
     prepare,
+    purgeExpired,
     release,
     beginSend,
     cancelBeforeProvider,
@@ -1167,6 +1212,9 @@ export function createAzureReminderDispatchLedgerStore(
     create: async (entity) => {
       await table.createEntity(entity as never);
     },
+    delete: async (partitionKey, rowKey, etag) => {
+      await table.deleteEntity(partitionKey, rowKey, { etag });
+    },
     get: async (partitionKey, rowKey) => {
       const entity = await table.getEntity<Record<string, unknown>>(
         partitionKey,
@@ -1179,6 +1227,10 @@ export function createAzureReminderDispatchLedgerStore(
         rowKey,
       };
     },
+    listUpdatedBefore: (cutoff) =>
+      table.listEntities<Record<string, unknown>>({
+        queryOptions: { filter: odata`updatedAt lt ${cutoff}` },
+      }),
     replace: async (entity, etag) => {
       await table.updateEntity(entity as never, 'Replace', { etag });
     },

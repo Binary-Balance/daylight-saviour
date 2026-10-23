@@ -1,13 +1,14 @@
 # Notification service
 
 Azure Functions hosts installation-scoped Change Reminder registration and
-throttle cleanup. This package also provides reusable APNs and FCM senders, and
-keyless FCM access-token primitives. The APNs sender accepts an injected signed
-provider token and HTTP/2 transport; it does not persist or log signing
-material. No scheduled runtime currently composes or invokes them for Change
-Reminder delivery; the owner-gated on-demand handler composes FCM or APNs only
-when that provider's two gates are enabled. No Google service-account key or
-long-lived FCM credential is accepted.
+daily [retention cleanup](#stored-data-and-retention). This package also
+provides reusable APNs and FCM senders, and keyless FCM access-token
+primitives. The APNs sender accepts an injected signed provider token and
+HTTP/2 transport; it does not persist or log signing material. No scheduled
+runtime currently composes or invokes them for Change Reminder delivery; the
+owner-gated on-demand handler composes FCM or APNs only when that provider's
+two gates are enabled. No Google service-account key or long-lived FCM
+credential is accepted.
 
 The registration HTTP surface accepts a strictly validated `POST`, and the
 installation-scoped `PUT` and `DELETE` endpoints require the current bearer
@@ -62,9 +63,7 @@ provider rejected an attempted send.
 Invalid-token cleanup has separate progress and retries without resending the
 notification. It checks the rejected registration's generation and token, and
 preserves registrations newer than an APNs invalidation timestamp. Ledger
-records contain no push token or credential. Their `createdAt` and `updatedAt`
-timestamps support the future 30-day retention task in
-[PUB-74](https://github.com/Binary-Balance/daylight-saviour/issues/74).
+records contain no push token or credential.
 
 Provider acceptance does not establish arrival on a device. FCM TTL bounds
 offline storage, while APNs explicitly treats expiry as best effort and allows
@@ -79,9 +78,33 @@ in [PUB-73](https://github.com/Binary-Balance/daylight-saviour/issues/73), with
 provider expiry in [PUB-133](https://github.com/Binary-Balance/daylight-saviour/issues/133),
 safe invocation logging in [PUB-134](https://github.com/Binary-Balance/daylight-saviour/issues/134)
 and network deadlines in [PUB-136](https://github.com/Binary-Balance/daylight-saviour/issues/136).
-Provisioning the `ReminderDispatchLedger` table also remains pending. Portable
-tests use injected stores, time and providers; they provide no live-send or
-deployment evidence.
+Portable tests use injected stores, time and providers; they provide no
+live-send or deployment evidence.
+
+## Stored data and retention
+
+| Record                                                 | Purpose                                                   | Contents                                                                                                                                                  | Kept until                                              |
+| ------------------------------------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Subscription (`ReminderSubscriptions`)                 | Send reminders and authorise changes to them              | Installation ID, credential hash, push token, platform, Home Time Zone, timing preferences, generation and registration time                              | Disable, deletion or a permanent invalid-token response |
+| Retired-identity marker (`ReminderSubscriptions`)      | Stop a delayed registration recreating a removed identity | Installation ID, generation and retirement time                                                                                                           | 30 days after the subscription is removed               |
+| Registration throttle (`ReminderRegistrationThrottle`) | Limit registration, update and deletion requests          | Hashed client IP address or installation ID, ten-minute window and request count                                                                          | 30 days after its window starts                         |
+| Dispatch ledger (`ReminderDispatchLedger`)             | Send each reminder at most once and record its outcome    | Installation ID, Home Time Zone, Change Event, timing, generation, delivery window, pack horizon, status, claim, expiry and cleanup state, and timestamps | 30 days after its last update                           |
+
+Removing a subscription replaces its row with the marker at once. The daily
+`reminder-throttle-cleanup` timer deletes the other expired rows, so a row can
+outlive its limit by up to a day. Each run makes one pass over rows already
+past their limit. Marker and ledger deletes carry the row's ETag, so a row that
+changed is skipped; a row already gone is skipped too, so overlapping runs are
+safe.
+
+As a safeguard, the purge also keeps a ledger row until its Change Event has
+passed, because a deleted row no longer stops that reminder being sent again.
+Dispatch first writes a row when its delivery window opens, at most about
+eight days before the event, so this does not arise in practice.
+
+A storage error or function timeout ends the run, and the next day's run
+continues. A malformed ledger row fails every run at that row, so later rows
+wait until it is repaired.
 
 ## Deployment settings
 
