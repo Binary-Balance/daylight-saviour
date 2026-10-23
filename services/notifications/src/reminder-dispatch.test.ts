@@ -554,6 +554,18 @@ describe('reminder dispatch ledger retention', () => {
     assert.equal(rows.size, 0);
   });
 
+  it('measures retention from the last update, not creation', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    await ledger.prepare(preparation(1, updatedAt));
+    const laterUpdate = new Date(updatedAt.getTime() + 5 * day);
+    await ledger.invalidate(identity, 1, laterUpdate);
+    await ledger.purgeExpired(purgedAt);
+    assert.equal(rows.size, 1);
+    await ledger.purgeExpired(new Date(laterUpdate.getTime() + 30 * day + 1));
+    assert.equal(rows.size, 0);
+  });
+
   it('keeps an old record until its Change Event', async () => {
     const { rows, table } = createTable();
     const ledger = createTableReminderDispatchLedgerStore(table);
