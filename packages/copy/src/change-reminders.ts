@@ -38,7 +38,7 @@ export const changeReminders = Object.freeze({
     heading: 'CHANGE REMINDERS ENABLED',
   }),
   explainer: Object.freeze({
-    body: 'One week and one day before a Change Event, following your Home Time Zone while you travel. Delivery is best effort. No account is needed. Only this installation, its push token, zone, timing preferences, and 30 days of delivery and rate-limit records are stored.',
+    body: 'One week and one day before a Change Event, following your Home Time Zone while you travel. Delivery is best effort. No account is needed. We store this installation’s ID, push token, Home Time Zone and timing preferences, plus 30 days of delivery and rate-limit records.',
     confirm: 'Enable reminders',
     heading: 'WARN ME BEFORE TIME MISBEHAVES',
   }),
