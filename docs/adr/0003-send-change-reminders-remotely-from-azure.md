@@ -18,7 +18,7 @@ Daylight Saviour will send Change Reminders from lightweight Azure-hosted infras
 - Each reminder is eligible from 9:00 am through 9:00 pm in the Home Time Zone. Transient failures are retried idempotently only within that Delivery Window.
 - An unsent reminder expires after its Delivery Window and is never delivered overnight or after its Change Event. Expiry raises an operational alert rather than causing a stale push.
 - Enabled subscriptions do not expire merely because the app has not opened; reminder delivery is a set-and-forget service.
-- Explicit user disable or deletion and permanent APNs or FCM invalid-token responses promptly delete the subscription data. A credential-free retired-identity marker may remain for up to 30 days to fence delayed registration replays.
+- Explicit user disable or deletion and permanent APNs or FCM invalid-token responses promptly delete the subscription data. A credential-free retired-identity marker is kept for 30 days to fence delayed registration replays.
 - Initial opt-in explains both reminder timings before requesting OS permission; one-week and one-day reminders default on after explicit confirmation.
 - Users can disable either timing independently. Disabling both deletes the remote subscription data, while later re-enabling either timing creates a fresh registration.
 - If OS notification permission remains available, re-opt-in completes in-app. If permission is blocked at OS level, the app explains the state and links to system settings rather than claiming reminders are active.
