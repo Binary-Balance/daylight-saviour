@@ -8,10 +8,10 @@ MVP Azure infrastructure will comprise one 512 MB Flex Consumption Function App 
 
 ## Consequences
 
-- Subscriptions are partitioned by Home Time Zone so dispatch queries only due zone partitions.
-- A dispatch ledger keyed by zone, Change Event, and reminder timing makes timer execution idempotent.
-- Ledger state distinguishes pending, provider-accepted, permanently failed, and expired dispatches. The timer retries transient failures only during the reminder's 12-hour Delivery Window.
+- Subscriptions share one fixed partition with one row per installation, so a Home Time Zone change updates that row in place. Dispatch queries only subscriptions in due zones.
+- A dispatch ledger keyed by installation, zone, Change Event, and reminder timing makes timer execution idempotent.
+- Ledger state distinguishes pending, provider-accepted, uncertain, permanently failed, and expired dispatches. The timer retries transient failures only during the reminder's 12-hour Delivery Window.
 - Expired or permanently failed dispatches feed an Azure Monitor alert without storing or logging full push tokens.
-- A scheduled retention task removes dispatch-ledger and operational entities older than 30 days and promptly removes subscriptions whose providers report permanently invalid tokens.
+- A scheduled retention task removes dispatch-ledger and operational entities older than 30 days. Dispatch promptly removes subscriptions whose providers report permanently invalid tokens.
 - No Cosmos DB, SQL, Service Bus, Durable Functions, API Management, Front Door, always-on compute, Kubernetes, or user identity service is introduced for MVP.
 - Scaling or abuse evidence may justify adding infrastructure later, but speculative components are excluded.
