@@ -69,6 +69,11 @@ resource reminderRegistrationThrottleTable 'Microsoft.Storage/storageAccounts/ta
   name: 'ReminderRegistrationThrottle'
 }
 
+resource reminderDispatchLedgerTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = {
+  parent: tableService
+  name: 'ReminderDispatchLedger'
+}
+
 resource accountDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
   name: 'send-to-log-analytics'
   scope: account

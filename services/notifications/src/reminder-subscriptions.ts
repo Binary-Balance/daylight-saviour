@@ -6,7 +6,6 @@ import type {
   HttpFunctionOptions,
   HttpRequest,
   HttpResponseInit,
-  TimerFunctionOptions,
 } from '@azure/functions';
 import {
   parseReminderSubscriptionRegistration,
@@ -16,7 +15,7 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 
 const maxRequestBytes = 8 * 1024;
 const throttleWindowMs = 10 * 60 * 1000;
-const operationalRetentionMs = 30 * 24 * 60 * 60 * 1000;
+export const operationalRetentionMs = 30 * 24 * 60 * 60 * 1000;
 const registrationRequestValidityMs = 24 * 60 * 60 * 1000;
 const registrationRequestFutureSkewMs = 5 * 60 * 1000;
 const throttleLimit = 5;
@@ -1173,15 +1172,4 @@ export const reminderSubscriptionDeleteOptions: HttpFunctionOptions = {
   handler: createReminderSubscriptionDeleteHandler(),
   methods: ['DELETE'],
   route: 'reminder-subscriptions/{installationId}',
-};
-
-export const reminderThrottleCleanupOptions: TimerFunctionOptions = {
-  handler: async () => {
-    const store = createAzureReminderSubscriptionStore();
-    const now = new Date();
-    await store.purgeExpiredThrottleRecords(now);
-    await store.purgeExpiredRetiredSubscriptions(now);
-  },
-  schedule: '0 17 3 * * *',
-  useMonitor: true,
 };
