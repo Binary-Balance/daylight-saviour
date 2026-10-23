@@ -5,8 +5,9 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react-native';
-import { AppState } from 'react-native';
+import { AppState, StyleSheet } from 'react-native';
 
+import { contrastRatio } from '../../../test-support/contrast';
 import { daylightSaviourPalettes } from '../../theme';
 import type { ChangeReminderAdapters } from './change-reminder-adapters';
 import ChangeReminderSection from './change-reminder-section';
@@ -100,6 +101,47 @@ it('renders restored registration truthfully without another enable action', asy
   ).toBeNull();
   expect(boundary.enable).not.toHaveBeenCalled();
 });
+
+it.each(['light', 'dark'] as const)(
+  'renders timing labels legibly in %s appearance',
+  async (appearance) => {
+    const palette = daylightSaviourPalettes[appearance];
+    render(
+      <ChangeReminderSection
+        adapters={adapters({
+          restore: jest.fn(async () => ({
+            kind: 'registered' as const,
+            notificationPermissionGranted: true,
+            registration: {
+              attemptGeneration: 1,
+              credential: 'c'.repeat(43),
+              deviceToken: 'fcm-token:with_valid.characters-123',
+              homeTimeZone: 'Australia/Sydney',
+              installationId: 'i'.repeat(43),
+              oneDayEnabled: true,
+              oneWeekEnabled: true,
+              registrationRequestId: 'a'.repeat(64),
+              state: 'registered' as const,
+              version: 4 as const,
+            },
+          })),
+        })}
+        homeTimeZone="Australia/Sydney"
+        palette={palette}
+      />,
+    );
+
+    for (const label of ['One week before', 'One day before']) {
+      const { color } = StyleSheet.flatten(
+        (await screen.findByText(label)).props.style,
+      );
+      expect(color).toBe(palette.ink);
+      expect(
+        contrastRatio(String(color), palette.background),
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  },
+);
 
 it('shows only a selectable installation ID in an external test build', async () => {
   const savedInstallationId = 'i'.repeat(43);

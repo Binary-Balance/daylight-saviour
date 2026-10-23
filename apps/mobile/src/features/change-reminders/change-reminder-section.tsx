@@ -19,16 +19,18 @@ import { createChangeReminderSession } from './change-reminder-session';
 function TimingControls({
   preferences,
   onChange,
+  palette,
   disabled = false,
 }: {
   readonly preferences: ChangeReminderPreferences;
   readonly onChange: (preferences: ChangeReminderPreferences) => void;
+  readonly palette: DaylightSaviourPalette;
   readonly disabled?: boolean;
 }) {
   return (
     <View style={styles.timings}>
       <View style={styles.timing}>
-        <Text style={styles.timingLabel}>
+        <Text style={[styles.timingLabel, { color: palette.ink }]}>
           {copy.changeReminders.timing.oneWeek}
         </Text>
         <Switch
@@ -43,7 +45,7 @@ function TimingControls({
         />
       </View>
       <View style={styles.timing}>
-        <Text style={styles.timingLabel}>
+        <Text style={[styles.timingLabel, { color: palette.ink }]}>
           {copy.changeReminders.timing.oneDay}
         </Text>
         <Switch
@@ -236,6 +238,7 @@ export default function ChangeReminderSection({
           onChange={(preferences) =>
             session.dispatch({ type: 'change-preferences', preferences })
           }
+          palette={palette}
           preferences={snapshot.preferences}
         />
       ) : null}
