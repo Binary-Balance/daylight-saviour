@@ -55,7 +55,7 @@
     "web:export": "npm exec --workspace=@daylight-saviour/mobile -- expo export --platform web"
   },
   "devDependencies": {
-    "@binary-balance/seshat": "0.8.1",
+    "@binary-balance/seshat": "0.9.0",
     "eslint": "9.39.2",
     "eslint-config-expo": "57.0.0",
     "expo-doctor": "1.20.0",
