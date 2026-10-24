@@ -62,11 +62,11 @@ exception when Router adopts a compatible patched parser.
 The notification service depends on `@azure/msal-node` 5.4.2
 ([GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5))
 through `@azure/identity` 4.13.1. Its authorization code flow can disclose
-request parameters to an attacker-controlled endpoint. Only 7.1.0 is patched,
-and the latest `@azure/identity`, 4.14.0, still requires an earlier major
-version. The service creates only `ManagedIdentityCredential`, which
-never uses that flow. Remove this exception when `@azure/identity` accepts a
-patched release.
+request parameters to an attacker-controlled endpoint. Versions 7.1.0 and later
+are patched, but the latest `@azure/identity`, 4.14.0, still requires an earlier
+major version. The service creates only `ManagedIdentityCredential`, which never
+uses that flow. Remove this exception when `@azure/identity` accepts a patched
+release.
 
 Two more advisories have no compatible patched release. Each affects only
 build and lint tooling, and none of these packages appears in the exported web
@@ -80,10 +80,11 @@ or Android bundle:
   one supplied by another party.
 - `zod` 3.25.76 ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)),
   through `@expo/cli`, `eslint-plugin-react-hooks` and `zod-validation-error`:
-  validating a large array without a length limit can exhaust memory. Only
-  4.6.6 is patched, and `@expo/cli` requires zod 3. The Expo CLI validates
-  arrays only in dev tools plugin configuration from installed packages. The
-  lint plugins run only on repository source and configuration.
+  validating a large array without a length limit can exhaust memory. Versions
+  4.6.6 and later are patched, but `@expo/cli` requires zod 3. The Expo CLI
+  validates arrays only in dev tools plugin configuration and command output,
+  both from installed packages. The lint plugin and its error formatter run
+  only on repository source and configuration.
 
 Remove each exception when its dependents accept a patched release.
 

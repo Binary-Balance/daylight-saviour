@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 // release; docs/development.md records why each is acceptable. Each lists the
 // only lockfile packages that may depend directly on the affected package, so
 // a new direct dependent fails the audit, as does a change in severity.
-// Remove an exception once a patch is available.
+// Remove an exception once its dependents accept a patched release.
 const exceptions = [
   {
     name: 'decode-uri-component',
