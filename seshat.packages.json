@@ -14,7 +14,13 @@
     "node_modules"
   ],
   "workers": 4,
-  "mutationOperators": ["comparison", "logical", "arithmetic", "boolean"],
+  "mutationOperators": [
+    "comparison",
+    "logical",
+    "arithmetic",
+    "boolean",
+    "optional"
+  ],
   "setups": [
     {
       "name": "packages",
