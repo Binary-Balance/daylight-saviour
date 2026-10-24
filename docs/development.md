@@ -59,21 +59,33 @@ unresponsiveness only if future app or upstream routing uses the included React
 Navigation core fallback or otherwise calls `query-string.parse`. Remove this
 exception when Router adopts a compatible patched parser.
 
-Two more advisories have no patched release. Each affects only build and
-test tooling, and none of these packages appears in the exported web or Android
-bundle:
+The notification service depends on `@azure/msal-node` 5.4.2
+([GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5))
+through `@azure/identity` 4.13.1. Its authorization code flow can disclose
+request parameters to an attacker-controlled endpoint. Only 7.1.0 is patched,
+and the latest `@azure/identity`, 4.14.0, still requires an earlier major
+version. The service creates only `ManagedIdentityCredential`, which
+never uses that flow. Remove this exception when `@azure/identity` accepts a
+patched release.
 
-- `braces` 3.0.3 ([GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)),
-  through `micromatch`: deeply nested glob patterns can exhaust the stack.
-  Metro and Jest match only patterns from repository configuration.
+Two more advisories have no compatible patched release. Each affects only
+build and lint tooling, and none of these packages appears in the exported web
+or Android bundle:
+
 - `node-forge` 1.4.0 ([GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv)),
   through `@expo/cli` and `@expo/code-signing-certificates`: RSA PKCS#1 v1.5
   signature verification accepts extra nested digest elements, which can let
   signatures be forged for low-exponent RSA keys. The Expo CLI only verifies
   signatures it has just made or a local certificate's own signature, never
   one supplied by another party.
+- `zod` 3.25.76 ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)),
+  through `@expo/cli`, `eslint-plugin-react-hooks` and `zod-validation-error`:
+  validating a large array without a length limit can exhaust memory. Only
+  4.6.6 is patched, and `@expo/cli` requires zod 3. The Expo CLI validates
+  arrays only in dev tools plugin configuration from installed packages. The
+  lint plugins run only on repository source and configuration.
 
-Remove each exception when its package publishes a fix.
+Remove each exception when its dependents accept a patched release.
 
 Portable signed-pack verification pins `@noble/ed25519` 3.1.0 and
 `@noble/hashes` 2.2.0 in `@daylight-saviour/contracts`. Both are MIT,

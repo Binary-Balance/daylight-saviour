@@ -14,18 +14,28 @@ const exceptions = [
     dependents: ['node_modules/query-string'],
   },
   {
-    name: 'braces',
-    url: 'https://github.com/advisories/GHSA-vfj7-8cjw-p6xm',
-    severity: 'high',
-    dependents: ['node_modules/micromatch'],
-  },
-  {
     name: 'node-forge',
     url: 'https://github.com/advisories/GHSA-86w9-cpqp-85rv',
     severity: 'high',
     dependents: [
       'node_modules/@expo/cli',
       'node_modules/@expo/code-signing-certificates',
+    ],
+  },
+  {
+    name: '@azure/msal-node',
+    url: 'https://github.com/advisories/GHSA-xcx6-jx8p-x3h5',
+    severity: 'high',
+    dependents: ['node_modules/@azure/identity'],
+  },
+  {
+    name: 'zod',
+    url: 'https://github.com/advisories/GHSA-mrhx-c7xc-m3w5',
+    severity: 'high',
+    dependents: [
+      'node_modules/@expo/cli',
+      'node_modules/eslint-plugin-react-hooks',
+      'node_modules/zod-validation-error',
     ],
   },
 ];
