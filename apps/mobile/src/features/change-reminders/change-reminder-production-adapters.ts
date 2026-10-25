@@ -629,6 +629,7 @@ export function createProductionChangeReminderAdapters({
           })
         ).kind === 'enabled'
       ) {
+        lastRefreshedToken = token;
         return { kind: 'succeeded' };
       }
     } catch {
@@ -701,12 +702,12 @@ export function createProductionChangeReminderAdapters({
               ? performTokenRefresh(homeTimeZone, currentToken)
               : Promise.resolve(null),
           );
-          if (result?.kind === 'succeeded') {
-            lastRefreshedToken = currentToken;
-            onResult(result);
-          } else if (result?.kind === 'failed') {
-            onResult(result);
-          }
+          // Nothing awaits this loop, so it only compares the result with
+          // null. Reading result.kind here would turn a result that a Seshat
+          // mutant leaves empty into an unhandled rejection. Seshat counts
+          // that as an execution error unless the test also fails an
+          // assertion, and the mutation run would stop.
+          if (result !== null) onResult(result);
         } finally {
           refreshingToken = null;
         }
