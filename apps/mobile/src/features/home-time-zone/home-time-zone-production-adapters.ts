@@ -32,6 +32,7 @@ const timeZoneDataPacks = createTimeZoneDataPackManager({
   request: (url, init) =>
     expoFetch(url, {
       headers: init.headers,
+      signal: init.signal,
     }),
   storage: {
     load: () => AsyncStorage.getItem(timeZoneDataPackStorageKey),

@@ -14,6 +14,9 @@ export { parseTimeZoneDataPackRemoteConfig } from './time-zone-data-remote-confi
 
 const foregroundCheckIntervalMs = 24 * 60 * 60 * 1_000;
 const maximumManifestBytes = 64 * 1024;
+// Covers a whole check: both requests and their bodies. Packs are tens of
+// kilobytes, so this is generous on a slow mobile network.
+const refreshTimeoutMs = 30_000;
 
 export type TimeZoneDataPackFreshness =
   | 'checking'
@@ -61,7 +64,10 @@ interface TimeZoneDataPackManagerOptions {
   readonly remoteConfig: TimeZoneDataPackRemoteConfig | null;
   readonly request?: (
     url: string,
-    init: { readonly headers: Readonly<Record<string, string>> },
+    init: {
+      readonly headers: Readonly<Record<string, string>>;
+      readonly signal: AbortSignal;
+    },
   ) => Promise<HttpResponse>;
   readonly storage: TimeZoneDataPackStorage;
 }
@@ -212,6 +218,22 @@ async function responseBytes(response: HttpResponse, maximum: number) {
   return bytes;
 }
 
+// Ends the wait at the deadline even when the network implementation ignores
+// the abort and never settles.
+function beforeDeadline<T>(signal: AbortSignal, work: Promise<T>) {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new TimeZoneDataPackTransportError());
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener('abort', abort, { once: true });
+    work
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
 function expired(pack: ActivatedTimeZoneDataPack, now: Date) {
   return now.getTime() > Date.parse(pack.coverage.validUntil);
 }
@@ -294,6 +316,9 @@ export function createTimeZoneDataPackManager(
 
     update({ ...snapshot, freshness: 'checking', lastError: null });
     const checkedAtIso = checkedAt.toISOString();
+    const deadline = new AbortController();
+    const { signal } = deadline;
+    const timer = setTimeout(() => deadline.abort(), refreshTimeoutMs);
     try {
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (persisted.etag !== null) headers['If-None-Match'] = persisted.etag;
@@ -302,9 +327,10 @@ export function createTimeZoneDataPackManager(
       }
       let manifestResponse: HttpResponse;
       try {
-        manifestResponse = await request(options.remoteConfig.manifestUrl, {
-          headers,
-        });
+        manifestResponse = await beforeDeadline(
+          signal,
+          request(options.remoteConfig.manifestUrl, { headers, signal }),
+        );
       } catch {
         throw new TimeZoneDataPackTransportError();
       }
@@ -326,9 +352,9 @@ export function createTimeZoneDataPackManager(
         throw new Error(`Manifest request returned ${manifestResponse.status}`);
       }
 
-      const manifestBytes = await responseBytes(
-        manifestResponse,
-        maximumManifestBytes,
+      const manifestBytes = await beforeDeadline(
+        signal,
+        responseBytes(manifestResponse, maximumManifestBytes),
       );
       const manifest =
         activateSignedTimeZoneDataPackManifestBytes(manifestBytes);
@@ -363,9 +389,13 @@ export function createTimeZoneDataPackManager(
       }
       let packResponse: HttpResponse;
       try {
-        packResponse = await request(packUrl.toString(), {
-          headers: { Accept: 'application/json' },
-        });
+        packResponse = await beforeDeadline(
+          signal,
+          request(packUrl.toString(), {
+            headers: { Accept: 'application/json' },
+            signal,
+          }),
+        );
       } catch {
         throw new TimeZoneDataPackTransportError();
       }
@@ -373,9 +403,9 @@ export function createTimeZoneDataPackManager(
         throw new Error(`Pack request returned ${packResponse.status}`);
       }
       contentLength(packResponse, manifest.pack.byteLength);
-      const packBytes = await responseBytes(
-        packResponse,
-        maximumTimeZoneDataPackBytes,
+      const packBytes = await beforeDeadline(
+        signal,
+        responseBytes(packResponse, maximumTimeZoneDataPackBytes),
       );
       const verified = verifySignedTimeZoneDataPackBytes(
         manifest,
@@ -426,6 +456,8 @@ export function createTimeZoneDataPackManager(
         lastCheckedAt: checkedAtIso,
         lastError: 'refresh-failed',
       });
+    } finally {
+      clearTimeout(timer);
     }
   }
 

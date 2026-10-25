@@ -296,6 +296,68 @@ describe('production Change Reminder adapters', () => {
     ]);
   });
 
+  it('keeps the registration deadline while the response body stalls', async () => {
+    const captured: { signal: AbortSignal | null } = { signal: null };
+    const fetchImplementation = jest
+      .fn()
+      .mockImplementationOnce(
+        async (_input: URL | RequestInfo, init?: RequestInit) => {
+          captured.signal = init?.signal ?? null;
+          // Headers arrive, but the body never finishes and ignores abort.
+          return new Response(new ReadableStream({ start: () => undefined }));
+        },
+      )
+      .mockImplementationOnce(async () =>
+        Response.json(responseBody),
+      ) as jest.MockedFunction<typeof fetch>;
+    const test = harness({ fetchImplementation, timeoutMs: 1 });
+
+    await expect(
+      settled(test.adapters.enable('Australia/Sydney'), 'Stalled enablement'),
+    ).resolves.toEqual({ kind: 'failed' });
+    expect(captured.signal?.aborted).toBe(true);
+    await expect(
+      settled(test.adapters.enable('Australia/Sydney'), 'Retried enablement'),
+    ).resolves.toEqual({ kind: 'enabled' });
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 2,
+      state: 'registered',
+    });
+  });
+
+  it('ignores a registration response that arrives after its deadline', async () => {
+    let respondLate: (response: Response) => void = () => undefined;
+    const fetchImplementation = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            respondLate = resolve;
+          }),
+      )
+      .mockImplementationOnce(async () =>
+        Response.json(responseBody),
+      ) as jest.MockedFunction<typeof fetch>;
+    const test = harness({ fetchImplementation, timeoutMs: 1 });
+
+    await expect(
+      settled(test.adapters.enable('Australia/Sydney'), 'Timed-out enablement'),
+    ).resolves.toEqual({ kind: 'failed' });
+    await expect(
+      settled(test.adapters.enable('Australia/Sydney'), 'Retried enablement'),
+    ).resolves.toEqual({ kind: 'enabled' });
+    const stored = test.stored();
+
+    respondLate(
+      Response.json({
+        credential: 'd'.repeat(43),
+        installationId: 'j'.repeat(43),
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(test.stored()).toBe(stored);
+  });
+
   it('shares one in-flight enable operation', async () => {
     let resolve!: (response: Response) => void;
     let markStarted!: () => void;
