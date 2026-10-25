@@ -13,15 +13,19 @@ import {
 } from '../time-zone-data/time-zone-data-manager';
 
 const now = new Date('2026-07-19T00:00:00.000Z');
-const baselinePackSnapshot = createTimeZoneDataPackManager({
-  bundledPack: bundledAustralianDataPack,
-  now: () => now,
-  remoteConfig: null,
-  storage: {
-    load: async () => null,
-    save: async () => undefined,
-  },
-}).getSnapshot();
+// Create inside tests, so a mutant that breaks the manager fails a test
+// instead of crashing this file while it loads.
+let baselinePack: TimeZoneDataPackSnapshot | undefined;
+const baselinePackSnapshot = () =>
+  (baselinePack ??= createTimeZoneDataPackManager({
+    bundledPack: bundledAustralianDataPack,
+    now: () => now,
+    remoteConfig: null,
+    storage: {
+      load: async () => null,
+      save: async () => undefined,
+    },
+  }).getSnapshot());
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -59,7 +63,7 @@ function createHarness({
   readonly uses24hourClock?: boolean;
 } = {}) {
   let storedZone = savedZone;
-  let packSnapshot = baselinePackSnapshot;
+  let packSnapshot = baselinePackSnapshot();
   const acknowledgements = new Map<string, string>();
   if (savedZone !== null && acknowledgedEventAt !== null) {
     acknowledgements.set(savedZone, acknowledgedEventAt);
@@ -410,12 +414,12 @@ describe('Home Time Zone session', () => {
     expect(session.getSnapshot()).toBe(ready);
 
     const callsBeforeSamePack = listener.mock.calls.length;
-    harness.publishPack(baselinePackSnapshot);
+    harness.publishPack(baselinePackSnapshot());
     expect(session.getSnapshot()).toBe(ready);
     expect(listener).toHaveBeenCalledTimes(callsBeforeSamePack);
 
     const checkingPack = {
-      ...baselinePackSnapshot,
+      ...baselinePackSnapshot(),
       freshness: 'checking',
     } as const;
     harness.publishPack(checkingPack);
