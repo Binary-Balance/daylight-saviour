@@ -80,11 +80,15 @@ than FCM's four-week maximum away. If the expiry has passed by the time of the
 request, it sends nothing and reports the send as expired. The APNs sender
 always sets `apns-expiration: 0`.
 
+The FCM transport bounds each request, including its response body, to 10
+seconds by default, and stops waiting even if `fetch` ignores the abort. A
+request that fails or times out in transit is reported as uncertain, not as a
+rejection, because FCM may still have accepted it.
+
 The senders do not yet implement the complete-operation deadline and
 final-authorization contract. Production timer composition, which bounds each
 FCM expiry by the delivery window, Validity Horizon and Change Event, remains in
-[PUB-73](https://github.com/Binary-Balance/daylight-saviour/issues/73), with
-network deadlines in [PUB-136](https://github.com/Binary-Balance/daylight-saviour/issues/136).
+[PUB-73](https://github.com/Binary-Balance/daylight-saviour/issues/73).
 Portable tests use injected stores, time and providers; they provide no
 live-send or deployment evidence.
 

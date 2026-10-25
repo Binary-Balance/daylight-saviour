@@ -5,6 +5,7 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 const fcmOrigin = 'https://fcm.googleapis.com';
 const maxFcmResponseCharacters = 64 * 1024;
 const maxFcmLifetimeMs = 28 * 24 * 60 * 60 * 1000;
+const defaultTransportTimeoutMs = 10_000;
 const fcmProjectIdPattern = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 const installationIdPattern = /^[A-Za-z0-9_-]{32,128}$/;
 const deviceTokenPattern = /^[A-Za-z0-9_:.-]{20,4096}$/;
@@ -114,7 +115,8 @@ export type FcmChangeReminderLogEvent =
   | 'fcm-change-reminder-malformed-response'
   | 'fcm-change-reminder-permanent-invalid-token'
   | 'fcm-change-reminder-permanent-rejection'
-  | 'fcm-change-reminder-transient-rejection';
+  | 'fcm-change-reminder-transient-rejection'
+  | 'fcm-change-reminder-uncertain';
 
 export interface FcmChangeReminderLogger {
   readonly write: (event: FcmChangeReminderLogEvent) => void;
@@ -134,7 +136,12 @@ export type FcmChangeReminderResult =
       readonly cleanupStatus: FcmSubscriptionCleanupStatus;
     }
   | { readonly kind: 'permanent-rejection' }
-  | { readonly kind: 'transient-rejection' };
+  | { readonly kind: 'transient-rejection' }
+  /**
+   * The request failed or timed out in transit. FCM may still have accepted
+   * it, so this is not a rejection and the send must not be repeated.
+   */
+  | { readonly kind: 'uncertain' };
 
 export interface FcmChangeReminderSender {
   readonly send: (
@@ -169,7 +176,7 @@ export type FcmFetch = (
     readonly body: string;
     readonly headers: Readonly<Record<string, string>>;
     readonly method: 'POST';
-    readonly signal?: AbortSignal;
+    readonly signal: AbortSignal;
   },
 ) => Promise<FcmFetchResponse>;
 
@@ -375,6 +382,7 @@ function report(
     'permanent-invalid-token': 'fcm-change-reminder-permanent-invalid-token',
     'permanent-rejection': 'fcm-change-reminder-permanent-rejection',
     'transient-rejection': 'fcm-change-reminder-transient-rejection',
+    uncertain: 'fcm-change-reminder-uncertain',
   };
   try {
     logger.write(events[result.kind]);
@@ -402,18 +410,17 @@ export function createFetchFcmHttpTransport(
   fetch: FcmFetch,
   options: { readonly timeoutMs?: number } = {},
 ): FcmHttpTransport {
-  if (
-    options.timeoutMs !== undefined &&
-    (!Number.isSafeInteger(options.timeoutMs) ||
-      options.timeoutMs <= 0 ||
-      options.timeoutMs > 60_000)
-  ) {
+  // Every send is bounded, so no composition can leave a send waiting on a
+  // stalled connection.
+  const timeoutMs = options.timeoutMs ?? defaultTransportTimeoutMs;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60_000)
     throw new Error('Invalid FCM transport timeout');
-  }
   return {
     async post(request) {
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
+      // The deadline covers the body as well as the headers. The race ends
+      // the wait even if fetch ignores the abort.
       const operation = async () => {
         const response = await fetch(request.endpoint.toString(), {
           body: JSON.stringify(request.payload),
@@ -422,18 +429,15 @@ export function createFetchFcmHttpTransport(
             'Content-Type': 'application/json; charset=utf-8',
           },
           method: 'POST',
-          ...(options.timeoutMs === undefined
-            ? {}
-            : { signal: controller.signal }),
+          signal: controller.signal,
         });
         return { body: await response.text(), status: response.status };
       };
-      if (options.timeoutMs === undefined) return operation();
       const timeout = new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => {
           controller.abort();
           reject(new Error('FCM transport timeout'));
-        }, options.timeoutMs);
+        }, timeoutMs);
       });
       try {
         return await Promise.race([operation(), timeout]);
@@ -483,7 +487,7 @@ export function createFcmChangeReminderSender(
         payload: buildPayload(subscription, facts, ttl),
       });
     } catch {
-      return report(dependencies.logger, { kind: 'transient-rejection' });
+      return report(dependencies.logger, { kind: 'uncertain' });
     }
 
     const body = parseJson(response.body);
