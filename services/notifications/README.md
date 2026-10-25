@@ -84,8 +84,7 @@ The senders do not yet implement the complete-operation deadline and
 final-authorization contract. Production timer composition, which bounds each
 FCM expiry by the delivery window, Validity Horizon and Change Event, remains in
 [PUB-73](https://github.com/Binary-Balance/daylight-saviour/issues/73), with
-safe invocation logging in [PUB-134](https://github.com/Binary-Balance/daylight-saviour/issues/134)
-and network deadlines in [PUB-136](https://github.com/Binary-Balance/daylight-saviour/issues/136).
+network deadlines in [PUB-136](https://github.com/Binary-Balance/daylight-saviour/issues/136).
 Portable tests use injected stores, time and providers; they provide no
 live-send or deployment evidence.
 
@@ -140,10 +139,15 @@ provider's gates are enabled.
 When composed, the keyless access-token provider accepts only short-lived
 credentials: managed-identity assertions must have a valid future expiry, while
 Google STS tokens and impersonated FCM access tokens are each bounded to one
-hour. The reusable provider and sender produce fixed events for exchange
+hour. The reusable provider and senders produce fixed events for exchange
 denials, transport failures, parsing, expiry, delivery, and failed invalid-token
 cleanup. Tokens, assertions, provider bodies, and transport errors never enter
-those events.
+those events. The controlled handler writes them to the log of the Function
+invocation that produced them, so an operator can tell a credential failure, a
+provider rejection and a failed cleanup apart. A warm worker reuses the
+composed runtime across overlapping invocations, so the logger finds the
+current invocation through `AsyncLocalStorage` rather than keeping the first.
+A logging failure never changes a send result.
 
 ## Least privilege
 

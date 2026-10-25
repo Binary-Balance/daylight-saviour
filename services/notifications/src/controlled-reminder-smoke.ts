@@ -1,13 +1,18 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import type {
   HttpFunctionOptions,
   HttpRequest,
   HttpResponseInit,
+  InvocationContext,
 } from '@azure/functions';
+import { ManagedIdentityCredential } from '@azure/identity';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
 import {
   createApnsChangeReminderSender,
   type ApnsChangeReminderSender,
+  type ApnsHttpTransport,
 } from './apns-change-reminder-sender.ts';
 import {
   createApnsProviderTokenProvider,
@@ -19,7 +24,10 @@ import {
   type FcmChangeReminderSender,
   type ReviewedChangeReminderFacts,
 } from './fcm-change-reminder-sender.ts';
-import { createKeylessFcmAccessTokenProvider } from './keyless-fcm-access-token.ts';
+import {
+  createKeylessFcmAccessTokenProvider,
+  type ManagedIdentityAssertionCredential,
+} from './keyless-fcm-access-token.ts';
 import {
   createAzureReminderSubscriptionStore,
   type ReminderSubscriptionStore,
@@ -40,6 +48,36 @@ interface ControlledReminderSmokeRuntime {
   readonly sender?: FcmChangeReminderSender;
   readonly store?: Pick<ReminderSubscriptionStore, 'getSubscription'>;
 }
+
+/** External systems the runtime calls, replaceable in tests. */
+export interface ControlledReminderSmokeBoundaries {
+  readonly createApnsTransport: () => ApnsHttpTransport;
+  readonly createCredential: (
+    clientId: string,
+  ) => ManagedIdentityAssertionCredential;
+  readonly createStore: (
+    environment: NodeJS.ProcessEnv,
+  ) => Pick<
+    ReminderSubscriptionStore,
+    'getSubscription' | 'removeIfDeviceTokenMatches'
+  >;
+  readonly fetch: typeof fetch;
+}
+
+const productionBoundaries: ControlledReminderSmokeBoundaries = {
+  createApnsTransport: createNodeApnsHttpTransport,
+  createCredential: (clientId) => new ManagedIdentityCredential(clientId),
+  createStore: createAzureReminderSubscriptionStore,
+  fetch,
+};
+
+// A warm worker reuses the composed runtime, and overlapping invocations
+// share it. Its loggers therefore look up the invocation they run in, rather
+// than capturing the one that composed the runtime.
+const invocation = new AsyncLocalStorage<InvocationContext>();
+const invocationLogger = {
+  write: (event: string) => invocation.getStore()?.log(event),
+};
 
 function outcome(
   status: number,
@@ -174,6 +212,7 @@ function required(environment: NodeJS.ProcessEnv, name: string) {
 
 export function createControlledReminderSmokeRuntime(
   environment: NodeJS.ProcessEnv = process.env,
+  boundaries: ControlledReminderSmokeBoundaries = productionBoundaries,
 ): ControlledReminderSmokeRuntime {
   const runtimeEnabled = environment.FCM_RUNTIME_ENABLED === 'true';
   const testSendEnabled = environment.FCM_TEST_SEND_ENABLED === 'true';
@@ -188,7 +227,7 @@ export function createControlledReminderSmokeRuntime(
     };
   }
 
-  const store = createAzureReminderSubscriptionStore(environment);
+  const store = boundaries.createStore(environment);
 
   return {
     ...(apnsActive
@@ -197,14 +236,14 @@ export function createControlledReminderSmokeRuntime(
             apnsEnvironment(required(environment, 'APNS_ENVIRONMENT')),
             required(environment, 'APNS_TOPIC'),
             {
-              logger: { write: () => undefined },
+              logger: invocationLogger,
               providerTokenProvider: createApnsProviderTokenProvider({
                 keyId: required(environment, 'APNS_KEY_ID'),
                 privateKey: required(environment, 'APNS_PRIVATE_KEY'),
                 teamId: required(environment, 'APNS_TEAM_ID'),
               }),
               subscriptionRemover: store,
-              transport: createNodeApnsHttpTransport(),
+              transport: boundaries.createApnsTransport(),
             },
           ),
         }
@@ -235,11 +274,15 @@ export function createControlledReminderSmokeRuntime(
                     'FCM_WORKLOAD_IDENTITY_PROVIDER',
                   ),
                 },
-                { logger: { write: () => undefined } },
+                {
+                  createCredential: boundaries.createCredential,
+                  fetch: boundaries.fetch,
+                  logger: invocationLogger,
+                },
               ),
-              logger: { write: () => undefined },
+              logger: invocationLogger,
               subscriptionRemover: store,
-              transport: createFetchFcmHttpTransport(fetch),
+              transport: createFetchFcmHttpTransport(boundaries.fetch),
             },
           ),
         }
@@ -263,7 +306,7 @@ export function createControlledReminderSmokeHandler(
 ) {
   let cachedRuntime: ControlledReminderSmokeRuntime | undefined;
 
-  return async (request: HttpRequest): Promise<HttpResponseInit> => {
+  const handle = async (request: HttpRequest): Promise<HttpResponseInit> => {
     let input: ControlledReminderSmokeRequest;
     try {
       input = await readRequest(request);
@@ -337,6 +380,9 @@ export function createControlledReminderSmokeHandler(
       return outcome(503, 'unavailable');
     }
   };
+
+  return (request: HttpRequest, context: InvocationContext) =>
+    invocation.run(context, () => handle(request));
 }
 
 export const controlledReminderSmokeOptions: HttpFunctionOptions = {

@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, it } from 'node:test';
+
+import { InvocationContext } from '@azure/functions';
 
 import {
   controlledReminderSmokeOptions,
   createControlledReminderSmokeHandler,
   createControlledReminderSmokeRuntime,
+  type ControlledReminderSmokeBoundaries,
 } from './controlled-reminder-smoke.ts';
 import type {
   ApnsChangeReminderResult,
@@ -50,6 +54,119 @@ function request(
     }),
     headers,
   } as never;
+}
+
+const entraAssertion = 'sensitive-entra-assertion';
+const federatedToken = 'sensitive-federated-token';
+const fcmAccessToken = 'sensitive-fcm-access-token';
+const providerDetail = 'sensitive provider detail';
+const fcmEnvironment = {
+  FCM_ENTRA_ASSERTION_AUDIENCE: 'api://portable-fcm-audience',
+  FCM_PROJECT_ID: 'portable-project',
+  FCM_RUNTIME_ENABLED: 'true',
+  FCM_SERVICE_ACCOUNT_EMAIL:
+    'portable-fcm-sender@portable-project.iam.gserviceaccount.com',
+  FCM_TEST_SEND_ENABLED: 'true',
+  FCM_WORKLOAD_IDENTITY_PROVIDER:
+    '//iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/portable-pool/providers/azure-runtime',
+  REMINDER_MANAGED_IDENTITY_CLIENT_ID: '00000000-0000-4000-8000-000000000000',
+};
+
+function fcmAccepted() {
+  return Response.json({ name: 'projects/portable-project/messages/1' });
+}
+
+function fcmError(
+  status: number,
+  providerStatus: string,
+  details: readonly unknown[] = [],
+) {
+  return Response.json(
+    {
+      error: {
+        code: status,
+        details,
+        message: providerDetail,
+        status: providerStatus,
+      },
+    },
+    { status },
+  );
+}
+
+/** Boundaries for the real composition: storage, Entra, Google and APNs. */
+function boundaries(
+  options: {
+    readonly fcmSend?: () => Promise<Response>;
+    readonly getToken?: () => Promise<{
+      readonly expiresOnTimestamp: number;
+      readonly token: string;
+    }>;
+    readonly platform?: 'android' | 'ios';
+    readonly remove?: () => Promise<'removed' | 'not-found' | 'token-replaced'>;
+  } = {},
+): ControlledReminderSmokeBoundaries {
+  return {
+    createApnsTransport: () => ({
+      post: async () => ({ body: '', status: 200 }),
+    }),
+    createCredential: () => ({
+      getToken:
+        options.getToken ??
+        (async () => ({
+          expiresOnTimestamp: Date.now() + 60 * 60 * 1000,
+          token: entraAssertion,
+        })),
+    }),
+    createStore: () => ({
+      getSubscription: async () => ({
+        deviceToken: options.platform === 'ios' ? 'a'.repeat(64) : deviceToken,
+        installationId,
+        platform: options.platform ?? 'android',
+      }),
+      removeIfDeviceTokenMatches: options.remove ?? (async () => 'removed'),
+    }),
+    fetch: async (input) => {
+      const url = String(input);
+      if (url.startsWith('https://sts.googleapis.com/')) {
+        return Response.json({
+          access_token: federatedToken,
+          expires_in: 3600,
+          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+          token_type: 'Bearer',
+        });
+      }
+      if (url.startsWith('https://iamcredentials.googleapis.com/')) {
+        return Response.json({
+          accessToken: fcmAccessToken,
+          expireTime: new Date(Date.now() + 50 * 60 * 1000).toISOString(),
+        });
+      }
+      return (options.fcmSend ?? (async () => fcmAccepted()))();
+    },
+  };
+}
+
+// Fails a test whose awaited work never settles, instead of letting it hang.
+// Seshat treats a hang as an unresolved mutant and withholds the score.
+function settled<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(new assert.AssertionError({ message: 'Work did not settle' })),
+      1000,
+    );
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
+function context(events: unknown[] = []) {
+  return new InvocationContext({
+    logHandler: (_level, ...args) => {
+      events.push(...args);
+    },
+  });
 }
 
 function runtime(
@@ -111,7 +228,7 @@ describe('controlled Change Reminder smoke handler', () => {
         },
         runtimeEnabled: false,
       }),
-    )(request(facts));
+    )(request(facts), context());
 
     assert.deepEqual(result, {
       headers: { 'Cache-Control': 'no-store' },
@@ -131,7 +248,7 @@ describe('controlled Change Reminder smoke handler', () => {
         },
         testSendEnabled: false,
       }),
-    )(request(facts));
+    )(request(facts), context());
 
     assert.deepEqual(result, {
       headers: { 'Cache-Control': 'no-store' },
@@ -154,7 +271,7 @@ describe('controlled Change Reminder smoke handler', () => {
         runtimeEnabled: false,
         testSendEnabled: false,
       }),
-    )(request(facts));
+    )(request(facts), context());
 
     assert.equal(result.status, 503);
     assert.equal(lookups, 0);
@@ -185,7 +302,7 @@ describe('controlled Change Reminder smoke handler', () => {
             return { kind: 'accepted' };
           },
         }),
-      )(request(input, options));
+      )(request(input, options), context());
 
       assert.equal(result.status, 400);
       assert.equal(sends, 0);
@@ -196,7 +313,7 @@ describe('controlled Change Reminder smoke handler', () => {
   it('returns a fixed outcome when the requested Android registration is absent', async () => {
     const result = await createControlledReminderSmokeHandler(
       runtime({ getSubscription: async () => null }),
-    )(request(facts));
+    )(request(facts), context());
 
     assert.deepEqual(result, {
       headers: { 'Cache-Control': 'no-store' },
@@ -220,7 +337,7 @@ describe('controlled Change Reminder smoke handler', () => {
           return { kind: 'accepted' };
         },
       }),
-    )(request(facts));
+    )(request(facts), context());
 
     assert.deepEqual(result, {
       headers: { 'Cache-Control': 'no-store' },
@@ -242,7 +359,7 @@ describe('controlled Change Reminder smoke handler', () => {
   it('maps a non-accepted sender result to a fixed unavailable outcome', async () => {
     const result = await createControlledReminderSmokeHandler(
       runtime({ send: async () => ({ kind: 'transient-rejection' }) }),
-    )(request(facts));
+    )(request(facts), context());
 
     assert.deepEqual(result, {
       headers: { 'Cache-Control': 'no-store' },
@@ -264,8 +381,8 @@ describe('controlled Change Reminder smoke handler', () => {
       })();
     });
 
-    assert.equal((await handler(request(facts))).status, 202);
-    assert.equal((await handler(request(facts))).status, 202);
+    assert.equal((await handler(request(facts), context())).status, 202);
+    assert.equal((await handler(request(facts), context())).status, 202);
     assert.equal(compositions, 1);
     assert.equal(sends, 2);
   });
@@ -285,7 +402,7 @@ describe('controlled Change Reminder smoke handler', () => {
           platform: 'ios',
         }),
       }),
-    )(request(facts));
+    )(request(facts), context());
 
     assert.equal(result.status, 202);
     assert.deepEqual(sent, { deviceToken: 'b'.repeat(64), installationId });
@@ -306,7 +423,7 @@ describe('controlled Change Reminder smoke handler', () => {
           platform: 'ios',
         }),
       }),
-    )(request(facts));
+    )(request(facts), context());
 
     assert.deepEqual(result, {
       headers: { 'Cache-Control': 'no-store' },
@@ -345,7 +462,7 @@ describe('controlled Change Reminder smoke handler', () => {
             platform: 'ios',
           }),
         }),
-      )(request(facts));
+      )(request(facts), context());
 
       assert.deepEqual(result, {
         headers: { 'Cache-Control': 'no-store' },
@@ -376,7 +493,7 @@ describe('controlled Change Reminder smoke handler', () => {
     ) as NodeJS.ProcessEnv;
     const result = await createControlledReminderSmokeHandler(() =>
       createControlledReminderSmokeRuntime(environment),
-    )(request(facts));
+    )(request(facts), context());
 
     assert.deepEqual(result, {
       headers: { 'Cache-Control': 'no-store' },
@@ -407,7 +524,7 @@ describe('controlled Change Reminder smoke handler', () => {
     ]) {
       const result = await createControlledReminderSmokeHandler(() =>
         createControlledReminderSmokeRuntime(environment),
-      )(request(facts));
+      )(request(facts), context());
 
       assert.deepEqual(result, {
         headers: { 'Cache-Control': 'no-store' },
@@ -430,12 +547,166 @@ describe('controlled Change Reminder smoke handler', () => {
           throw new Error(`${credential}: ${providerDetail}`);
         },
       }),
-    )(request(facts));
+    )(request(facts), context());
 
     assert.equal(result.status, 503);
     assert.deepEqual(result.jsonBody, { outcome: 'unavailable' });
     assert.doesNotMatch(JSON.stringify(result), new RegExp(credential));
     assert.doesNotMatch(JSON.stringify(result), new RegExp(providerDetail));
     assert.doesNotMatch(JSON.stringify(result), new RegExp(deviceToken));
+  });
+
+  it('logs a failed invalid-token cleanup without tokens or credentials', async () => {
+    const events: unknown[] = [];
+    const cleanupDetail = 'sensitive cleanup detail';
+    const result = await createControlledReminderSmokeHandler(() =>
+      createControlledReminderSmokeRuntime(
+        fcmEnvironment,
+        boundaries({
+          fcmSend: async () =>
+            fcmError(404, 'NOT_FOUND', [
+              {
+                '@type': 'type.googleapis.com/google.firebase.fcm.v1.FcmError',
+                errorCode: 'UNREGISTERED',
+              },
+            ]),
+          remove: async () => {
+            throw new Error(cleanupDetail);
+          },
+        }),
+      ),
+    )(request(facts), context(events));
+
+    assert.deepEqual(result, {
+      headers: { 'Cache-Control': 'no-store' },
+      jsonBody: { outcome: 'unavailable' },
+      status: 503,
+    });
+    assert.deepEqual(events, [
+      'fcm-credential-ready',
+      'fcm-change-reminder-permanent-invalid-token',
+      'fcm-change-reminder-invalid-token-cleanup-failed',
+    ]);
+    const serialisedEvents = JSON.stringify(events);
+    for (const secret of [
+      deviceToken,
+      installationId,
+      entraAssertion,
+      federatedToken,
+      fcmAccessToken,
+      providerDetail,
+      cleanupDetail,
+    ]) {
+      assert.doesNotMatch(serialisedEvents, new RegExp(secret));
+    }
+  });
+
+  it('distinguishes a credential exchange failure from a provider rejection', async () => {
+    const events: unknown[] = [];
+    const result = await createControlledReminderSmokeHandler(() =>
+      createControlledReminderSmokeRuntime(
+        fcmEnvironment,
+        boundaries({
+          getToken: async () => {
+            throw new Error(entraAssertion);
+          },
+        }),
+      ),
+    )(request(facts), context(events));
+
+    assert.equal(result.status, 503);
+    assert.deepEqual(events, [
+      'fcm-credential-entra-denied',
+      'fcm-change-reminder-transient-rejection',
+    ]);
+  });
+
+  it('keeps the delivery result when the invocation logger fails', async () => {
+    const result = await createControlledReminderSmokeHandler(() =>
+      createControlledReminderSmokeRuntime(fcmEnvironment, boundaries()),
+    )(
+      request(facts),
+      new InvocationContext({
+        logHandler: () => {
+          throw new Error('logging unavailable');
+        },
+      }),
+    );
+
+    assert.deepEqual(result, {
+      headers: { 'Cache-Control': 'no-store' },
+      jsonBody: { outcome: 'accepted' },
+      status: 202,
+    });
+  });
+
+  it('logs APNs sender events to the invocation', async () => {
+    const privateKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
+      .privateKey.export({ format: 'pem', type: 'pkcs8' })
+      .toString();
+    const events: unknown[] = [];
+    const result = await createControlledReminderSmokeHandler(() =>
+      createControlledReminderSmokeRuntime(
+        {
+          APNS_ENVIRONMENT: 'sandbox',
+          APNS_KEY_ID: 'ABCDE12345',
+          APNS_PRIVATE_KEY: privateKey,
+          APNS_RUNTIME_ENABLED: 'true',
+          APNS_TEAM_ID: 'ZYXWV98765',
+          APNS_TOPIC: 'com.example.app',
+          FCM_TEST_SEND_ENABLED: 'true',
+        },
+        boundaries({ platform: 'ios' }),
+      ),
+    )(request(facts), context(events));
+
+    assert.equal(result.status, 202);
+    assert.deepEqual(events, ['apns-change-reminder-accepted']);
+  });
+
+  it('logs each overlapping invocation of a warm runtime to its own context', async () => {
+    let releaseFirst = () => {};
+    let firstReachedFcm = () => {};
+    const firstHeld = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstAtFcm = new Promise<void>((resolve) => {
+      firstReachedFcm = resolve;
+    });
+    let sends = 0;
+    const handler = createControlledReminderSmokeHandler(() =>
+      createControlledReminderSmokeRuntime(
+        fcmEnvironment,
+        boundaries({
+          fcmSend: async () => {
+            sends += 1;
+            if (sends > 1) return fcmAccepted();
+            firstReachedFcm();
+            await firstHeld;
+            return fcmError(503, 'UNAVAILABLE');
+          },
+        }),
+      ),
+    );
+    const firstEvents: unknown[] = [];
+    const secondEvents: unknown[] = [];
+
+    const first = handler(request(facts), context(firstEvents));
+    await settled(firstAtFcm);
+    const second = await settled(
+      handler(request(facts), context(secondEvents)),
+    );
+    releaseFirst();
+
+    assert.equal((await settled(first)).status, 503);
+    assert.equal(second.status, 202);
+    assert.deepEqual(firstEvents, [
+      'fcm-credential-ready',
+      'fcm-change-reminder-transient-rejection',
+    ]);
+    assert.deepEqual(secondEvents, [
+      'fcm-credential-ready',
+      'fcm-change-reminder-accepted',
+    ]);
   });
 });
