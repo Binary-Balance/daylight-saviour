@@ -57,6 +57,16 @@ describe('createCivilTimeReport', () => {
       ).kind,
       'missing',
     );
+    assert.equal(
+      resolveCivilTimeReportEvent(
+        pack(),
+        'Europe/London',
+        '2026-10-03T16:00:00.000Z',
+        'Forward Change',
+        atSecondsBefore(1),
+      ).kind,
+      'missing',
+    );
   });
 
   for (const [description, secondsBefore, expected] of [
