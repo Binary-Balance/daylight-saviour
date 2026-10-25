@@ -221,13 +221,14 @@ async function responseBytes(response: HttpResponse, maximum: number) {
 // Ends the wait at the deadline even when the network implementation ignores
 // the abort and never settles.
 function beforeDeadline<T>(signal: AbortSignal, work: Promise<T>) {
-  return new Promise<T>((resolve, reject) => {
-    const abort = () => reject(new TimeZoneDataPackTransportError());
-    signal.addEventListener('abort', abort, { once: true });
-    work
-      .then(resolve, reject)
-      .finally(() => signal.removeEventListener('abort', abort));
-  });
+  return Promise.race([
+    work,
+    new Promise<never>((_resolve, reject) =>
+      signal.addEventListener('abort', () =>
+        reject(new TimeZoneDataPackTransportError()),
+      ),
+    ),
+  ]);
 }
 
 function expired(pack: ActivatedTimeZoneDataPack, now: Date) {
