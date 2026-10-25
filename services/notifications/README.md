@@ -72,10 +72,18 @@ guarantee when a device displays an accepted notification. See
 [FCM message lifespan](https://firebase.google.com/docs/cloud-messaging/customize-messages/setting-message-lifespan)
 and [APNs requests](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns).
 
-The current APNs and FCM senders do not implement this expiry, complete-operation
-deadline and final-authorization contract. Production timer composition remains
-in [PUB-73](https://github.com/Binary-Balance/daylight-saviour/issues/73), with
-provider expiry in [PUB-133](https://github.com/Binary-Balance/daylight-saviour/issues/133),
+The FCM sender requires an explicit message lifetime. A controlled smoke send
+is `immediate` and sets a zero TTL, so FCM delivers it at once or drops it. A
+queued send passes its expiry, and the sender sets the TTL from the whole
+seconds left just before the request. It rejects an expiry that has passed or
+is more than FCM's four-week maximum away, and sends nothing if the expiry
+passes while it acquires a credential. The APNs sender always sets
+`apns-expiration: 0`.
+
+The senders do not yet implement the complete-operation deadline and
+final-authorization contract. Production timer composition, which derives each
+FCM expiry from the delivery window, remains in
+[PUB-73](https://github.com/Binary-Balance/daylight-saviour/issues/73), with
 safe invocation logging in [PUB-134](https://github.com/Binary-Balance/daylight-saviour/issues/134)
 and network deadlines in [PUB-136](https://github.com/Binary-Balance/daylight-saviour/issues/136).
 Portable tests use injected stores, time and providers; they provide no

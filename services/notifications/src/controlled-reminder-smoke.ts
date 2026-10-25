@@ -304,7 +304,11 @@ export function createControlledReminderSmokeHandler(
         ) {
           return outcome(503, 'unavailable');
         }
-        const result = await runtime.sender.send(target, facts);
+        // A smoke send proves delivery now. FCM must not hold it for an
+        // offline device and deliver it after the test.
+        const result = await runtime.sender.send(target, facts, {
+          kind: 'immediate',
+        });
         return result.kind === 'accepted'
           ? outcome(202, 'accepted')
           : outcome(503, 'unavailable');
