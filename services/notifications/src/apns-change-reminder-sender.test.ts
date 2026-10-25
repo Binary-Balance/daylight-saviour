@@ -44,6 +44,7 @@ function sender(
   providerResponse: ApnsHttpResponse = { body: '', status: 200 },
   options: {
     readonly getProviderToken?: () => Promise<string>;
+    readonly logWrite?: (event: ApnsChangeReminderLogEvent) => void;
     readonly removeIfDeviceTokenMatches?: (
       subscription: ApnsChangeReminderSubscription,
       invalidatedAt: Date,
@@ -61,7 +62,7 @@ function sender(
     'sandbox',
     'com.example.app',
     {
-      logger: { write: (event) => logs.push(event) },
+      logger: { write: options.logWrite ?? ((event) => logs.push(event)) },
       providerTokenProvider: {
         getProviderToken:
           options.getProviderToken ?? (async () => providerToken),
@@ -274,6 +275,23 @@ describe('APNs Change Reminder sender', () => {
     assert.doesNotMatch(serialisedLogs, new RegExp(deviceToken));
     assert.doesNotMatch(serialisedLogs, new RegExp(providerToken));
     assert.doesNotMatch(serialisedLogs, new RegExp(sensitiveProviderResponse));
+  });
+
+  it('keeps an invalid-token result when logging fails', async () => {
+    const test = sender(response(410, 'Unregistered', invalidatedAt), {
+      logWrite: () => {
+        throw new Error('logging unavailable');
+      },
+      removeIfDeviceTokenMatches: async () => {
+        throw new Error('cleanup unavailable');
+      },
+    });
+
+    assert.deepEqual(await test.instance.send(subscription, facts), {
+      cleanupStatus: 'failed',
+      kind: 'permanent-invalid-token',
+      invalidTokenReason: 'unregistered',
+    });
   });
 
   it('treats unavailable or invalid injected provider tokens as transient', async () => {

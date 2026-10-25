@@ -70,6 +70,7 @@ function sender(
       readonly value: string;
     }>;
     readonly clock?: () => Date;
+    readonly logWrite?: (event: FcmChangeReminderLogEvent) => void;
     readonly removeIfDeviceTokenMatches?: () => Promise<FcmSubscriptionRemovalResult>;
     readonly post?: (request: FcmHttpRequest) => Promise<FcmHttpResponse>;
   } = {},
@@ -87,7 +88,7 @@ function sender(
         })),
     },
     clock: options.clock ?? (() => now),
-    logger: { write: (event) => logs.push(event) },
+    logger: { write: options.logWrite ?? ((event) => logs.push(event)) },
     subscriptionRemover: {
       removeIfDeviceTokenMatches: async (matchingSubscription) => {
         removalRequests.push(matchingSubscription);
@@ -629,6 +630,27 @@ describe('FCM Change Reminder sender', () => {
     assert.doesNotMatch(serialisedLogs, new RegExp(fullCredential));
     assert.doesNotMatch(serialisedLogs, new RegExp(sensitiveProviderResponse));
     assert.doesNotMatch(serialisedLogs, new RegExp(cleanupFailure));
+  });
+
+  it('keeps an invalid-token result when logging fails', async () => {
+    const test = sender(
+      response(404, fcmError(404, 'NOT_FOUND', unregisteredDetails)),
+      {
+        logWrite: () => {
+          throw new Error('logging unavailable');
+        },
+        removeIfDeviceTokenMatches: async () => {
+          throw new Error('cleanup unavailable');
+        },
+      },
+    );
+
+    const result = await test.instance.send(subscription, facts, immediate);
+
+    assert.deepEqual(result, {
+      kind: 'permanent-invalid-token',
+      cleanupStatus: 'failed',
+    });
   });
 
   it('keeps a rotated token when the conditional remover finds a mismatch', async () => {
