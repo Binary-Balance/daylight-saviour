@@ -276,21 +276,39 @@ describe('FCM Change Reminder sender', () => {
     assert.deepEqual(test.logs, ['fcm-change-reminder-expired']);
   });
 
-  for (const [name, lifetime, message] of [
-    ['an expiry at the current time', until(now), 'Expired'],
-    ['an expiry in the past', until(new Date(now.getTime() - 1)), 'Expired'],
-    ['an invalid date', until(new Date(Number.NaN)), 'Invalid'],
+  for (const [name, expiresAt] of [
+    ['at the current time', now],
+    ['in the past', new Date(now.getTime() - 1)],
+  ] as const) {
+    it(`reports an expiry ${name} as expired without sending`, async () => {
+      const test = sender(response(200, '{}'));
+
+      const result = await test.instance.send(
+        subscription,
+        facts,
+        until(expiresAt),
+      );
+
+      assert.deepEqual(result, { kind: 'expired' });
+      assert.deepEqual(test.requests, []);
+      assert.deepEqual(test.logs, ['fcm-change-reminder-expired']);
+    });
+  }
+
+  for (const [name, lifetime] of [
+    ['an invalid date', until(new Date(Number.NaN))],
     [
       'an expiry beyond the four-week FCM maximum',
       until(new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000 + 1)),
-      'Invalid',
     ],
     [
       'a non-date expiry',
       { kind: 'until', expiresAt: '2026-07-27T00:00:00.000Z' },
-      'Invalid',
     ],
-    ['an unknown lifetime kind', { kind: 'provider-default' }, 'Invalid'],
+    [
+      'an unknown lifetime kind',
+      { kind: 'provider-default', expiresAt: new Date(now.getTime() + 1_000) },
+    ],
   ] as const) {
     it(`rejects ${name} before acquiring a credential`, async () => {
       let accessTokenRequests = 0;
@@ -310,7 +328,7 @@ describe('FCM Change Reminder sender', () => {
           facts,
           lifetime as unknown as FcmMessageLifetime,
         ),
-        { message: `${message} FCM message lifetime` },
+        { message: 'Invalid FCM message lifetime' },
       );
       assert.equal(accessTokenRequests, 0);
       assert.deepEqual(test.requests, []);

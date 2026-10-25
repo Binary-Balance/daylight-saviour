@@ -303,9 +303,10 @@ function assertLifetime(lifetime: FcmMessageLifetime, now: Date) {
   if (lifetime.kind !== 'until' || !(lifetime.expiresAt instanceof Date))
     throw new Error('Invalid FCM message lifetime');
   const remainingMs = lifetime.expiresAt.getTime() - now.getTime();
+  // An expiry that has already passed is not invalid: a caller can race the
+  // clock. The send reports it as `expired` once the TTL is taken.
   if (!Number.isFinite(remainingMs) || remainingMs > maxFcmLifetimeMs)
     throw new Error('Invalid FCM message lifetime');
-  if (remainingMs <= 0) throw new Error('Expired FCM message lifetime');
 }
 
 function messageTtl(
@@ -461,8 +462,8 @@ export function createFcmChangeReminderSender(
     } catch {
       return report(dependencies.logger, { kind: 'transient-rejection' });
     }
-    // The provider owns lifetime policy. After asynchronous acquisition, the
-    // sender only rechecks current usability.
+    // The token provider owns credential lifetime policy. After asynchronous
+    // acquisition, the sender only rechecks current usability.
     const now = clock();
     if (!hasUsableAccessToken(accessToken, now)) {
       return report(dependencies.logger, { kind: 'transient-rejection' });

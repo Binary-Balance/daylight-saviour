@@ -75,14 +75,14 @@ and [APNs requests](https://developer.apple.com/documentation/usernotifications/
 The FCM sender requires an explicit message lifetime. A controlled smoke send
 is `immediate` and sets a zero TTL, so FCM delivers it at once or drops it. A
 queued send passes its expiry, and the sender sets the TTL from the whole
-seconds left just before the request. It rejects an expiry that has passed or
-is more than FCM's four-week maximum away, and sends nothing if the expiry
-passes while it acquires a credential. The APNs sender always sets
-`apns-expiration: 0`.
+seconds left just before the request. It rejects an invalid expiry or one more
+than FCM's four-week maximum away. If the expiry has passed by the time of the
+request, it sends nothing and reports the send as expired. The APNs sender
+always sets `apns-expiration: 0`.
 
 The senders do not yet implement the complete-operation deadline and
-final-authorization contract. Production timer composition, which derives each
-FCM expiry from the delivery window, remains in
+final-authorization contract. Production timer composition, which bounds each
+FCM expiry by the delivery window, Validity Horizon and Change Event, remains in
 [PUB-73](https://github.com/Binary-Balance/daylight-saviour/issues/73), with
 safe invocation logging in [PUB-134](https://github.com/Binary-Balance/daylight-saviour/issues/134)
 and network deadlines in [PUB-136](https://github.com/Binary-Balance/daylight-saviour/issues/136).
