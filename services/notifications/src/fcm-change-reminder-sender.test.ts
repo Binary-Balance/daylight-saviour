@@ -435,7 +435,7 @@ describe('FCM Change Reminder sender', () => {
       }),
     ],
   ] as const) {
-    it(`times out a request that ${name} after ten seconds by default`, async () => {
+    it(`times out a request that ${name} after ten seconds`, async () => {
       mock.timers.enable({ apis: ['setTimeout'] });
       try {
         let signal: AbortSignal | undefined;

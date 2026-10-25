@@ -81,7 +81,7 @@ request, it sends nothing and reports the send as expired. The APNs sender
 always sets `apns-expiration: 0`.
 
 The FCM transport bounds each request, including its response body, to 10
-seconds by default, and stops waiting even if `fetch` ignores the abort. A
+seconds, and stops waiting even if `fetch` ignores the abort. A
 request that fails or times out in transit is reported as uncertain, not as a
 rejection, because FCM may still have accepted it.
 

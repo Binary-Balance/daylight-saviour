@@ -5,7 +5,9 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 const fcmOrigin = 'https://fcm.googleapis.com';
 const maxFcmResponseCharacters = 64 * 1024;
 const maxFcmLifetimeMs = 28 * 24 * 60 * 60 * 1000;
-const defaultTransportTimeoutMs = 10_000;
+// Bounds every send, so no composition can leave one waiting on a stalled
+// connection. Matches the APNs transport and the FCM credential provider.
+const transportTimeoutMs = 10_000;
 const fcmProjectIdPattern = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 const installationIdPattern = /^[A-Za-z0-9_-]{32,128}$/;
 const deviceTokenPattern = /^[A-Za-z0-9_:.-]{20,4096}$/;
@@ -406,15 +408,7 @@ export function fcmSendEndpoint(projectId: string) {
   return new URL(`/v1/projects/${projectId}/messages:send`, fcmOrigin);
 }
 
-export function createFetchFcmHttpTransport(
-  fetch: FcmFetch,
-  options: { readonly timeoutMs?: number } = {},
-): FcmHttpTransport {
-  // Every send is bounded, so no composition can leave a send waiting on a
-  // stalled connection.
-  const timeoutMs = options.timeoutMs ?? defaultTransportTimeoutMs;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60_000)
-    throw new Error('Invalid FCM transport timeout');
+export function createFetchFcmHttpTransport(fetch: FcmFetch): FcmHttpTransport {
   return {
     async post(request) {
       const controller = new AbortController();
@@ -437,7 +431,7 @@ export function createFetchFcmHttpTransport(
         timer = setTimeout(() => {
           controller.abort();
           reject(new Error('FCM transport timeout'));
-        }, timeoutMs);
+        }, transportTimeoutMs);
       });
       try {
         return await Promise.race([operation(), timeout]);
