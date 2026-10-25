@@ -4,6 +4,7 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 
 const fcmOrigin = 'https://fcm.googleapis.com';
 const maxFcmResponseCharacters = 64 * 1024;
+const maxFcmLifetimeMs = 28 * 24 * 60 * 60 * 1000;
 const fcmProjectIdPattern = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 const installationIdPattern = /^[A-Za-z0-9_-]{32,128}$/;
 const deviceTokenPattern = /^[A-Za-z0-9_:.-]{20,4096}$/;
@@ -43,6 +44,16 @@ export interface FcmAccessTokenProvider {
   readonly getAccessToken: () => Promise<FcmAccessToken>;
 }
 
+/**
+ * FCM keeps an undelivered message for four weeks unless the request sets a
+ * TTL, so every send states its lifetime. `immediate` sends a zero TTL: FCM
+ * delivers at once or drops the message. `until` lets FCM hold the message
+ * no later than `expiresAt`.
+ */
+export type FcmMessageLifetime =
+  | { readonly kind: 'immediate' }
+  | { readonly kind: 'until'; readonly expiresAt: Date };
+
 export interface FcmChangeReminderPayload {
   readonly message: {
     readonly android: {
@@ -51,6 +62,7 @@ export interface FcmChangeReminderPayload {
         readonly sound: 'default';
       };
       readonly priority: 'HIGH';
+      readonly ttl: `${number}s`;
     };
     readonly data: ChangeReminderNotification;
     readonly notification: {
@@ -97,6 +109,7 @@ export interface FcmSubscriptionRemover {
 
 export type FcmChangeReminderLogEvent =
   | 'fcm-change-reminder-accepted'
+  | 'fcm-change-reminder-expired'
   | 'fcm-change-reminder-invalid-token-cleanup-failed'
   | 'fcm-change-reminder-malformed-response'
   | 'fcm-change-reminder-permanent-invalid-token'
@@ -109,6 +122,8 @@ export interface FcmChangeReminderLogger {
 
 export type FcmChangeReminderResult =
   | { readonly kind: 'accepted' }
+  /** The lifetime ended before the request could be made; nothing was sent. */
+  | { readonly kind: 'expired' }
   | { readonly kind: 'malformed-response' }
   | {
       readonly kind: 'permanent-invalid-token';
@@ -125,6 +140,7 @@ export interface FcmChangeReminderSender {
   readonly send: (
     subscription: FcmChangeReminderSubscription,
     facts: ReviewedChangeReminderFacts,
+    lifetime: FcmMessageLifetime,
   ) => Promise<FcmChangeReminderResult>;
 }
 
@@ -282,9 +298,31 @@ function assertReviewedFacts(
   }
 }
 
+function assertLifetime(lifetime: FcmMessageLifetime, now: Date) {
+  if (lifetime.kind === 'immediate') return;
+  if (lifetime.kind !== 'until' || !(lifetime.expiresAt instanceof Date))
+    throw new Error('Invalid FCM message lifetime');
+  const remainingMs = lifetime.expiresAt.getTime() - now.getTime();
+  // An expiry that has already passed is not invalid: a caller can race the
+  // clock. The send reports it as `expired` once the TTL is taken.
+  if (!Number.isFinite(remainingMs) || remainingMs > maxFcmLifetimeMs)
+    throw new Error('Invalid FCM message lifetime');
+}
+
+function messageTtl(
+  lifetime: FcmMessageLifetime,
+  now: Date,
+): `${number}s` | undefined {
+  if (lifetime.kind === 'immediate') return '0s';
+  const remainingMs = lifetime.expiresAt.getTime() - now.getTime();
+  // Round down so FCM never holds the message past its expiry.
+  return remainingMs > 0 ? `${Math.floor(remainingMs / 1000)}s` : undefined;
+}
+
 function buildPayload(
   subscription: FcmChangeReminderSubscription,
   facts: ReviewedChangeReminderFacts,
+  ttl: `${number}s`,
 ): FcmChangeReminderPayload {
   return {
     message: {
@@ -294,6 +332,7 @@ function buildPayload(
           sound: 'default',
         },
         priority: 'HIGH',
+        ttl,
       },
       data: {
         changeDirection: facts.changeDirection,
@@ -331,6 +370,7 @@ function report(
     FcmChangeReminderLogEvent
   > = {
     accepted: 'fcm-change-reminder-accepted',
+    expired: 'fcm-change-reminder-expired',
     'malformed-response': 'fcm-change-reminder-malformed-response',
     'permanent-invalid-token': 'fcm-change-reminder-permanent-invalid-token',
     'permanent-rejection': 'fcm-change-reminder-permanent-rejection',
@@ -413,7 +453,8 @@ export function createFcmChangeReminderSender(
 
   async function send(
     subscription: FcmChangeReminderSubscription,
-    payload: FcmChangeReminderPayload,
+    facts: ReviewedChangeReminderFacts,
+    lifetime: FcmMessageLifetime,
   ): Promise<FcmChangeReminderResult> {
     let accessToken: FcmAccessToken;
     try {
@@ -421,10 +462,17 @@ export function createFcmChangeReminderSender(
     } catch {
       return report(dependencies.logger, { kind: 'transient-rejection' });
     }
-    // The provider owns lifetime policy. After asynchronous acquisition, the
-    // sender only rechecks current usability.
-    if (!hasUsableAccessToken(accessToken, clock())) {
+    // The token provider owns credential lifetime policy. After asynchronous
+    // acquisition, the sender only rechecks current usability.
+    const now = clock();
+    if (!hasUsableAccessToken(accessToken, now)) {
       return report(dependencies.logger, { kind: 'transient-rejection' });
+    }
+    // Credential exchange takes time, so the TTL comes from the clock just
+    // before the request rather than from when the send was requested.
+    const ttl = messageTtl(lifetime, now);
+    if (ttl === undefined) {
+      return report(dependencies.logger, { kind: 'expired' });
     }
 
     let response: FcmHttpResponse;
@@ -432,7 +480,7 @@ export function createFcmChangeReminderSender(
       response = await dependencies.transport.post({
         accessToken: accessToken.value,
         endpoint,
-        payload,
+        payload: buildPayload(subscription, facts, ttl),
       });
     } catch {
       return report(dependencies.logger, { kind: 'transient-rejection' });
@@ -479,9 +527,10 @@ export function createFcmChangeReminderSender(
   }
 
   return {
-    async send(subscription, facts) {
+    async send(subscription, facts, lifetime) {
       assertReviewedFacts(subscription, facts);
-      return send(subscription, buildPayload(subscription, facts));
+      assertLifetime(lifetime, clock());
+      return send(subscription, facts, lifetime);
     },
   };
 }

@@ -13,6 +13,7 @@ import type {
 import type {
   FcmChangeReminderResult,
   FcmChangeReminderSubscription,
+  FcmMessageLifetime,
   ReviewedChangeReminderFacts,
 } from './fcm-change-reminder-sender.ts';
 
@@ -68,6 +69,7 @@ function runtime(
     readonly send?: (
       subscription: FcmChangeReminderSubscription,
       facts: ReviewedChangeReminderFacts,
+      lifetime: FcmMessageLifetime,
     ) => Promise<FcmChangeReminderResult>;
   } = {},
 ) {
@@ -207,13 +209,14 @@ describe('controlled Change Reminder smoke handler', () => {
     let actual:
       | {
           readonly facts: unknown;
+          readonly lifetime: unknown;
           readonly subscription: unknown;
         }
       | undefined;
     const result = await createControlledReminderSmokeHandler(
       runtime({
-        send: async (subscription, reviewedFacts) => {
-          actual = { facts: reviewedFacts, subscription };
+        send: async (subscription, reviewedFacts, lifetime) => {
+          actual = { facts: reviewedFacts, lifetime, subscription };
           return { kind: 'accepted' };
         },
       }),
@@ -231,6 +234,7 @@ describe('controlled Change Reminder smoke handler', () => {
         homeTimeZone: 'Australia/Sydney',
         timing: 'one-week',
       },
+      lifetime: { kind: 'immediate' },
       subscription: { deviceToken, installationId },
     });
   });

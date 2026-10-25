@@ -9,6 +9,7 @@ import {
   type FcmHttpRequest,
   type FcmHttpResponse,
   type FcmChangeReminderSubscription,
+  type FcmMessageLifetime,
   type FcmSubscriptionRemovalResult,
 } from './fcm-change-reminder-sender.ts';
 
@@ -28,6 +29,12 @@ const facts = {
   homeTimeZone: 'Australia/Sydney',
   timing: 'one-week' as const,
 };
+
+const immediate = { kind: 'immediate' } as const;
+
+function until(expiresAt: Date) {
+  return { kind: 'until', expiresAt } as const;
+}
 
 const unregisteredDetails = [
   {
@@ -108,7 +115,7 @@ describe('FCM Change Reminder sender', () => {
       ),
     );
 
-    const result = await test.instance.send(subscription, facts);
+    const result = await test.instance.send(subscription, facts, immediate);
 
     assert.deepEqual(result, { kind: 'accepted' });
     assert.deepEqual(test.requests, [
@@ -125,6 +132,7 @@ describe('FCM Change Reminder sender', () => {
                 sound: 'default',
               },
               priority: 'HIGH',
+              ttl: '0s',
             },
             data: {
               changeDirection: 'forward',
@@ -145,6 +153,188 @@ describe('FCM Change Reminder sender', () => {
     assert.deepEqual(test.logs, ['fcm-change-reminder-accepted']);
     assert.deepEqual(test.removalRequests, []);
   });
+
+  it('sends a queued message with the whole seconds left before expiry', async () => {
+    const test = sender(
+      response(
+        200,
+        JSON.stringify({ name: 'projects/portable-project/messages/1' }),
+      ),
+    );
+
+    const result = await test.instance.send(
+      subscription,
+      facts,
+      until(new Date(now.getTime() + 90_500)),
+    );
+
+    assert.deepEqual(result, { kind: 'accepted' });
+    assert.equal(test.requests[0]?.payload.message.android.ttl, '90s');
+  });
+
+  it('accepts the four-week FCM maximum lifetime', async () => {
+    const test = sender(
+      response(
+        200,
+        JSON.stringify({ name: 'projects/portable-project/messages/1' }),
+      ),
+    );
+
+    await test.instance.send(
+      subscription,
+      facts,
+      until(new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000)),
+    );
+
+    assert.equal(test.requests[0]?.payload.message.android.ttl, '2419200s');
+  });
+
+  it('takes the TTL from the clock after credential acquisition', async () => {
+    let currentTime = now.getTime();
+    const test = sender(
+      response(
+        200,
+        JSON.stringify({ name: 'projects/portable-project/messages/1' }),
+      ),
+      {
+        accessToken: async () => {
+          currentTime += 30_000;
+          return {
+            expiresAt: new Date(currentTime + 30 * 60 * 1000),
+            value: fullCredential,
+          };
+        },
+        clock: () => new Date(currentTime),
+      },
+    );
+
+    await test.instance.send(
+      subscription,
+      facts,
+      until(new Date(now.getTime() + 60_000)),
+    );
+
+    assert.equal(test.requests[0]?.payload.message.android.ttl, '30s');
+  });
+
+  it('sends a zero TTL while less than a second remains', async () => {
+    let currentTime = now.getTime();
+    const test = sender(
+      response(
+        200,
+        JSON.stringify({ name: 'projects/portable-project/messages/1' }),
+      ),
+      {
+        accessToken: async () => {
+          currentTime += 999;
+          return {
+            expiresAt: new Date(currentTime + 30 * 60 * 1000),
+            value: fullCredential,
+          };
+        },
+        clock: () => new Date(currentTime),
+      },
+    );
+
+    const result = await test.instance.send(
+      subscription,
+      facts,
+      until(new Date(now.getTime() + 1_000)),
+    );
+
+    assert.deepEqual(result, { kind: 'accepted' });
+    assert.equal(test.requests[0]?.payload.message.android.ttl, '0s');
+  });
+
+  it('sends nothing when the lifetime ends during credential acquisition', async () => {
+    let currentTime = now.getTime();
+    const test = sender(
+      response(
+        200,
+        JSON.stringify({ name: 'projects/portable-project/messages/1' }),
+      ),
+      {
+        accessToken: async () => {
+          currentTime += 1_000;
+          return {
+            expiresAt: new Date(currentTime + 30 * 60 * 1000),
+            value: fullCredential,
+          };
+        },
+        clock: () => new Date(currentTime),
+      },
+    );
+
+    const result = await test.instance.send(
+      subscription,
+      facts,
+      until(new Date(now.getTime() + 1_000)),
+    );
+
+    assert.deepEqual(result, { kind: 'expired' });
+    assert.deepEqual(test.requests, []);
+    assert.deepEqual(test.logs, ['fcm-change-reminder-expired']);
+  });
+
+  for (const [name, expiresAt] of [
+    ['at the current time', now],
+    ['in the past', new Date(now.getTime() - 1)],
+  ] as const) {
+    it(`reports an expiry ${name} as expired without sending`, async () => {
+      const test = sender(response(200, '{}'));
+
+      const result = await test.instance.send(
+        subscription,
+        facts,
+        until(expiresAt),
+      );
+
+      assert.deepEqual(result, { kind: 'expired' });
+      assert.deepEqual(test.requests, []);
+      assert.deepEqual(test.logs, ['fcm-change-reminder-expired']);
+    });
+  }
+
+  for (const [name, lifetime] of [
+    ['an invalid date', until(new Date(Number.NaN))],
+    [
+      'an expiry beyond the four-week FCM maximum',
+      until(new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000 + 1)),
+    ],
+    [
+      'a non-date expiry',
+      { kind: 'until', expiresAt: '2026-07-27T00:00:00.000Z' },
+    ],
+    [
+      'an unknown lifetime kind',
+      { kind: 'provider-default', expiresAt: new Date(now.getTime() + 1_000) },
+    ],
+  ] as const) {
+    it(`rejects ${name} before acquiring a credential`, async () => {
+      let accessTokenRequests = 0;
+      const test = sender(response(200, '{}'), {
+        accessToken: async () => {
+          accessTokenRequests += 1;
+          return {
+            expiresAt: new Date(now.getTime() + 30 * 60 * 1000),
+            value: fullCredential,
+          };
+        },
+      });
+
+      await assert.rejects(
+        test.instance.send(
+          subscription,
+          facts,
+          lifetime as unknown as FcmMessageLifetime,
+        ),
+        { message: 'Invalid FCM message lifetime' },
+      );
+      assert.equal(accessTokenRequests, 0);
+      assert.deepEqual(test.requests, []);
+      assert.deepEqual(test.logs, []);
+    });
+  }
 
   it('uses injected fetch for the FCM HTTP v1 request', async () => {
     let input: string | undefined;
@@ -175,6 +365,7 @@ describe('FCM Change Reminder sender', () => {
           android: {
             notification: { channel_id: 'change-reminders', sound: 'default' },
             priority: 'HIGH',
+            ttl: '0s',
           },
           data: {
             changeDirection: 'forward',
@@ -202,6 +393,7 @@ describe('FCM Change Reminder sender', () => {
           android: {
             notification: { channel_id: 'change-reminders', sound: 'default' },
             priority: 'HIGH',
+            ttl: '0s',
           },
           data: {
             changeDirection: 'forward',
@@ -232,7 +424,7 @@ describe('FCM Change Reminder sender', () => {
   it('classifies a transient provider rejection without removing a subscription', async () => {
     const test = sender(response(503, fcmError(503, 'UNAVAILABLE')));
 
-    const result = await test.instance.send(subscription, facts);
+    const result = await test.instance.send(subscription, facts, immediate);
 
     assert.deepEqual(result, { kind: 'transient-rejection' });
     assert.deepEqual(test.removalRequests, []);
@@ -244,7 +436,7 @@ describe('FCM Change Reminder sender', () => {
       response(404, fcmError(404, 'NOT_FOUND', unregisteredDetails)),
     );
 
-    const result = await test.instance.send(subscription, facts);
+    const result = await test.instance.send(subscription, facts, immediate);
 
     assert.deepEqual(result, {
       kind: 'permanent-invalid-token',
@@ -259,7 +451,7 @@ describe('FCM Change Reminder sender', () => {
   it('keeps a subscription when a provider response is malformed', async () => {
     const test = sender(response(200, sensitiveProviderResponse));
 
-    const result = await test.instance.send(subscription, facts);
+    const result = await test.instance.send(subscription, facts, immediate);
 
     assert.deepEqual(result, { kind: 'malformed-response' });
     assert.deepEqual(test.removalRequests, []);
@@ -269,7 +461,7 @@ describe('FCM Change Reminder sender', () => {
   it('rejects unknown provider status values as malformed', async () => {
     const test = sender(response(400, fcmError(400, 'NOT_A_GOOGLE_STATUS')));
 
-    const result = await test.instance.send(subscription, facts);
+    const result = await test.instance.send(subscription, facts, immediate);
 
     assert.deepEqual(result, { kind: 'malformed-response' });
     assert.deepEqual(test.removalRequests, []);
@@ -285,7 +477,7 @@ describe('FCM Change Reminder sender', () => {
         response(status, fcmError(status, providerStatus, unregisteredDetails)),
       );
 
-      const result = await test.instance.send(subscription, facts);
+      const result = await test.instance.send(subscription, facts, immediate);
 
       assert.deepEqual(result, { kind: 'malformed-response' });
       assert.deepEqual(test.removalRequests, []);
@@ -296,7 +488,7 @@ describe('FCM Change Reminder sender', () => {
   it('distinguishes a permanent non-token provider rejection', async () => {
     const test = sender(response(400, fcmError(400, 'INVALID_ARGUMENT')));
 
-    const result = await test.instance.send(subscription, facts);
+    const result = await test.instance.send(subscription, facts, immediate);
 
     assert.deepEqual(result, { kind: 'permanent-rejection' });
     assert.deepEqual(test.removalRequests, []);
@@ -311,7 +503,7 @@ describe('FCM Change Reminder sender', () => {
     ] as const) {
       const test = sender(response(status, fcmError(status, providerStatus)));
 
-      const result = await test.instance.send(subscription, facts);
+      const result = await test.instance.send(subscription, facts, immediate);
 
       assert.deepEqual(result, { kind: 'transient-rejection' });
       assert.deepEqual(test.removalRequests, []);
@@ -328,7 +520,7 @@ describe('FCM Change Reminder sender', () => {
     ] as const) {
       const test = sender(response(status, fcmError(status, providerStatus)));
 
-      const result = await test.instance.send(subscription, facts);
+      const result = await test.instance.send(subscription, facts, immediate);
 
       assert.deepEqual(result, { kind: 'permanent-rejection' });
       assert.deepEqual(test.removalRequests, []);
@@ -343,7 +535,7 @@ describe('FCM Change Reminder sender', () => {
       },
     });
 
-    const result = await test.instance.send(subscription, facts);
+    const result = await test.instance.send(subscription, facts, immediate);
 
     assert.deepEqual(result, { kind: 'transient-rejection' });
     assert.deepEqual(test.requests, []);
@@ -371,7 +563,7 @@ describe('FCM Change Reminder sender', () => {
       },
     );
 
-    assert.deepEqual(await test.instance.send(subscription, facts), {
+    assert.deepEqual(await test.instance.send(subscription, facts, immediate), {
       kind: 'transient-rejection',
     });
     assert.deepEqual(test.requests, []);
@@ -391,7 +583,7 @@ describe('FCM Change Reminder sender', () => {
       },
     );
 
-    assert.deepEqual(await test.instance.send(subscription, facts), {
+    assert.deepEqual(await test.instance.send(subscription, facts, immediate), {
       kind: 'accepted',
     });
     assert.equal(test.requests.length, 1);
@@ -402,7 +594,7 @@ describe('FCM Change Reminder sender', () => {
       response(404, fcmError(404, 'NOT_FOUND', unregisteredDetails)),
     );
 
-    await test.instance.send(subscription, facts);
+    await test.instance.send(subscription, facts, immediate);
 
     const serialisedLogs = JSON.stringify(test.logs);
     assert.doesNotMatch(serialisedLogs, new RegExp(fullDeviceToken));
@@ -421,7 +613,7 @@ describe('FCM Change Reminder sender', () => {
       },
     );
 
-    const result = await test.instance.send(subscription, facts);
+    const result = await test.instance.send(subscription, facts, immediate);
 
     assert.deepEqual(result, {
       kind: 'permanent-invalid-token',
@@ -447,7 +639,7 @@ describe('FCM Change Reminder sender', () => {
       },
     );
 
-    const result = await test.instance.send(subscription, facts);
+    const result = await test.instance.send(subscription, facts, immediate);
 
     assert.deepEqual(result, {
       kind: 'permanent-invalid-token',
