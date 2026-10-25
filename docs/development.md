@@ -354,6 +354,10 @@ shape:
   run.
 - Make a test fail, not hang, when awaited work never settles. Seshat treats a
   timeout as unresolved and withholds the mutation score.
+- Keep `null` out of background work that tests do not await. A mutant that
+  removes a `?.` there throws an uncaught error, which Seshat attributes to a
+  test only if that test also fails an assertion; otherwise it stops the run.
+  The token refresh loop uses an explicit `skipped` result for this reason.
 
 Some mutants hang no matter how the tests are written. Removing
 `index += decoded.width;` from `strictUtf8` in the contracts package makes its

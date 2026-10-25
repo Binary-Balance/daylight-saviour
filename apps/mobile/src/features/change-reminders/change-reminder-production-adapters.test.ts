@@ -1383,6 +1383,33 @@ describe('production Change Reminder adapters', () => {
     expect(outcomes).toEqual([]);
   });
 
+  it('refreshes a token queued behind an unchanged token', async () => {
+    let listener: ((token: { readonly data: unknown }) => void) | undefined;
+    const outcomes: unknown[] = [];
+    const test = harness();
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((nextListener) => {
+        listener = nextListener;
+        return { remove: jest.fn() };
+      });
+    await test.adapters.enable('Australia/Sydney');
+    test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
+    const replacement = 'fcm-token:replacement_valid.characters-456';
+    listener?.({ data: 'fcm-token:with_valid.characters-123' });
+    listener?.({ data: replacement });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      deviceToken: replacement,
+      state: 'registered',
+    });
+    expect(outcomes).toEqual([{ kind: 'succeeded' }]);
+  });
+
   it('keeps failed token refresh pending and retries the same token', async () => {
     const fetchImplementation = jest
       .fn()

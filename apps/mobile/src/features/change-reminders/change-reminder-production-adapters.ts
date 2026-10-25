@@ -24,6 +24,13 @@ const registrationKey = 'change-reminder-registration-v2';
 const requestTimeoutMs = 10_000;
 const notificationChannelId = 'change-reminders';
 const maximumAttemptGeneration = 2_147_483_647;
+// A refresh with nothing to do is an explicit outcome rather than null, so
+// the background refresh loop has no null result to dereference. That loop
+// is not awaited, so a throw there would be an unhandled rejection.
+const skippedTokenRefresh = { kind: 'skipped' } as const;
+type TokenRefreshOutcome =
+  | ChangeReminderTokenRefreshResult
+  | typeof skippedTokenRefresh;
 
 interface PermissionResult {
   readonly canAskAgain: boolean;
@@ -604,22 +611,24 @@ export function createProductionChangeReminderAdapters({
   async function performTokenRefresh(
     homeTimeZone: string,
     token: unknown,
-  ): Promise<ChangeReminderTokenRefreshResult | null> {
-    if (platform === 'web' || !validDeviceToken(token)) return null;
+  ): Promise<TokenRefreshOutcome> {
+    if (platform === 'web' || !validDeviceToken(token)) {
+      return skippedTokenRefresh;
+    }
     try {
       const saved = await loadStoredState();
-      if (saved === null) return null;
+      if (saved === null) return skippedTokenRefresh;
       const currentHomeTimeZone =
         latestHomeTimeZoneIntent ??
         (saved.homeTimeZone === homeTimeZone ? homeTimeZone : null);
-      if (currentHomeTimeZone === null) return null;
-      if (saved.state === 'pending-delete') return null;
+      if (currentHomeTimeZone === null) return skippedTokenRefresh;
+      if (saved.state === 'pending-delete') return skippedTokenRefresh;
       if (
         saved.state === 'registered' &&
         saved.version !== 2 &&
         saved.deviceToken === token
       ) {
-        return null;
+        return skippedTokenRefresh;
       }
       if (
         (
@@ -699,12 +708,10 @@ export function createProductionChangeReminderAdapters({
           const result = await enqueue(() =>
             currentListenerGeneration === tokenListenerGeneration
               ? performTokenRefresh(homeTimeZone, currentToken)
-              : Promise.resolve(null),
+              : Promise.resolve(skippedTokenRefresh),
           );
-          if (result?.kind === 'succeeded') {
-            lastRefreshedToken = currentToken;
-            onResult(result);
-          } else if (result?.kind === 'failed') {
+          if (result.kind !== 'skipped') {
+            if (result.kind === 'succeeded') lastRefreshedToken = currentToken;
             onResult(result);
           }
         } finally {
