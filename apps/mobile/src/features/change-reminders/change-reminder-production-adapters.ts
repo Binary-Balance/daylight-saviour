@@ -24,13 +24,6 @@ const registrationKey = 'change-reminder-registration-v2';
 const requestTimeoutMs = 10_000;
 const notificationChannelId = 'change-reminders';
 const maximumAttemptGeneration = 2_147_483_647;
-// A refresh with nothing to do is an explicit outcome rather than null, so
-// the background refresh loop has no null result to dereference. That loop
-// is not awaited, so a throw there would be an unhandled rejection.
-const skippedTokenRefresh = { kind: 'skipped' } as const;
-type TokenRefreshOutcome =
-  | ChangeReminderTokenRefreshResult
-  | typeof skippedTokenRefresh;
 
 interface PermissionResult {
   readonly canAskAgain: boolean;
@@ -611,24 +604,22 @@ export function createProductionChangeReminderAdapters({
   async function performTokenRefresh(
     homeTimeZone: string,
     token: unknown,
-  ): Promise<TokenRefreshOutcome> {
-    if (platform === 'web' || !validDeviceToken(token)) {
-      return skippedTokenRefresh;
-    }
+  ): Promise<ChangeReminderTokenRefreshResult | null> {
+    if (platform === 'web' || !validDeviceToken(token)) return null;
     try {
       const saved = await loadStoredState();
-      if (saved === null) return skippedTokenRefresh;
+      if (saved === null) return null;
       const currentHomeTimeZone =
         latestHomeTimeZoneIntent ??
         (saved.homeTimeZone === homeTimeZone ? homeTimeZone : null);
-      if (currentHomeTimeZone === null) return skippedTokenRefresh;
-      if (saved.state === 'pending-delete') return skippedTokenRefresh;
+      if (currentHomeTimeZone === null) return null;
+      if (saved.state === 'pending-delete') return null;
       if (
         saved.state === 'registered' &&
         saved.version !== 2 &&
         saved.deviceToken === token
       ) {
-        return skippedTokenRefresh;
+        return null;
       }
       if (
         (
@@ -638,6 +629,7 @@ export function createProductionChangeReminderAdapters({
           })
         ).kind === 'enabled'
       ) {
+        lastRefreshedToken = token;
         return { kind: 'succeeded' };
       }
     } catch {
@@ -708,12 +700,13 @@ export function createProductionChangeReminderAdapters({
           const result = await enqueue(() =>
             currentListenerGeneration === tokenListenerGeneration
               ? performTokenRefresh(homeTimeZone, currentToken)
-              : Promise.resolve(skippedTokenRefresh),
+              : Promise.resolve(null),
           );
-          if (result.kind !== 'skipped') {
-            if (result.kind === 'succeeded') lastRefreshedToken = currentToken;
-            onResult(result);
-          }
+          // Nothing awaits this loop, so it only compares the result with
+          // null. Reading result.kind here would turn a result that a Seshat
+          // mutant leaves empty into an unhandled rejection, which no test
+          // can attribute, and Seshat would stop the mutation run.
+          if (result !== null) onResult(result);
         } finally {
           refreshingToken = null;
         }
