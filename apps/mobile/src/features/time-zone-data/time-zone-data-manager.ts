@@ -223,10 +223,6 @@ async function responseBytes(response: HttpResponse, maximum: number) {
 function beforeDeadline<T>(signal: AbortSignal, work: Promise<T>) {
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(new TimeZoneDataPackTransportError());
-    if (signal.aborted) {
-      abort();
-      return;
-    }
     signal.addEventListener('abort', abort, { once: true });
     work
       .then(resolve, reject)

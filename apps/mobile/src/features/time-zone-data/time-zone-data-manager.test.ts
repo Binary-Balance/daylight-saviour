@@ -446,119 +446,124 @@ describe('remote build configuration', () => {
       ).toBeNull();
     },
   );
+});
 
-  describe('refresh deadline', () => {
-    beforeEach(() => jest.useFakeTimers());
-    afterEach(() => jest.useRealTimers());
+describe('Time-Zone Data Pack refresh deadline', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
 
-    // Records when a refresh settles, so a refresh that never settles fails
-    // an assertion instead of hanging the test.
-    function tracked(refresh: Promise<void>) {
-      const state = { settled: false };
-      void refresh.then(() => {
-        state.settled = true;
-      });
-      return state;
-    }
+  // Records when a refresh settles, so a refresh that never settles fails
+  // an assertion instead of hanging the test.
+  function tracked(refresh: Promise<void>) {
+    const state = { settled: false };
+    void refresh.then(() => {
+      state.settled = true;
+    });
+    return state;
+  }
 
-    // Like a network implementation that ignores abort and never settles.
-    function neverSettles(signals: AbortSignal[]) {
-      return (_url: string, init: { readonly signal: AbortSignal }) => {
-        signals.push(init.signal);
-        return new Promise<never>(() => undefined);
-      };
-    }
+  // Like a network implementation that ignores abort and never settles.
+  function neverSettles(signals: AbortSignal[]) {
+    return (_url: string, init: { readonly signal: AbortSignal }) => {
+      signals.push(init.signal);
+      return new Promise<never>(() => undefined);
+    };
+  }
 
-    it('fails a manifest request that never returns headers at the deadline', async () => {
-      const signals: AbortSignal[] = [];
-      const manager = managerWith({
-        request: jest.fn(neverSettles(signals)),
-      });
-
-      const refresh = tracked(manager.refresh('cold-launch'));
-      await jest.advanceTimersByTimeAsync(29_999);
-      expect(refresh.settled).toBe(false);
-      expect(signals[0]?.aborted).toBe(false);
-      await jest.advanceTimersByTimeAsync(1);
-
-      expect(refresh.settled).toBe(true);
-      expect(signals[0]?.aborted).toBe(true);
-      expect(manager.getSnapshot()).toMatchObject({
-        freshness: 'offline-valid',
-        lastError: 'refresh-failed',
-        source: 'bundled',
-      });
+  it('fails a manifest request that never returns headers at the deadline', async () => {
+    const signals: AbortSignal[] = [];
+    const manager = managerWith({
+      request: jest.fn(neverSettles(signals)),
     });
 
-    it('fails a pack whose body stalls after its headers', async () => {
+    const refresh = tracked(manager.refresh('cold-launch'));
+    await jest.advanceTimersByTimeAsync(29_999);
+    expect(refresh.settled).toBe(false);
+    expect(signals[0]?.aborted).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+
+    expect(refresh.settled).toBe(true);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'offline-valid',
+      lastError: 'refresh-failed',
+      source: 'bundled',
+    });
+  });
+
+  it.each([
+    ['manifest', 0],
+    ['pack', 1],
+  ])(
+    'fails a %s whose body stalls after its headers',
+    async (_name, stalledCall) => {
       const artifacts = signedArtifacts();
+      const responses = [
+        response(200, JSON.stringify(artifacts.manifest)),
+        response(200, artifacts.bytes),
+      ];
       const signals: AbortSignal[] = [];
-      const request = jest
-        .fn()
-        .mockImplementationOnce(async () =>
-          response(200, JSON.stringify(artifacts.manifest)),
-        )
-        .mockImplementationOnce(
-          async (_url: string, init: { readonly signal: AbortSignal }) => {
-            signals.push(init.signal);
-            return {
-              ...response(200),
-              arrayBuffer: () => new Promise<never>(() => undefined),
-            };
-          },
-        );
+      const request = jest.fn(
+        async (_url: string, init: { readonly signal: AbortSignal }) => {
+          const call = signals.push(init.signal) - 1;
+          return call === stalledCall
+            ? {
+                ...responses[call]!,
+                arrayBuffer: () => new Promise<never>(() => undefined),
+              }
+            : responses[call]!;
+        },
+      );
       const manager = managerWith({ request });
 
       const refresh = tracked(manager.refresh('manual'));
       await jest.advanceTimersByTimeAsync(30_000);
 
       expect(refresh.settled).toBe(true);
-      expect(signals[0]?.aborted).toBe(true);
+      expect(signals[stalledCall]?.aborted).toBe(true);
       expect(manager.getSnapshot()).toMatchObject({
         freshness: 'retry-failed',
         lastError: 'refresh-failed',
         source: 'bundled',
       });
+    },
+  );
+
+  it('lets a manual retry start a new check and ignores the late response', async () => {
+    const artifacts = signedArtifacts();
+    let respondLate: (late: ReturnType<typeof response>) => void = () =>
+      undefined;
+    const request = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            respondLate = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(response(200, JSON.stringify(artifacts.manifest)))
+      .mockResolvedValueOnce(response(200, artifacts.bytes));
+    const manager = managerWith({ request });
+
+    const first = tracked(manager.refresh('foreground'));
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(first.settled).toBe(true);
+
+    await manager.refresh('manual');
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'current',
+      pack: { packVersion: '2026d-australian-v1' },
+      source: 'remote',
     });
 
-    it('lets a manual retry start a new check and ignores the late response', async () => {
-      const artifacts = signedArtifacts();
-      let respondLate: (late: ReturnType<typeof response>) => void = () =>
-        undefined;
-      const request = jest
-        .fn()
-        .mockImplementationOnce(
-          () =>
-            new Promise((resolve) => {
-              respondLate = resolve;
-            }),
-        )
-        .mockResolvedValueOnce(
-          response(200, JSON.stringify(artifacts.manifest)),
-        )
-        .mockResolvedValueOnce(response(200, artifacts.bytes));
-      const manager = managerWith({ request });
-
-      const first = tracked(manager.refresh('foreground'));
-      await jest.advanceTimersByTimeAsync(30_000);
-      expect(first.settled).toBe(true);
-
-      await manager.refresh('manual');
-      expect(manager.getSnapshot()).toMatchObject({
-        freshness: 'current',
-        pack: { packVersion: '2026d-australian-v1' },
-        source: 'remote',
-      });
-
-      respondLate(response(500));
-      await jest.advanceTimersByTimeAsync(0);
-      expect(request).toHaveBeenCalledTimes(3);
-      expect(manager.getSnapshot()).toMatchObject({
-        freshness: 'current',
-        lastError: null,
-        pack: { packVersion: '2026d-australian-v1' },
-        source: 'remote',
-      });
+    respondLate(response(500));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'current',
+      lastError: null,
+      pack: { packVersion: '2026d-australian-v1' },
+      source: 'remote',
     });
   });
 });
