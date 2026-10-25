@@ -704,8 +704,9 @@ export function createProductionChangeReminderAdapters({
           );
           // Nothing awaits this loop, so it only compares the result with
           // null. Reading result.kind here would turn a result that a Seshat
-          // mutant leaves empty into an unhandled rejection, which no test
-          // can attribute, and Seshat would stop the mutation run.
+          // mutant leaves empty into an unhandled rejection. Seshat counts
+          // that as an execution error unless the test also fails an
+          // assertion, and the mutation run would stop.
           if (result !== null) onResult(result);
         } finally {
           refreshingToken = null;
