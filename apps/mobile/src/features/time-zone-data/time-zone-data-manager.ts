@@ -219,8 +219,9 @@ async function responseBytes(response: HttpResponse, maximum: number) {
 }
 
 // Ends the wait at the deadline even when the network implementation ignores
-// the abort and never settles. Call it only while the deadline is pending: a
-// listener added after the abort never fires, so no await may precede a call.
+// the abort and never settles. A listener added after the abort never fires,
+// so between starting the timer and each call, run only synchronous code or
+// an earlier beforeDeadline wait.
 function beforeDeadline<T>(signal: AbortSignal, work: Promise<T>) {
   return Promise.race([
     work,
