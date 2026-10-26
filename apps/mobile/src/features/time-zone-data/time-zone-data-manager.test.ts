@@ -462,34 +462,42 @@ describe('Time-Zone Data Pack refresh deadline', () => {
     return state;
   }
 
-  // Like a network implementation that ignores abort and never settles.
-  function neverSettles(signals: AbortSignal[]) {
-    return (_url: string, init: { readonly signal: AbortSignal }) => {
-      signals.push(init.signal);
-      return new Promise<never>(() => undefined);
-    };
-  }
+  it.each([
+    ['manifest', 0],
+    ['pack', 1],
+  ])(
+    'fails a %s request that never returns headers at the deadline',
+    async (_name, stalledCall) => {
+      const artifacts = signedArtifacts();
+      const signals: AbortSignal[] = [];
+      const request = jest.fn(
+        (_url: string, init: { readonly signal: AbortSignal }) => {
+          const call = signals.push(init.signal) - 1;
+          // Like a network implementation that ignores abort and never settles.
+          return call === stalledCall
+            ? new Promise<never>(() => undefined)
+            : Promise.resolve(
+                response(200, JSON.stringify(artifacts.manifest)),
+              );
+        },
+      );
+      const manager = managerWith({ request });
 
-  it('fails a manifest request that never returns headers at the deadline', async () => {
-    const signals: AbortSignal[] = [];
-    const manager = managerWith({
-      request: jest.fn(neverSettles(signals)),
-    });
+      const refresh = tracked(manager.refresh('cold-launch'));
+      await jest.advanceTimersByTimeAsync(29_999);
+      expect(refresh.settled).toBe(false);
+      expect(signals[stalledCall]?.aborted).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
 
-    const refresh = tracked(manager.refresh('cold-launch'));
-    await jest.advanceTimersByTimeAsync(29_999);
-    expect(refresh.settled).toBe(false);
-    expect(signals[0]?.aborted).toBe(false);
-    await jest.advanceTimersByTimeAsync(1);
-
-    expect(refresh.settled).toBe(true);
-    expect(signals[0]?.aborted).toBe(true);
-    expect(manager.getSnapshot()).toMatchObject({
-      freshness: 'offline-valid',
-      lastError: 'refresh-failed',
-      source: 'bundled',
-    });
-  });
+      expect(refresh.settled).toBe(true);
+      expect(signals[stalledCall]?.aborted).toBe(true);
+      expect(manager.getSnapshot()).toMatchObject({
+        freshness: 'offline-valid',
+        lastError: 'refresh-failed',
+        source: 'bundled',
+      });
+    },
+  );
 
   it.each([
     ['manifest', 0],
