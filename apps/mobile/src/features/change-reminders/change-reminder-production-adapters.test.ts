@@ -1,4 +1,4 @@
-import { AndroidImportance } from 'expo-notifications';
+import { AndroidImportance, PermissionStatus } from 'expo-notifications';
 
 import { createProductionChangeReminderAdapters } from './change-reminder-production-adapters';
 import { createChangeReminderSession } from './change-reminder-session';
@@ -39,10 +39,18 @@ function harness({
   currentToken = 'fcm-token:with_valid.characters-123',
   deleteItemImplementation = async () => undefined,
   endpoint = 'https://reminders.example.test/reminder-subscriptions',
-  existingPermission = { canAskAgain: true, granted: true },
+  existingPermission = {
+    canAskAgain: true,
+    granted: true,
+    status: PermissionStatus.GRANTED,
+  },
   fetchImplementation = async () => Response.json(responseBody),
   platform = 'android',
-  requestedPermission = { canAskAgain: true, granted: true },
+  requestedPermission = {
+    canAskAgain: true,
+    granted: true,
+    status: PermissionStatus.GRANTED,
+  },
   setItemImplementation = async () => undefined,
   storage = { value: null },
   timeoutMs = 100,
@@ -54,12 +62,14 @@ function harness({
   readonly existingPermission?: {
     readonly canAskAgain: boolean;
     readonly granted: boolean;
+    readonly status: PermissionStatus;
   };
   readonly fetchImplementation?: typeof fetch;
   readonly platform?: string;
   readonly requestedPermission?: {
     readonly canAskAgain: boolean;
     readonly granted: boolean;
+    readonly status: PermissionStatus;
   };
   readonly setItemImplementation?: (
     key: string,
@@ -173,7 +183,11 @@ describe('production Change Reminder adapters', () => {
   it('requests iOS permission before registering its device token', async () => {
     const test = harness({
       currentToken: iosDeviceToken,
-      existingPermission: { canAskAgain: true, granted: false },
+      existingPermission: {
+        canAskAgain: true,
+        granted: false,
+        status: PermissionStatus.UNDETERMINED,
+      },
       platform: 'ios',
     });
 
@@ -198,8 +212,16 @@ describe('production Change Reminder adapters', () => {
 
   it('uses returned canAskAgain for first denial', async () => {
     const test = harness({
-      existingPermission: { canAskAgain: true, granted: false },
-      requestedPermission: { canAskAgain: true, granted: false },
+      existingPermission: {
+        canAskAgain: true,
+        granted: false,
+        status: PermissionStatus.UNDETERMINED,
+      },
+      requestedPermission: {
+        canAskAgain: true,
+        granted: false,
+        status: PermissionStatus.DENIED,
+      },
     });
     await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
       kind: 'permission-denied',
@@ -213,7 +235,11 @@ describe('production Change Reminder adapters', () => {
 
   it('does not prompt when existing permission is OS-blocked', async () => {
     const test = harness({
-      existingPermission: { canAskAgain: false, granted: false },
+      existingPermission: {
+        canAskAgain: false,
+        granted: false,
+        status: PermissionStatus.DENIED,
+      },
     });
     await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
       kind: 'os-blocked',
@@ -228,8 +254,16 @@ describe('production Change Reminder adapters', () => {
 
   it('uses returned OS-blocked status after a prompt', async () => {
     const test = harness({
-      existingPermission: { canAskAgain: true, granted: false },
-      requestedPermission: { canAskAgain: false, granted: false },
+      existingPermission: {
+        canAskAgain: true,
+        granted: false,
+        status: PermissionStatus.UNDETERMINED,
+      },
+      requestedPermission: {
+        canAskAgain: false,
+        granted: false,
+        status: PermissionStatus.DENIED,
+      },
     });
     await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
       kind: 'os-blocked',
@@ -449,9 +483,66 @@ describe('production Change Reminder adapters', () => {
     });
   });
 
+  it('discards a saved record from a previous install without network work', async () => {
+    const registered = harness();
+    await registered.adapters.enable('Australia/Sydney');
+    const pending = harness({
+      fetchImplementation: async () => {
+        throw new TypeError('Network request failed');
+      },
+    });
+    await pending.adapters.enable('Australia/Sydney');
+    expect(JSON.parse(pending.stored() ?? '')).toMatchObject({
+      state: 'pending',
+    });
+
+    for (const saved of [registered.stored(), pending.stored()]) {
+      const reinstalled = harness({
+        existingPermission: {
+          canAskAgain: true,
+          granted: false,
+          status: PermissionStatus.UNDETERMINED,
+        },
+        platform: 'ios',
+        storage: { value: saved },
+      });
+      await expect(reinstalled.adapters.restore()).resolves.toEqual({
+        kind: 'unregistered',
+      });
+      expect(reinstalled.stored()).toBeNull();
+      expect(reinstalled.dependencies.fetch).not.toHaveBeenCalled();
+      expect(
+        reinstalled.dependencies.notifications.getDevicePushTokenAsync,
+      ).not.toHaveBeenCalled();
+    }
+  });
+
+  it('keeps a registration whose permission was later denied', async () => {
+    const test = harness();
+    await test.adapters.enable('Australia/Sydney');
+    const saved = test.stored();
+    const revoked = harness({
+      existingPermission: {
+        canAskAgain: false,
+        granted: false,
+        status: PermissionStatus.DENIED,
+      },
+      storage: { value: saved },
+    });
+    await expect(revoked.adapters.restore()).resolves.toMatchObject({
+      kind: 'registered',
+      notificationPermissionGranted: false,
+    });
+    expect(revoked.stored()).toBe(saved);
+  });
+
   it('updates the saved zone through the authenticated registration without permission work', async () => {
     const test = harness({
-      existingPermission: { canAskAgain: false, granted: false },
+      existingPermission: {
+        canAskAgain: false,
+        granted: false,
+        status: PermissionStatus.DENIED,
+      },
       fetchImplementation: jest.fn(
         async (_input: URL | RequestInfo) =>
           new Response(null, { status: 204 }),
