@@ -42,6 +42,7 @@ Every ADR is currently accepted. Status is recorded in each ADR's front matter.
 - [ADR 0009: Use a minimal serverless Azure footprint](adr/0009-use-minimal-serverless-azure-footprint.md)
 - [ADR 0010: Protect registration with installation credentials](adr/0010-protect-registration-with-installation-credentials.md)
 - [ADR 0016: Provide an audited reminder dispatch kill switch](adr/0016-provide-a-reminder-dispatch-kill-switch.md)
+- [ADR 0022: Expire silent reminder subscriptions after warning](adr/0022-expire-silent-reminder-subscriptions-after-warning.md)
 
 ### Product experience and release quality
 

@@ -22,5 +22,5 @@ Daylight Saviour will send Change Reminders from lightweight Azure-hosted infras
 - Initial opt-in explains both reminder timings before requesting OS permission; one-week and one-day reminders default on after explicit confirmation.
 - Users can disable either timing independently. Disabling both deletes the remote subscription data, while later re-enabling either timing creates a fresh registration.
 - If OS notification permission remains available, re-opt-in completes in-app. If permission is blocked at OS level, the app explains the state and links to system settings rather than claiming reminders are active.
-- Home Time Zones with no scheduled Change Event may retain a dormant subscription so later verified rules can activate ordinary one-week or one-day reminders.
+- Home Time Zones with no scheduled Change Event may retain a dormant subscription so later verified rules can activate ordinary one-week or one-day reminders. It expires after 24 months without contact from the app (ADR 0022).
 - A newly introduced event never causes catch-up delivery for a reminder timing whose Delivery Window has already passed.
