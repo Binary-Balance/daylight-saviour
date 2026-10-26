@@ -503,7 +503,7 @@ describe('Time-Zone Data Pack refresh deadline', () => {
     ['manifest', 0],
     ['pack', 1],
   ])(
-    'fails a %s whose body stalls after its headers',
+    'fails a %s whose body stalls after its headers as a transport loss',
     async (_name, stalledCall) => {
       const artifacts = signedArtifacts();
       const responses = [
@@ -524,13 +524,13 @@ describe('Time-Zone Data Pack refresh deadline', () => {
       );
       const manager = managerWith({ request });
 
-      const refresh = tracked(manager.refresh('manual'));
+      const refresh = tracked(manager.refresh('cold-launch'));
       await jest.advanceTimersByTimeAsync(30_000);
 
       expect(refresh.settled).toBe(true);
       expect(signals[stalledCall]?.aborted).toBe(true);
       expect(manager.getSnapshot()).toMatchObject({
-        freshness: 'retry-failed',
+        freshness: 'offline-valid',
         lastError: 'refresh-failed',
         source: 'bundled',
       });
