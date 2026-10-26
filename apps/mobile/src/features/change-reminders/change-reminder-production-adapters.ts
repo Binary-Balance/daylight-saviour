@@ -28,6 +28,7 @@ const maximumAttemptGeneration = 2_147_483_647;
 interface PermissionResult {
   readonly canAskAgain: boolean;
   readonly granted: boolean;
+  readonly status: Notifications.PermissionStatus;
 }
 
 interface ProductionAdapterDependencies {
@@ -784,6 +785,16 @@ export function createProductionChangeReminderAdapters({
           },
         };
       }
+      const permission = await notifications.getPermissionsAsync();
+      // Enabling saves nothing until permission is granted, so a record beside
+      // never-asked permission belongs to a previous install: the iOS keychain
+      // survives uninstall. Reusing it would attach this install's token to a
+      // registration the provider is already retiring as unregistered. A
+      // pending deletion above is kept: finishing it honours the user's intent.
+      if (permission.status === Notifications.PermissionStatus.UNDETERMINED) {
+        await secureStore.deleteItemAsync(registrationKey);
+        return { kind: 'unregistered' };
+      }
       if (saved.state === 'pending' || saved.state === 'pending-update') {
         return {
           homeTimeZone: saved.homeTimeZone,
@@ -815,7 +826,6 @@ export function createProductionChangeReminderAdapters({
             : {}),
         };
       }
-      const permission = await notifications.getPermissionsAsync();
       if (!permission.granted) {
         return {
           kind: 'registered',
