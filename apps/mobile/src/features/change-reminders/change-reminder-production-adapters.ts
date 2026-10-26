@@ -395,6 +395,24 @@ export function createProductionChangeReminderAdapters({
     await secureStore.setItemAsync(registrationKey, JSON.stringify(state));
   }
 
+  function deleteRegistration(
+    registrationEndpoint: string,
+    registration: {
+      readonly credential: string;
+      readonly installationId: string;
+    },
+  ) {
+    return fetchWithTimeout(
+      request,
+      updateEndpoint(registrationEndpoint, registration.installationId),
+      {
+        headers: { authorization: `Bearer ${registration.credential}` },
+        method: 'DELETE',
+      },
+      timeoutMs,
+    );
+  }
+
   async function synchronize(
     homeTimeZone: string,
     deviceToken: string,
@@ -788,10 +806,20 @@ export function createProductionChangeReminderAdapters({
       const permission = await notifications.getPermissionsAsync();
       // Enabling saves nothing until permission is granted, so a record beside
       // never-asked permission belongs to a previous install: the iOS keychain
-      // survives uninstall. Reusing it would attach this install's token to a
-      // registration the provider is already retiring as unregistered. A
-      // pending deletion above is kept: finishing it honours the user's intent.
+      // survives uninstall. Delete its server registration rather than wait
+      // for the provider to reject the old token, which Apple does not
+      // guarantee. A pending deletion
+      // above is kept: finishing it honours the user's intent.
       if (permission.status === Notifications.PermissionStatus.UNDETERMINED) {
+        const registrationEndpoint =
+          parseReminderRegistrationEndpoint(endpoint);
+        // ponytail: a failed delete is not retried, so the old subscription
+        // waits for provider cleanup; keep a pending deletion if that matters.
+        if (saved.state !== 'pending' && registrationEndpoint !== null) {
+          await deleteRegistration(registrationEndpoint, saved).catch(
+            () => undefined,
+          );
+        }
         await secureStore.deleteItemAsync(registrationKey);
         return { kind: 'unregistered' };
       }
@@ -954,14 +982,9 @@ export function createProductionChangeReminderAdapters({
                   version: 4 as const,
                 } satisfies StoredChangeReminderPendingDelete);
           await saveStoredState(pendingDelete);
-          const response = await fetchWithTimeout(
-            request,
-            updateEndpoint(registrationEndpoint, pendingDelete.installationId),
-            {
-              headers: { authorization: `Bearer ${pendingDelete.credential}` },
-              method: 'DELETE',
-            },
-            timeoutMs,
+          const response = await deleteRegistration(
+            registrationEndpoint,
+            pendingDelete,
           );
           if (response.status !== 204) return { kind: 'failed' as const };
           await secureStore.deleteItemAsync(registrationKey);
