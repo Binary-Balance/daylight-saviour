@@ -447,3 +447,131 @@ describe('remote build configuration', () => {
     },
   );
 });
+
+describe('Time-Zone Data Pack refresh deadline', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  // Records when a refresh settles, so a refresh that never settles fails
+  // an assertion instead of hanging the test.
+  function tracked(refresh: Promise<void>) {
+    const state = { settled: false };
+    void refresh.then(() => {
+      state.settled = true;
+    });
+    return state;
+  }
+
+  it.each([
+    ['manifest', 0],
+    ['pack', 1],
+  ])(
+    'fails a %s request that never returns headers at the deadline',
+    async (_name, stalledCall) => {
+      const artifacts = signedArtifacts();
+      const signals: AbortSignal[] = [];
+      const request = jest.fn(
+        (_url: string, init: { readonly signal: AbortSignal }) => {
+          const call = signals.push(init.signal) - 1;
+          // Like a network implementation that ignores abort and never settles.
+          return call === stalledCall
+            ? new Promise<never>(() => undefined)
+            : Promise.resolve(
+                response(200, JSON.stringify(artifacts.manifest)),
+              );
+        },
+      );
+      const manager = managerWith({ request });
+
+      const refresh = tracked(manager.refresh('cold-launch'));
+      await jest.advanceTimersByTimeAsync(29_999);
+      expect(refresh.settled).toBe(false);
+      expect(signals[stalledCall]?.aborted).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
+
+      expect(refresh.settled).toBe(true);
+      expect(signals[stalledCall]?.aborted).toBe(true);
+      expect(manager.getSnapshot()).toMatchObject({
+        freshness: 'offline-valid',
+        lastError: 'refresh-failed',
+        source: 'bundled',
+      });
+    },
+  );
+
+  it.each([
+    ['manifest', 0],
+    ['pack', 1],
+  ])(
+    'fails a %s whose body stalls after its headers as a transport loss',
+    async (_name, stalledCall) => {
+      const artifacts = signedArtifacts();
+      const responses = [
+        response(200, JSON.stringify(artifacts.manifest)),
+        response(200, artifacts.bytes),
+      ];
+      const signals: AbortSignal[] = [];
+      const request = jest.fn(
+        async (_url: string, init: { readonly signal: AbortSignal }) => {
+          const call = signals.push(init.signal) - 1;
+          return call === stalledCall
+            ? {
+                ...responses[call]!,
+                arrayBuffer: () => new Promise<never>(() => undefined),
+              }
+            : responses[call]!;
+        },
+      );
+      const manager = managerWith({ request });
+
+      const refresh = tracked(manager.refresh('cold-launch'));
+      await jest.advanceTimersByTimeAsync(30_000);
+
+      expect(refresh.settled).toBe(true);
+      expect(signals[stalledCall]?.aborted).toBe(true);
+      expect(manager.getSnapshot()).toMatchObject({
+        freshness: 'offline-valid',
+        lastError: 'refresh-failed',
+        source: 'bundled',
+      });
+    },
+  );
+
+  it('lets a manual retry start a new check and ignores the late response', async () => {
+    const artifacts = signedArtifacts();
+    let respondLate: (late: ReturnType<typeof response>) => void = () =>
+      undefined;
+    const request = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            respondLate = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(response(200, JSON.stringify(artifacts.manifest)))
+      .mockResolvedValueOnce(response(200, artifacts.bytes));
+    const manager = managerWith({ request });
+
+    const first = tracked(manager.refresh('foreground'));
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(first.settled).toBe(true);
+
+    await manager.refresh('manual');
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'current',
+      pack: { packVersion: '2026d-australian-v1' },
+      source: 'remote',
+    });
+
+    respondLate(response(500));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'current',
+      lastError: null,
+      pack: { packVersion: '2026d-australian-v1' },
+      source: 'remote',
+    });
+  });
+});

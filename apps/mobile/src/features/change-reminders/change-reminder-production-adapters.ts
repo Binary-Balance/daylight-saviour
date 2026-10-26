@@ -344,6 +344,8 @@ function validDeviceToken(value: unknown): value is string {
   );
 }
 
+// Reads the body before the deadline too: headers can arrive and the body
+// then stall.
 async function fetchWithTimeout(
   request: typeof fetch,
   url: string,
@@ -354,7 +356,13 @@ async function fetchWithTimeout(
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      request(url, { ...init, signal: controller.signal }),
+      request(url, { ...init, signal: controller.signal }).then(
+        async (response) => ({
+          body: await response.text(),
+          ok: response.ok,
+          status: response.status,
+        }),
+      ),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           controller.abort();
@@ -539,7 +547,9 @@ export function createProductionChangeReminderAdapters({
       }
       const registration =
         pending.state === 'pending'
-          ? parseReminderSubscriptionRegistrationResponse(await response.json())
+          ? parseReminderSubscriptionRegistrationResponse(
+              JSON.parse(response.body),
+            )
           : {
               credential: pending.credential,
               installationId: pending.installationId,

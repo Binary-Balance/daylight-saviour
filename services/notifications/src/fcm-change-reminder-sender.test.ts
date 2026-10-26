@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 
 import {
   createFcmChangeReminderSender,
@@ -344,6 +344,7 @@ describe('FCM Change Reminder sender', () => {
           readonly body: string;
           readonly headers: Readonly<Record<string, string>>;
           readonly method: 'POST';
+          readonly signal: AbortSignal;
         }
       | undefined;
     const transport = createFetchFcmHttpTransport(
@@ -415,11 +416,75 @@ describe('FCM Change Reminder sender', () => {
         'Content-Type': 'application/json; charset=utf-8',
       },
       method: 'POST',
+      signal: init?.signal,
     });
+    assert.ok(init?.signal instanceof AbortSignal);
     assert.deepEqual(result, {
       body: JSON.stringify({ name: 'projects/portable-project/messages/1' }),
       status: 200,
     });
+  });
+
+  for (const [name, stalledResponse] of [
+    ['never returns headers', () => new Promise<never>(() => undefined)],
+    [
+      'stalls its body after the headers',
+      async () => ({
+        status: 200,
+        text: () => new Promise<never>(() => undefined),
+      }),
+    ],
+  ] as const) {
+    it(`times out a request that ${name} after ten seconds`, async () => {
+      mock.timers.enable({ apis: ['setTimeout'] });
+      try {
+        let signal: AbortSignal | undefined;
+        const transport = createFetchFcmHttpTransport(async (_input, init) => {
+          signal = init.signal;
+          // Like a network implementation that ignores abort.
+          return stalledResponse();
+        });
+        const outcome = { error: undefined as unknown, settled: false };
+        void transport
+          .post({
+            accessToken: fullCredential,
+            endpoint: fcmSendEndpoint('portable-project'),
+            payload: {} as FcmHttpRequest['payload'],
+          })
+          .catch((error: unknown) => {
+            outcome.error = error;
+          })
+          .finally(() => {
+            outcome.settled = true;
+          });
+
+        mock.timers.tick(9_999);
+        await new Promise(setImmediate);
+        assert.equal(outcome.settled, false);
+        mock.timers.tick(1);
+        await new Promise(setImmediate);
+
+        assert.equal(outcome.settled, true);
+        assert.match(String(outcome.error), /FCM transport timeout/);
+        assert.equal(signal?.aborted, true);
+      } finally {
+        mock.timers.reset();
+      }
+    });
+  }
+
+  it('reports a failed or timed-out request as uncertain, not rejected', async () => {
+    const test = sender(response(200, '{}'), {
+      post: async () => {
+        throw new Error('FCM transport timeout');
+      },
+    });
+
+    const result = await test.instance.send(subscription, facts, immediate);
+
+    assert.deepEqual(result, { kind: 'uncertain' });
+    assert.deepEqual(test.removalRequests, []);
+    assert.deepEqual(test.logs, ['fcm-change-reminder-uncertain']);
   });
 
   it('classifies a transient provider rejection without removing a subscription', async () => {

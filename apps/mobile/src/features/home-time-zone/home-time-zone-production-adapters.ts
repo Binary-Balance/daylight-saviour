@@ -29,10 +29,7 @@ const timeZoneDataPacks = createTimeZoneDataPackManager({
     manifestUrl: process.env.EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL,
     trustedKeysJson: process.env.EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON,
   }),
-  request: (url, init) =>
-    expoFetch(url, {
-      headers: init.headers,
-    }),
+  request: expoFetch,
   storage: {
     load: () => AsyncStorage.getItem(timeZoneDataPackStorageKey),
     save: (value) => AsyncStorage.setItem(timeZoneDataPackStorageKey, value),
