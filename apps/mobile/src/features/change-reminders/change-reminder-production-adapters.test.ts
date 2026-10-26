@@ -483,7 +483,7 @@ describe('production Change Reminder adapters', () => {
     });
   });
 
-  it('discards a saved record from a previous install without network work', async () => {
+  it('deletes a previous install registration on the server, then forgets it', async () => {
     const registered = harness();
     await registered.adapters.enable('Australia/Sydney');
     const pending = harness({
@@ -495,14 +495,25 @@ describe('production Change Reminder adapters', () => {
     expect(JSON.parse(pending.stored() ?? '')).toMatchObject({
       state: 'pending',
     });
+    const undetermined = {
+      canAskAgain: true,
+      granted: false,
+      status: PermissionStatus.UNDETERMINED,
+    };
 
-    for (const saved of [registered.stored(), pending.stored()]) {
-      const reinstalled = harness({
-        existingPermission: {
-          canAskAgain: true,
-          granted: false,
-          status: PermissionStatus.UNDETERMINED,
+    for (const [saved, deleteResult] of [
+      [registered.stored(), async () => new Response(null, { status: 204 })],
+      [
+        registered.stored(),
+        async () => {
+          throw new TypeError('Network request failed');
         },
+      ],
+      [pending.stored(), async () => new Response(null, { status: 204 })],
+    ] as const) {
+      const reinstalled = harness({
+        existingPermission: undetermined,
+        fetchImplementation: deleteResult,
         platform: 'ios',
         storage: { value: saved },
       });
@@ -510,10 +521,22 @@ describe('production Change Reminder adapters', () => {
         kind: 'unregistered',
       });
       expect(reinstalled.stored()).toBeNull();
-      expect(reinstalled.dependencies.fetch).not.toHaveBeenCalled();
       expect(
         reinstalled.dependencies.notifications.getDevicePushTokenAsync,
       ).not.toHaveBeenCalled();
+      if (saved === pending.stored()) {
+        expect(reinstalled.dependencies.fetch).not.toHaveBeenCalled();
+      } else {
+        expect(reinstalled.dependencies.fetch).toHaveBeenCalledTimes(1);
+        const [url, init] = reinstalled.dependencies.fetch.mock.calls[0]!;
+        expect(String(url)).toBe(
+          `https://reminders.example.test/reminder-subscriptions/${responseBody.installationId}`,
+        );
+        expect(init).toMatchObject({
+          headers: { authorization: `Bearer ${responseBody.credential}` },
+          method: 'DELETE',
+        });
+      }
     }
   });
 

@@ -101,6 +101,14 @@ live-send or deployment evidence.
 | Registration throttle (`ReminderRegistrationThrottle`) | Limit registration, update and deletion requests          | Hashed client IP address or installation ID, ten-minute window and request count                                                                          | 30 days after its window starts                         |
 | Dispatch ledger (`ReminderDispatchLedger`)             | Send each reminder at most once and record its outcome    | Installation ID, Home Time Zone, Change Event, timing, generation, delivery window, pack horizon, status, claim, expiry and cleanup state, and timestamps | 30 days after its last update                           |
 
+Uninstalling the app does not tell the service. An uninstalled app's
+subscription stays until APNs or FCM rejects its token as permanently invalid,
+which can only happen when something is sent to it. Apple does not promise
+when, or whether, APNs starts rejecting a token after an uninstall, so such a
+subscription may be kept indefinitely. When a reinstalled iOS app finds the
+previous install's registration in the keychain, it makes one attempt to
+delete that registration from the service before starting again.
+
 Removing a subscription replaces its row with the marker at once. The daily
 `reminder-throttle-cleanup` timer deletes the other expired rows, so a row can
 outlive its limit by up to a day. Each run makes one pass over rows already
