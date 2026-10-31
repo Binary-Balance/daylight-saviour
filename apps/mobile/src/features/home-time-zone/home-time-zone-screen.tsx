@@ -175,6 +175,21 @@ function ZoneChooser({
   );
 }
 
+// iOS also reports `inactive` for system alerts and the notification centre.
+// Becoming active again from there is not a new opening of the app, so only
+// a return from the background counts.
+function onReturnFromBackground(onReturn: () => void) {
+  let wasBackgrounded = false;
+  return AppState.addEventListener('change', (nextState) => {
+    if (nextState === 'background') {
+      wasBackgrounded = true;
+    } else if (nextState === 'active' && wasBackgrounded) {
+      wasBackgrounded = false;
+      onReturn();
+    }
+  });
+}
+
 export default function HomeTimeZoneScreen({
   adapters,
   now,
@@ -197,11 +212,8 @@ export default function HomeTimeZoneScreen({
 
   useEffect(() => {
     const stop = session.start();
-    const appStateSubscription = AppState.addEventListener(
-      'change',
-      (nextState) => {
-        if (nextState === 'active') session.dispatch({ type: 'foreground' });
-      },
+    const appStateSubscription = onReturnFromBackground(() =>
+      session.dispatch({ type: 'foreground' }),
     );
     return () => {
       appStateSubscription.remove();
@@ -212,7 +224,6 @@ export default function HomeTimeZoneScreen({
   if (snapshot.kind === 'ready') {
     return (
       <StatusScreen
-        acknowledgedEventAt={snapshot.acknowledgedEventAt}
         dataPackSnapshot={snapshot.dataPackSnapshot}
         key={snapshot.zoneId}
         now={now}
@@ -222,6 +233,7 @@ export default function HomeTimeZoneScreen({
         }
         onChooseZone={() => session.dispatch({ type: 'choose-zone' })}
         onRetryDataPack={() => session.dispatch({ type: 'manual-refresh' })}
+        openingAcknowledgedEventAt={snapshot.openingAcknowledgedEventAt}
         secondaryCopySeed={snapshot.secondaryCopySeed}
         uses24hourClock={snapshot.uses24hourClock}
         zoneId={snapshot.zoneId}

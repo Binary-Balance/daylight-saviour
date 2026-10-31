@@ -34,9 +34,9 @@ export type HomeTimeZoneSessionSnapshot =
       readonly saving: boolean;
     }
   | {
-      readonly acknowledgedEventAt: string | null;
       readonly dataPackSnapshot: TimeZoneDataPackSnapshot;
       readonly kind: 'ready';
+      readonly openingAcknowledgedEventAt: string | null;
       readonly secondaryCopySeed: string;
       readonly uses24hourClock: boolean;
       readonly zoneId: string;
@@ -87,6 +87,10 @@ type FlowState =
   | {
       readonly acknowledgedEventAt: string | null;
       readonly kind: 'ready';
+      // Lags acknowledgedEventAt until the app next returns from the
+      // background, so an Aftermath that has just been acknowledged stays
+      // on screen for the rest of its opening.
+      readonly openingAcknowledgedEventAt: string | null;
       readonly secondaryCopySeed: string;
       readonly uses24hourClock: boolean;
       readonly zoneId: string;
@@ -140,9 +144,9 @@ export function createHomeTimeZoneSession({
     }
 
     return {
-      acknowledgedEventAt: flow.acknowledgedEventAt,
       dataPackSnapshot,
       kind: 'ready',
+      openingAcknowledgedEventAt: flow.openingAcknowledgedEventAt,
       secondaryCopySeed: flow.secondaryCopySeed,
       uses24hourClock: flow.uses24hourClock,
       zoneId: flow.zoneId,
@@ -190,6 +194,7 @@ export function createHomeTimeZoneSession({
           setFlow({
             acknowledgedEventAt,
             kind: 'ready',
+            openingAcknowledgedEventAt: acknowledgedEventAt,
             secondaryCopySeed,
             uses24hourClock: localization.uses24hourClock,
             zoneId: canonical,
@@ -265,6 +270,7 @@ export function createHomeTimeZoneSession({
         setFlow({
           acknowledgedEventAt,
           kind: 'ready',
+          openingAcknowledgedEventAt: acknowledgedEventAt,
           secondaryCopySeed: selectionFlow.secondaryCopySeed,
           uses24hourClock: selectionFlow.uses24hourClock,
           zoneId: zone.id,
@@ -291,6 +297,18 @@ export function createHomeTimeZoneSession({
       void adapters.aftermathAcknowledgements
         .save(zoneId, eventAt)
         .catch(() => undefined);
+    }
+  }
+
+  function startOpening() {
+    if (
+      flow.kind === 'ready' &&
+      flow.openingAcknowledgedEventAt !== flow.acknowledgedEventAt
+    ) {
+      setFlow({
+        ...flow,
+        openingAcknowledgedEventAt: flow.acknowledgedEventAt,
+      });
     }
   }
 
@@ -341,6 +359,7 @@ export function createHomeTimeZoneSession({
         setFlow({
           acknowledgedEventAt: flow.returnAcknowledgedEventAt,
           kind: 'ready',
+          openingAcknowledgedEventAt: flow.returnAcknowledgedEventAt,
           secondaryCopySeed: flow.secondaryCopySeed,
           uses24hourClock: flow.uses24hourClock,
           zoneId: flow.returnZoneId,
@@ -358,6 +377,7 @@ export function createHomeTimeZoneSession({
           .catch(() => undefined);
         return;
       case 'foreground':
+        startOpening();
         void adapters.timeZoneDataPacks
           .refresh('foreground')
           .catch(() => undefined);
