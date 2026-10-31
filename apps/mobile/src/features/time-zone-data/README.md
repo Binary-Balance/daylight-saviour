@@ -13,8 +13,9 @@ Signed downgrades never activate.
 
 Cold launch always checks configured manifest. Returning from the background
 checks only when previous attempt is at least 24 hours old. Manual retry
-bypasses that gate. Requests carry saved ETag and Last-Modified validators; 304 updates check
-time without downloading immutable pack. Concurrent checks share one flight.
+bypasses that gate. Requests carry saved ETag and Last-Modified validators; 304
+updates check time without downloading immutable pack. Concurrent checks share
+one flight.
 Each check has a 30-second deadline covering both requests and their bodies.
 At the deadline it aborts the requests, stops waiting even if the network
 ignores the abort, and fails as a transport loss. The flight is then released,

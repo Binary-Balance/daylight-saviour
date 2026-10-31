@@ -87,9 +87,9 @@ type FlowState =
   | {
       readonly acknowledgedEventAt: string | null;
       readonly kind: 'ready';
-      // Lags acknowledgedEventAt until the app next returns from the
-      // background, so an Aftermath that has just been acknowledged stays
-      // on screen for the rest of its opening.
+      // Lags acknowledgedEventAt so an Aftermath that has just been
+      // acknowledged stays on screen. It catches up when the app returns from
+      // the background or the chooser closes, which is when Aftermath ends.
       readonly openingAcknowledgedEventAt: string | null;
       readonly secondaryCopySeed: string;
       readonly uses24hourClock: boolean;

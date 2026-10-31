@@ -177,7 +177,9 @@ function ZoneChooser({
 
 // iOS also reports `inactive` for system alerts and the notification centre.
 // Becoming active again from there is not a new opening of the app, so only
-// a return from the background counts.
+// a return from the background counts. Android reports `background` for its
+// permission dialog too, and JavaScript cannot tell that from leaving the app,
+// so a return from that dialog does count.
 function onReturnFromBackground(onReturn: () => void) {
   let wasBackgrounded = false;
   return AppState.addEventListener('change', (nextState) => {
