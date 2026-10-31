@@ -352,7 +352,7 @@ npx --no-install seshat crap --config seshat.packages.json --json > seshat-packa
 node scripts/seshat-summary.mjs seshat-packages.json
 ```
 
-Use `check` instead of `crap` to add mutation testing. It is slow: about 15
+Use `check` instead of `crap` to add mutation testing. It is slow: about 20
 minutes for packages on a four-core CI runner, and hours for mobile. Exit
 status 0 means complete with thresholds met, 1 means a threshold was missed and
 2 means the run was incomplete or invalid. For an area that is not yet
