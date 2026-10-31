@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { TableClient } from '@azure/data-tables';
+import { ManagedIdentityCredential } from '@azure/identity';
+
 import {
   createAzureReminderSubscriptionStore,
+  createReminderSubscriptionDeleteHandler,
   createReminderSubscriptionHandler,
+  createReminderSubscriptionUpdateHandler,
   createTableReminderSubscriptionStore,
   deleteReminderSubscription,
   deriveInstallationId,
@@ -416,6 +421,76 @@ describe('reminder subscription updates', () => {
   const installationId = 'i'.repeat(43);
   const credential = 'c'.repeat(43);
 
+  it('stores the update it read from the request', async () => {
+    let received:
+      | Parameters<ReminderSubscriptionStore['updateSubscription']>[0]
+      | undefined;
+    await updateReminderSubscription(
+      request(update, { authorization: `Bearer ${credential}` }),
+      store({
+        updateSubscription: async (record) => {
+          received = record;
+          return 'accepted';
+        },
+      }),
+      installationId,
+    );
+
+    assert.equal(received?.attemptGeneration, update.attemptGeneration);
+    assert.equal(received?.deviceToken, update.deviceToken);
+    assert.equal(received?.homeTimeZone, update.homeTimeZone);
+    assert.equal(received?.oneDayEnabled, update.oneDayEnabled);
+    assert.equal(received?.oneWeekEnabled, update.oneWeekEnabled);
+    assert.equal(received?.platform, update.platform);
+  });
+
+  it('rejects an update that is not JSON or not a supported zone', async () => {
+    const authorization = `Bearer ${credential}`;
+
+    assert.equal(
+      (
+        await updateReminderSubscription(
+          request(update, { authorization, contentType: 'text/plain' }),
+          store(),
+          installationId,
+        )
+      ).status,
+      415,
+    );
+    for (const body of ['not json', { ...update, homeTimeZone: 'Mars/Base' }]) {
+      assert.equal(
+        (
+          await updateReminderSubscription(
+            request(body, { authorization }),
+            store(),
+            installationId,
+          )
+        ).status,
+        400,
+      );
+    }
+  });
+
+  it('routes an update through its handler to the requested installation', async () => {
+    let target: string | undefined;
+    const result = await createReminderSubscriptionUpdateHandler(() =>
+      store({
+        updateSubscription: async (record) => {
+          target = record.installationId;
+          return 'accepted';
+        },
+      }),
+    )(
+      Object.assign(
+        request(update, { authorization: `Bearer ${credential}` }),
+        { params: { installationId } },
+      ),
+    );
+
+    assert.equal(result.status, 204);
+    assert.equal(target, installationId);
+  });
+
   it('accepts exact bearer-authenticated updates without returning secrets', async () => {
     let received:
       | { readonly credentialHash: string; readonly installationId: string }
@@ -579,7 +654,65 @@ describe('reminder subscription deletion', () => {
   }
 });
 
+describe('reminder subscription delete handler', () => {
+  const installationId = 'i'.repeat(43);
+  const deletion = () =>
+    Object.assign(request('', { authorization: `Bearer ${'c'.repeat(43)}` }), {
+      params: { installationId },
+    });
+
+  it('routes a deletion to the requested installation', async () => {
+    let target: string | undefined;
+    const result = await createReminderSubscriptionDeleteHandler(() =>
+      store({
+        deleteSubscription: async (selectedInstallationId) => {
+          target = selectedInstallationId;
+          return 'deleted';
+        },
+      }),
+    )(deletion());
+
+    assert.equal(result.status, 204);
+    assert.equal(target, installationId);
+  });
+
+  it('reports a coarse failure when its store is unavailable', async () => {
+    const result = await createReminderSubscriptionDeleteHandler(() => {
+      throw new Error('store unavailable');
+    })(deletion());
+
+    assert.equal(result.status, 503);
+  });
+});
+
 describe('Azure Table mapping', () => {
+  it('uses real clients with the managed identity by default', async (t) => {
+    const clients: TableClient[] = [];
+    // Keeps the real client from reaching the network.
+    const offline = async function (this: TableClient) {
+      clients.push(this);
+      throw new Error('no network in tests');
+    };
+    t.mock.method(TableClient.prototype, 'getEntity', offline);
+    t.mock.method(TableClient.prototype, 'createEntity', offline);
+
+    await assert.rejects(
+      createAzureReminderSubscriptionStore({
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      }).takeSourceAllowance(hashOpaqueValue('source'), new Date()),
+      /no network in tests/,
+    );
+
+    const [client] = clients;
+    assert.ok(client);
+    assert.equal(client.tableName, 'ReminderRegistrationThrottle');
+    assert.equal(client.url, 'https://dlsvstorage.table.core.windows.net');
+    const credential = Reflect.get(client, 'credential');
+    assert.ok(credential instanceof ManagedIdentityCredential);
+    assert.equal(Reflect.get(credential, 'clientId'), 'runtime-uami-client-id');
+  });
+
   it('selects the configured UAMI and shares its credential across both Table clients', () => {
     const credential = {
       getToken: async () => ({

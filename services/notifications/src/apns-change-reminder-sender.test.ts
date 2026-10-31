@@ -294,6 +294,54 @@ describe('APNs Change Reminder sender', () => {
     });
   });
 
+  for (const [invalidSubscription, invalidFacts, message] of [
+    [
+      { ...subscription, installationId: 'too-short' },
+      facts,
+      'Invalid reminder subscription installation ID',
+    ],
+    [
+      { ...subscription, deviceToken: 'not-a-device-token' },
+      facts,
+      'Invalid reminder subscription token',
+    ],
+    [
+      subscription,
+      { ...facts, homeTimeZone: 'Europe/London' },
+      'Invalid Change Reminder Home Time Zone',
+    ],
+    [
+      subscription,
+      { ...facts, changeDirection: 'sideways' },
+      'Invalid Change Reminder direction',
+    ],
+    [
+      subscription,
+      { ...facts, timing: 'one-month' },
+      'Invalid Change Reminder timing',
+    ],
+    [
+      subscription,
+      { ...facts, changeEventAt: new Date(Number.NaN) },
+      'Invalid Change Reminder event instant',
+    ],
+    [
+      subscription,
+      { ...facts, changeEventAt: '2026-10-04T16:00:00.000Z' },
+      'Invalid Change Reminder event instant',
+    ],
+  ] as const) {
+    it(`rejects before any request: ${message}`, async () => {
+      const test = sender();
+
+      await assert.rejects(
+        test.instance.send(invalidSubscription as never, invalidFacts as never),
+        { message },
+      );
+      assert.deepEqual(test.requests, []);
+    });
+  }
+
   it('reports a failed or timed-out request as uncertain, not rejected', async () => {
     const test = sender(undefined, {
       post: async () => {

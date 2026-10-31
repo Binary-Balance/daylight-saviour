@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { describe, it } from 'node:test';
+import { describe, it, type TestContext } from 'node:test';
 
 import {
   createApnsProviderTokenProvider,
@@ -167,6 +167,83 @@ describe('APNs runtime', () => {
     });
     assert.equal(actualPayload, JSON.stringify(apnsRequest.payload));
     assert.equal(closes, 1);
+  });
+
+  describe('transport settlement', () => {
+    const timeoutMs = 4_321;
+
+    // Runs one request against a stream driven by `emit`, and counts the calls
+    // that show whether the request settled once and cleared its timer once.
+    async function settle(
+      t: TestContext,
+      emit: (stream: EventEmitter, session: EventEmitter) => void,
+    ) {
+      const setTimer = t.mock.method(globalThis, 'setTimeout');
+      const clearTimer = t.mock.method(globalThis, 'clearTimeout');
+      let streamClosed = 0;
+      const stream = Object.assign(new EventEmitter(), {
+        close() {
+          streamClosed += 1;
+        },
+        end() {
+          queueMicrotask(() => emit(stream, session));
+        },
+      });
+      const session = Object.assign(new EventEmitter(), {
+        close() {},
+        request: () => stream,
+      });
+      const outcome = settled(
+        createNodeApnsHttpTransport({
+          connect: () => session as never,
+          timeoutMs,
+        }).post(request()),
+      ).then(
+        (response) => ({ response }),
+        (error: Error) => ({ error }),
+      );
+
+      const result = await outcome;
+      const timer = setTimer.mock.calls.find(
+        (call) => call.arguments[1] === timeoutMs,
+      )?.result;
+      const timerClears = clearTimer.mock.calls.filter(
+        (call) => call.arguments[0] === timer,
+      ).length;
+      return { result, streamClosed, timerClears };
+    }
+
+    it('ignores a stream error after the response has ended', async (t) => {
+      const { result, streamClosed, timerClears } = await settle(
+        t,
+        (stream) => {
+          stream.emit('response', { ':status': 200 });
+          stream.emit('end');
+          stream.emit('error', new Error('late failure'));
+        },
+      );
+
+      assert.deepEqual(result, { response: { body: '', status: 200 } });
+      assert.equal(streamClosed, 0);
+      assert.equal(timerClears, 1);
+    });
+
+    it('settles only once when failures and the end arrive together', async (t) => {
+      const failure = new Error('first failure');
+      const { result, streamClosed, timerClears } = await settle(
+        t,
+        (stream, session) => {
+          stream.emit('response', { ':status': 200 });
+          session.emit('error', failure);
+          stream.emit('error', new Error('second failure'));
+          stream.emit('end');
+        },
+      );
+
+      assert.deepEqual(result, { error: failure });
+      assert.equal(streamClosed, 1);
+      assert.equal(timerClears, 1);
+    });
   });
 
   it('rejects bounded transport failures and closes the session', async () => {
