@@ -45,19 +45,24 @@ Seshat accepts only the `jest-expo` versions in its [runner compatibility guide]
 Do not use `--legacy-peer-deps`, `npm audit fix --force`, or unreviewed lifecycle-script approvals to suppress dependency problems. Resolve conflicts explicitly, document accepted advisories, and verify dependency shape with `npm run dependencies:check`.
 
 `npm run audit` fails closed for moderate, high, and critical advisories.
-`scripts/audit.mjs` lists each temporary exception with its advisory, severity
-and the only installed packages allowed to depend directly on it. A new direct
-dependent or a changed severity fails the audit. So does an exception that no
-longer matches an advisory, so a patched release forces its removal.
+`scripts/audit.mjs` lists each temporary exception with its advisory, severity,
+installed copies and the only packages allowed to depend directly on it. A new
+copy, a new direct dependent or a changed severity fails the audit. So does an
+exception that no longer matches an advisory, so a patched release forces its
+removal.
 
 The shipped `expo-router` 57.0.29 → `query-string` 7.1.3 →
-`decode-uri-component` 0.2.2 chain is temporarily accepted but dormant under
-standard routing: its active `getStateFromPath` fork uses `URL` and
+`decode-uri-component` 0.2.2 chain
+([GHSA-vcc3-ghjq-m6fr](https://github.com/advisories/GHSA-vcc3-ghjq-m6fr),
+[GHSA-qr28-fpjm-wq7f](https://github.com/advisories/GHSA-qr28-fpjm-wq7f)) is
+temporarily accepted but dormant under standard routing: its active
+`getStateFromPath` fork uses `URL` and
 `URLSearchParams`, while `query-string` is used to stringify paths. Externally
 supplied navigation or deep-link query text can cause CPU exhaustion and client
 unresponsiveness only if future app or upstream routing uses the included React
-Navigation core fallback or otherwise calls `query-string.parse`. Remove this
-exception when Router adopts a compatible patched parser.
+Navigation core fallback or otherwise calls `query-string.parse`. Version 0.5.1
+is patched, but it is ESM-only and outside the `^0.2.2` that `query-string`
+requires. Remove this exception when Router adopts a compatible patched parser.
 
 The notification service depends on `@azure/msal-node` 5.4.2
 ([GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5))
@@ -68,16 +73,10 @@ major version. The service creates only `ManagedIdentityCredential`, which never
 uses that flow. Remove this exception when `@azure/identity` accepts a patched
 release.
 
-Two more advisories have no compatible patched release. Each affects only
-build and lint tooling, and none of these packages appears in the exported web
-or Android bundle:
+Three more advisories have no compatible patched release. Each affects only
+build, test and lint tooling, and none of these packages appears in the exported
+web or Android bundle:
 
-- `node-forge` 1.4.0 ([GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv)),
-  through `@expo/cli` and `@expo/code-signing-certificates`: RSA PKCS#1 v1.5
-  signature verification accepts extra nested digest elements, which can let
-  signatures be forged for low-exponent RSA keys. The Expo CLI only verifies
-  signatures it has just made or a local certificate's own signature, never
-  one supplied by another party.
 - `zod` 3.25.76 ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)),
   through `@expo/cli`, `eslint-plugin-react-hooks` and `zod-validation-error`:
   validating a large array without a length limit can exhaust memory. Versions
@@ -85,6 +84,19 @@ or Android bundle:
   validates arrays only in dev tools plugin configuration and command output,
   both from installed packages. The lint plugin and its error formatter run
   only on repository source and configuration.
+- `glob` 13.0.6 ([GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)),
+  through `@expo/cli`, `@expo/config`, `@expo/config-plugins`,
+  `@expo/fingerprint` and `@expo/metro-config`: a search can keep walking the
+  file system after its `AbortSignal` fires. Versions 14.0.2 and later are
+  patched, but these packages require glob 13. Only `@expo/cli` passes a signal,
+  to stop searching the local project after its first match, so the extra walk
+  costs only time. The 7.2.3 copies under Jest are outside this advisory, and
+  `npm audit` reports them only because they depend on `minimatch`.
+- `minimatch` 3.1.5 and 10.2.6 ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)),
+  through ESLint, Jest, `glob` and `@expo/fingerprint`: a crafted pattern can
+  grow until matching exhausts the CPU. Version 11.0.1 and later are patched,
+  but these tools require earlier majors. They match only patterns from
+  repository configuration and installed packages.
 
 Remove each exception when its dependents accept a patched release.
 
