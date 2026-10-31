@@ -40,10 +40,10 @@ jobs:
       COMMAND: ${{ (matrix.area == 'packages' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'check' || 'crap' }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -77,7 +77,7 @@ jobs:
 
       - name: Keep Seshat report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: seshat-${{ matrix.area }}
           path: seshat-${{ matrix.area }}.json

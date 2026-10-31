@@ -61,6 +61,10 @@ test('pins every external action to an immutable commit', () => {
   }
 });
 
+test('leaves npm uncached so a cold run stays cold', () => {
+  assert.match(workflow, /\n\s+package-manager-cache: false\n/);
+});
+
 test('keeps cold and warm cache generations source-scoped and repeatable', () => {
   const cacheRevision = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
   const expectedCachePaths = `path: |
