@@ -74,6 +74,9 @@ function store(
     deleteSubscription: async () => 'deleted',
     getSubscription: async () => null,
     getSubscriptionSnapshot: async () => null,
+    listZoneSubscriptionPages: async function* () {
+      // Handler tests never list a zone.
+    },
     purgeExpiredRetiredSubscriptions: async () => undefined,
     purgeExpiredThrottleRecords: async () => undefined,
     removeIfDeviceTokenMatches: async () => 'not-found',
@@ -138,6 +141,9 @@ function subscriptionTable(
       (async function* () {
         // Subscription-only tests never enumerate retired rows.
       })(),
+    listZonePages: async function* () {
+      // Subscription-only tests never list a zone.
+    },
     replace: async () => undefined,
     ...overrides,
   };
@@ -841,6 +847,82 @@ describe('Azure Table mapping', () => {
     assert.match(retiredFilter, /2026-08-08/);
   });
 
+  it('lists a zone as pages of valid snapshots, without its retired rows', async () => {
+    const zone = 'Australia/Sydney';
+    const row = {
+      attemptGeneration: 3,
+      credentialHash: 'hash',
+      deviceToken: 'device-token',
+      etag: 'etag',
+      homeTimeZone: zone,
+      oneDayEnabled: true,
+      oneWeekEnabled: false,
+      partitionKey: 'subscriptions-v1',
+      platform: 'ios',
+      registeredAt: new Date('2026-08-01T00:00:00.000Z'),
+      rowKey: 'first',
+    };
+    let filter = '';
+    let pageSize: number | undefined;
+    const azureStore = createAzureReminderSubscriptionStore(
+      {
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      },
+      {
+        createCredential: () => ({
+          getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+        }),
+        createTableClient: () =>
+          ({
+            listEntities: (options: {
+              readonly queryOptions: { readonly filter: string };
+            }) => {
+              filter = options.queryOptions.filter;
+              return {
+                byPage: (settings: { readonly maxPageSize: number }) => {
+                  pageSize = settings.maxPageSize;
+                  return (async function* () {
+                    yield [
+                      row,
+                      { ...row, oneDayEnabled: 'yes', rowKey: 'bad' },
+                    ];
+                    yield [];
+                  })();
+                },
+              };
+            },
+          }) as never,
+      },
+    );
+
+    const pages = [];
+    for await (const page of azureStore.listZoneSubscriptionPages(zone)) {
+      pages.push(page);
+    }
+
+    assert.deepEqual(pages, [
+      [
+        {
+          attemptGeneration: 3,
+          deviceToken: 'device-token',
+          homeTimeZone: zone,
+          installationId: 'first',
+          oneDayEnabled: true,
+          oneWeekEnabled: false,
+          platform: 'ios',
+          registeredAt: row.registeredAt,
+        },
+      ],
+      [],
+    ]);
+    assert.equal(
+      filter,
+      "PartitionKey eq 'subscriptions-v1' and homeTimeZone eq 'Australia/Sydney'",
+    );
+    assert.equal(pageSize, 100);
+  });
+
   it('uses a fixed subscription partition and retains canonical zone as data', async () => {
     let entity: Record<string, unknown> | undefined;
     const tableStore = createTableReminderSubscriptionStore(
@@ -1209,6 +1291,9 @@ describe('generation-ordered subscription persistence', () => {
       },
       setBeforeReplace: (callback: (() => Promise<void>) | undefined) => {
         beforeReplace = callback;
+      },
+      listZonePages: async function* () {
+        // Persistence tests never list a zone.
       },
       listRetiredExpired: async function* (now: Date) {
         for (const row of rows.values()) {

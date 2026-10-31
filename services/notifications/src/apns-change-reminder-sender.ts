@@ -2,7 +2,12 @@ import { changeReminderNotification } from '@daylight-saviour/copy/change-remind
 import type { ChangeReminderNotification } from '@daylight-saviour/contracts/reminder-subscription-runtime';
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
-import type { ReviewedChangeReminderFacts } from './fcm-change-reminder-sender.ts';
+import {
+  finalSendCheck,
+  type ChangeReminderLifetime,
+  type ChangeReminderSendGuard,
+  type ReviewedChangeReminderFacts,
+} from './fcm-change-reminder-sender.ts';
 
 const apnsOrigins = {
   production: 'https://api.push.apple.com',
@@ -85,6 +90,8 @@ export interface ApnsHttpRequest {
   readonly httpVersion: '2';
   readonly method: 'POST';
   readonly payload: ApnsChangeReminderPayload;
+  /** Shortens, but never extends, the transport's own limit. */
+  readonly timeoutMs?: number;
 }
 
 export interface ApnsHttpResponse {
@@ -119,8 +126,10 @@ export interface ApnsSubscriptionRemover {
 
 export type ApnsChangeReminderLogEvent =
   | 'apns-change-reminder-accepted'
+  | 'apns-change-reminder-expired'
   | 'apns-change-reminder-invalid-token-cleanup-failed'
   | 'apns-change-reminder-malformed-response'
+  | 'apns-change-reminder-not-authorized'
   | 'apns-change-reminder-permanent-invalid-token'
   | 'apns-change-reminder-permanent-rejection'
   | 'apns-change-reminder-transient-rejection'
@@ -132,10 +141,16 @@ export interface ApnsChangeReminderLogger {
 
 export type ApnsChangeReminderResult =
   | { readonly kind: 'accepted' }
+  /** The lifetime ended before the request could be made; nothing was sent. */
+  | { readonly kind: 'expired' }
   | { readonly kind: 'malformed-response' }
+  /** Final authorization refused the send after credentials were ready. */
+  | { readonly kind: 'not-authorized' }
   | {
       readonly kind: 'permanent-invalid-token';
       readonly cleanupStatus: ApnsSubscriptionCleanupStatus;
+      /** Dispatch cleanup preserves a registration newer than this. */
+      readonly invalidatedAt: Date;
       /**
        * A fixed classification for the one APNs response the controlled proof
        * may report. Never carry an arbitrary provider response reason here.
@@ -150,10 +165,13 @@ export interface ApnsChangeReminderSender {
   readonly send: (
     subscription: ApnsChangeReminderSubscription,
     facts: ReviewedChangeReminderFacts,
+    lifetime: ChangeReminderLifetime,
+    guard?: ChangeReminderSendGuard,
   ) => Promise<ApnsChangeReminderResult>;
 }
 
 export interface ApnsChangeReminderSenderDependencies {
+  readonly clock?: () => Date;
   readonly logger: ApnsChangeReminderLogger;
   readonly providerTokenProvider: ApnsProviderTokenProvider;
   readonly subscriptionRemover: ApnsSubscriptionRemover;
@@ -283,6 +301,16 @@ function assertReviewedFacts(
   }
 }
 
+function expirationHeader(lifetime: ChangeReminderLifetime, now: Date) {
+  if (lifetime.kind === 'immediate') return '0';
+  // Whole seconds, rounded down so APNs never holds it past its expiry. Zero
+  // would mean immediate delivery, not an expired message.
+  const expiresAtSeconds = Math.floor(lifetime.expiresAt.getTime() / 1000);
+  return expiresAtSeconds > Math.floor(now.getTime() / 1000)
+    ? String(expiresAtSeconds)
+    : undefined;
+}
+
 function buildPayload(
   facts: ReviewedChangeReminderFacts,
 ): ApnsChangeReminderPayload {
@@ -313,7 +341,9 @@ function report(
     ApnsChangeReminderLogEvent
   > = {
     accepted: 'apns-change-reminder-accepted',
+    expired: 'apns-change-reminder-expired',
     'malformed-response': 'apns-change-reminder-malformed-response',
+    'not-authorized': 'apns-change-reminder-not-authorized',
     'permanent-invalid-token': 'apns-change-reminder-permanent-invalid-token',
     'permanent-rejection': 'apns-change-reminder-permanent-rejection',
     'transient-rejection': 'apns-change-reminder-transient-rejection',
@@ -354,9 +384,10 @@ export function createApnsChangeReminderSender(
   if (!(environment in apnsOrigins))
     throw new Error('Invalid APNs environment');
   if (!topicPattern.test(topic)) throw new Error('Invalid injected APNs topic');
+  const clock = dependencies.clock ?? (() => new Date());
 
   return {
-    async send(subscription, facts) {
+    async send(subscription, facts, lifetime, guard) {
       assertReviewedFacts(subscription, facts);
       let providerToken: string;
       try {
@@ -371,13 +402,19 @@ export function createApnsChangeReminderSender(
       ) {
         return report(dependencies.logger, { kind: 'transient-rejection' });
       }
+      const check = await finalSendCheck(guard, clock, (now) =>
+        expirationHeader(lifetime, now),
+      );
+      if (typeof check === 'string') {
+        return report(dependencies.logger, { kind: check });
+      }
 
       let response: ApnsHttpResponse;
       try {
         response = await dependencies.transport.post({
           endpoint: apnsSendEndpoint(environment, subscription.deviceToken),
           headers: {
-            'apns-expiration': '0',
+            'apns-expiration': check.lifetime,
             'apns-priority': '10',
             'apns-push-type': 'alert',
             'apns-topic': topic,
@@ -387,6 +424,7 @@ export function createApnsChangeReminderSender(
           httpVersion: '2',
           method: 'POST',
           payload: buildPayload(facts),
+          ...check.timeout,
         });
       } catch {
         // APNs may have accepted a request that failed in transit, so a retry
@@ -430,6 +468,7 @@ export function createApnsChangeReminderSender(
       const result = report(dependencies.logger, {
         kind: 'permanent-invalid-token',
         cleanupStatus: cleanup,
+        invalidatedAt: error.invalidatedAt,
         ...(error.invalidTokenReason === undefined
           ? {}
           : { invalidTokenReason: error.invalidTokenReason }),

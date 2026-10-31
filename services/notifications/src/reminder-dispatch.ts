@@ -77,6 +77,11 @@ export type ReminderDispatchResultKind =
   | 'uncertain';
 
 export interface ReminderDispatchResult {
+  /**
+   * The outcome was recorded by an earlier run. Each run revisits every
+   * subscription in a due zone, so this keeps a past outcome from counting again.
+   */
+  readonly alreadyRecorded?: true;
   readonly cleanupStatus?: ReminderDispatchCleanupStatus;
   readonly kind: ReminderDispatchResultKind;
 }
@@ -211,7 +216,11 @@ function parsedContext(context: ReminderDispatchContext) {
   } as const;
 }
 
-function effectiveExpiry(endsAt: Date, packValidUntil: Date, eventAt: Date) {
+export function effectiveExpiry(
+  endsAt: Date,
+  packValidUntil: Date,
+  eventAt: Date,
+) {
   return new Date(
     Math.min(endsAt.getTime(), packValidUntil.getTime(), eventAt.getTime()),
   );
@@ -475,6 +484,7 @@ export function createReminderDispatchOperation(
       return {
         ...resultForRecord(preparation),
         ...(cleanupStatus === undefined ? {} : { cleanupStatus }),
+        alreadyRecorded: true,
       };
     }
 
@@ -743,5 +753,28 @@ export function createReminderDispatchOperation(
     return resultForRecord(record);
   }
 
-  return { dispatch, retryInvalidTokenCleanup };
+  /**
+   * Finishes a record that no later dispatch will reach, without a provider
+   * send: planning stops once a Delivery Window closes.
+   */
+  async function settle(
+    record: ReminderDispatchLedgerRecord,
+  ): Promise<ReminderDispatchResult> {
+    if (record.status === 'permanent-failure') {
+      const cleanupStatus = await retryInvalidTokenCleanup(record);
+      return {
+        ...(cleanupStatus === undefined ? {} : { cleanupStatus }),
+        alreadyRecorded: true,
+        kind: 'permanent-failure',
+      };
+    }
+    await dependencies.ledger.claim(
+      record,
+      copyDate(clock(), 'clock'),
+      claimLeaseMs,
+    );
+    return resultForRecord(await dependencies.ledger.get(record));
+  }
+
+  return { dispatch, retryInvalidTokenCleanup, settle };
 }

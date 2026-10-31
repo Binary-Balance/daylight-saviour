@@ -96,6 +96,10 @@ function createTable() {
       if (row === undefined) throw azureError(404);
       return { ...row };
     },
+    // Lists every row: the store must not trust the server-side filter.
+    async *listUnsettledPages() {
+      yield [...rows.values()].map((row) => ({ ...row }));
+    },
     // Lists every row, not only old ones: the store must apply the retention
     // boundary itself rather than trust the server-side filter.
     async *listUpdatedBefore() {
@@ -879,6 +883,108 @@ function operationFixture(
     },
   };
 }
+
+describe('unsettled reminder dispatch records', () => {
+  const closedAt = new Date(Date.parse(window.endsAt) + 1);
+
+  async function unsettled(
+    ledger: ReturnType<typeof createTableReminderDispatchLedgerStore>,
+    now: Date,
+  ) {
+    const records = [];
+    for await (const page of ledger.listUnsettledPages(now)) {
+      records.push(...page);
+    }
+    return records;
+  }
+
+  for (const status of ['pending', 'claimed', 'transient-failure'] as const) {
+    it(`lists a ${status} record only after its window closes`, async () => {
+      const { rows, table } = createTable();
+      const ledger = createTableReminderDispatchLedgerStore(table);
+      await ledger.prepare(preparation());
+      const row = [...rows.values()][0]!;
+      row.status = status;
+
+      assert.deepEqual(await unsettled(ledger, new Date(window.endsAt)), []);
+      assert.equal((await unsettled(ledger, closedAt)).length, 1);
+    });
+  }
+
+  for (const [cleanupStatus, listed] of [
+    [undefined, 0],
+    ['pending', 1],
+    ['failed', 1],
+    ['removed', 0],
+    ['not-found', 0],
+    ['token-replaced', 0],
+  ] as const) {
+    it(`lists a rejected token with cleanup ${cleanupStatus} ${listed} times`, async () => {
+      const { rows, table } = createTable();
+      const ledger = createTableReminderDispatchLedgerStore(table);
+      await ledger.prepare(preparation());
+      const row = [...rows.values()][0]!;
+      row.status = 'permanent-failure';
+      if (cleanupStatus !== undefined) row.cleanupStatus = cleanupStatus;
+
+      assert.equal(
+        (await unsettled(ledger, new Date(window.startsAt))).length,
+        listed,
+      );
+    });
+  }
+
+  for (const status of ['accepted', 'expired', 'uncertain'] as const) {
+    it(`does not list a ${status} record`, async () => {
+      const { rows, table } = createTable();
+      const ledger = createTableReminderDispatchLedgerStore(table);
+      await ledger.prepare(preparation());
+      [...rows.values()][0]!.status = status;
+
+      assert.deepEqual(await unsettled(ledger, closedAt), []);
+    });
+  }
+
+  it('asks Azure for bounded pages of unsettled records', async () => {
+    let filter = '';
+    let pageSize: number | undefined;
+    const ledger = createAzureReminderDispatchLedgerStore(
+      {
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      },
+      {
+        createCredential: () => ({
+          getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+        }),
+        createTableClient: () =>
+          ({
+            listEntities: (options: {
+              readonly queryOptions: { readonly filter: string };
+            }) => {
+              filter = options.queryOptions.filter;
+              return {
+                byPage: (settings: { readonly maxPageSize: number }) => {
+                  pageSize = settings.maxPageSize;
+                  return (async function* () {
+                    yield [];
+                  })();
+                },
+              };
+            },
+          }) as never,
+      },
+    );
+
+    await unsettled(ledger, closedAt);
+
+    assert.equal(
+      filter,
+      "((status eq 'pending' or status eq 'claimed' or status eq 'transient-failure') and deliveryWindowEndsAt lt datetime'2026-09-28T21:00:00.001Z') or (status eq 'permanent-failure' and (cleanupStatus eq 'pending' or cleanupStatus eq 'failed'))",
+    );
+    assert.equal(pageSize, 100);
+  });
+});
 
 describe('reminder dispatch operation', () => {
   it('passes explicit provider expiry and bounded completion deadline', async () => {

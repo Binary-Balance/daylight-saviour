@@ -13,6 +13,7 @@ const ledgerPartitionPrefix = 'reminder-dispatch-v1-';
 const tableMutationRetryLimit = 12;
 const defaultClaimLeaseMs = 60_000;
 const maxClaimLeaseMs = 60 * 60 * 1_000;
+const unsettledPageSize = 100;
 
 export type ReminderDispatchStatus =
   | 'pending'
@@ -113,6 +114,9 @@ export interface ReminderDispatchLedgerTable {
     partitionKey: string,
     rowKey: string,
   ) => Promise<Record<string, unknown>>;
+  readonly listUnsettledPages: (
+    now: Date,
+  ) => AsyncIterable<readonly Record<string, unknown>[]>;
   readonly listUpdatedBefore: (
     cutoff: Date,
   ) => AsyncIterable<Record<string, unknown>>;
@@ -144,6 +148,13 @@ export interface ReminderDispatchLedgerStore {
   readonly prepare: (
     preparation: ReminderDispatchPreparation,
   ) => Promise<ReminderDispatchLedgerRecord>;
+  /**
+   * Yields bounded pages of records no later dispatch will reach: those left
+   * open after their Delivery Window, and rejected tokens still to clean up.
+   */
+  readonly listUnsettledPages: (
+    now: Date,
+  ) => AsyncIterable<readonly ReminderDispatchLedgerRecord[]>;
   /**
    * Deletes, in one pass, records last updated more than 30 days ago whose
    * Change Event has passed.
@@ -500,6 +511,20 @@ function packExpiryCanReset(
     record.status === 'expired' &&
     record.expiryReason === 'pack' &&
     packValidUntil.getTime() >= now.getTime()
+  );
+}
+
+function isUnsettled(record: ReminderDispatchLedgerRecord, now: Date) {
+  if (record.status === 'permanent-failure') {
+    return (
+      record.cleanupStatus === 'pending' || record.cleanupStatus === 'failed'
+    );
+  }
+  return (
+    (record.status === 'pending' ||
+      record.status === 'claimed' ||
+      record.status === 'transient-failure') &&
+    record.deliveryWindowEndsAt.getTime() < now.getTime()
   );
 }
 
@@ -1123,6 +1148,17 @@ export function createTableReminderDispatchLedgerStore(
     );
   }
 
+  async function* listUnsettledPages(
+    nowInput: Date,
+  ): AsyncGenerator<readonly ReminderDispatchLedgerRecord[], void, unknown> {
+    const now = nowDate(nowInput);
+    for await (const page of table.listUnsettledPages(now)) {
+      yield page
+        .map(recordFromEntity)
+        .filter((record) => isUnsettled(record, now));
+    }
+  }
+
   async function purgeExpired(nowInput: Date) {
     const now = nowDate(nowInput);
     const cutoff = now.getTime() - operationalRetentionMs;
@@ -1158,6 +1194,7 @@ export function createTableReminderDispatchLedgerStore(
     complete,
     get,
     invalidate,
+    listUnsettledPages,
     prepare,
     purgeExpired,
     release,
@@ -1227,6 +1264,14 @@ export function createAzureReminderDispatchLedgerStore(
         rowKey,
       };
     },
+    listUnsettledPages: (now) =>
+      table
+        .listEntities<Record<string, unknown>>({
+          queryOptions: {
+            filter: odata`((status eq 'pending' or status eq 'claimed' or status eq 'transient-failure') and deliveryWindowEndsAt lt ${now}) or (status eq 'permanent-failure' and (cleanupStatus eq 'pending' or cleanupStatus eq 'failed'))`,
+          },
+        })
+        .byPage({ maxPageSize: unsettledPageSize }),
     listUpdatedBefore: (cutoff) =>
       table.listEntities<Record<string, unknown>>({
         queryOptions: { filter: odata`updatedAt lt ${cutoff}` },
