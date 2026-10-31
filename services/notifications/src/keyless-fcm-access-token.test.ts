@@ -117,6 +117,58 @@ function successfulResponses() {
 }
 
 describe('keyless FCM access-token provider', () => {
+  for (const [invalid, message] of [
+    [
+      { managedIdentityClientId: 'not-a-client-id' },
+      'Invalid FCM managed-identity client ID',
+    ],
+    [
+      { entraAssertionAudience: 'ftp://portable-google-federation' },
+      'Invalid FCM Entra assertion audience',
+    ],
+    [
+      { entraAssertionAudience: `api://${'a'.repeat(507)}` },
+      'Invalid FCM Entra assertion audience',
+    ],
+    [
+      { entraAssertionAudience: 'api://portable-google-federation/.default' },
+      'Invalid FCM Entra assertion audience',
+    ],
+    [
+      { serviceAccountEmail: 'someone@example.com' },
+      'Invalid FCM service-account email',
+    ],
+    [
+      { workloadIdentityProvider: 'projects/123456/providers/fcm' },
+      'Invalid FCM workload-identity provider',
+    ],
+  ] as const) {
+    it(`rejects before creating a credential: ${message}`, () => {
+      assert.throws(
+        () =>
+          createKeylessFcmAccessTokenProvider(
+            {
+              entraAssertionAudience: 'api://portable-google-federation',
+              managedIdentityClientId: '11111111-2222-4333-8444-555555555555',
+              serviceAccountEmail,
+              workloadIdentityProvider,
+              ...invalid,
+            },
+            {
+              createCredential: () => {
+                throw new Error('credential created');
+              },
+              fetch: async () => {
+                throw new Error('request made');
+              },
+              logger: { write: () => undefined },
+            },
+          ),
+        { message },
+      );
+    });
+  }
+
   it('exchanges one managed-identity assertion for an exact service-account FCM token', async () => {
     const test = harness(successfulResponses());
 

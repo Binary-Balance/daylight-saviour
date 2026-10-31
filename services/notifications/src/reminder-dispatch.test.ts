@@ -395,6 +395,85 @@ describe('reminder dispatch ledger', () => {
     );
   });
 
+  it('resets a pack expiry only for a pack that is still valid', async () => {
+    const { table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    const now = new Date(window.startsAt);
+    const later = new Date(now.getTime() + 1);
+    const validPack = new Date('2027-01-01T00:00:00.000Z');
+    await ledger.prepare({ ...preparation(1, now), packValidUntil: now });
+    assert.equal(await ledger.claim(identity, later), null);
+    assert.equal((await ledger.get(identity))?.expiryReason, 'pack');
+
+    assert.equal(
+      (
+        await ledger.prepare({
+          ...preparation(1, later),
+          packValidUntil: now,
+        })
+      ).status,
+      'expired',
+    );
+    assert.equal(
+      (
+        await ledger.prepare({
+          ...preparation(1, later),
+          packValidUntil: validPack,
+        })
+      ).status,
+      'pending',
+    );
+  });
+
+  it('lets a later generation reset a pack expiry', async () => {
+    const { table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    const now = new Date(window.startsAt);
+    const later = new Date(now.getTime() + 1);
+    await ledger.prepare({ ...preparation(1, now), packValidUntil: now });
+    assert.equal(await ledger.claim(identity, later), null);
+
+    const reset = await ledger.prepare(preparation(2, later));
+
+    assert.equal(reset.status, 'pending');
+    assert.equal(reset.attemptGeneration, 2);
+  });
+
+  for (const outcome of [
+    { kind: 'accepted' },
+    { kind: 'permanent-failure', invalidToken: false },
+    { kind: 'uncertain' },
+  ] as const) {
+    it(`does not invalidate a ${outcome.kind} record`, async () => {
+      const { table } = createTable();
+      const ledger = createTableReminderDispatchLedgerStore(table);
+      const now = new Date(window.startsAt);
+      await ledger.prepare(preparation(1, now));
+      const claim = await ledger.claim(identity, now);
+      assert.ok(claim);
+      await ledger.beginSend(claim, now);
+      await ledger.complete(claim, outcome, now);
+
+      const result = await ledger.invalidate(identity, 1, now);
+
+      assert.equal(result.kind, 'updated');
+      assert.equal(result.record?.status, outcome.kind);
+      assert.equal((await ledger.get(identity))?.status, outcome.kind);
+    });
+  }
+
+  it('does not replace the reason on a true expiry when invalidated', async () => {
+    const { table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    await ledger.prepare(preparation(1));
+    const afterWindow = new Date('2026-09-28T21:00:00.001Z');
+    assert.equal(await ledger.claim(identity, afterWindow), null);
+
+    await ledger.invalidate(identity, 1, afterWindow);
+
+    assert.equal((await ledger.get(identity))?.expiryReason, 'window');
+  });
+
   it('keeps exact window endpoints eligible and expires after the event or window', async () => {
     const { table } = createTable();
     const ledger = createTableReminderDispatchLedgerStore(table);
@@ -1121,6 +1200,89 @@ describe('reminder dispatch operation', () => {
     assert.equal(fixture.sent.length, 0);
     assert.equal((await fixture.ledger.get(identity))?.status, 'pending');
   });
+
+  for (const [given, sent] of [
+    ['forward', 'forward'],
+    ['Forward Change', 'forward'],
+    ['backward', 'backward'],
+    ['Backward Change', 'backward'],
+  ] as const) {
+    it(`sends the ${given} direction to the provider as ${sent}`, async () => {
+      const delivery = { ...context().delivery, changeDirection: given };
+      const fixture = operationFixture(context({ delivery }));
+
+      await fixture.operation.dispatch(context({ delivery }));
+
+      assert.equal(fixture.sent[0]?.changeDirection, sent);
+    });
+  }
+
+  // Runs the final authorization after the current context has become `next`.
+  async function authorizedAfter(next: ReminderDispatchContext) {
+    const fixture = operationFixture();
+    let authorized: boolean | undefined;
+    const operation = createReminderDispatchOperation({
+      ledger: fixture.ledger,
+      provider: {
+        send: async (_request, authorize) => {
+          fixture.setCurrent(next);
+          authorized = await authorize();
+          return { kind: authorized ? 'accepted' : 'not-authorized' };
+        },
+      },
+      readCurrentContext: async () => fixture.getCurrent(),
+      subscriptionStore: {
+        getSubscriptionSnapshot: async () => fixture.getCurrent().subscription,
+        removeIfDeviceTokenAndGenerationMatches: async () => 'removed',
+      },
+      clock: () => new Date(window.startsAt),
+    });
+    await operation.dispatch(context());
+    return authorized;
+  }
+
+  it('authorizes a send whose context has not changed', async () => {
+    assert.equal(await authorizedAfter(context()), true);
+  });
+
+  for (const [change, next] of [
+    [
+      'pack validity',
+      context({ activePackValidUntil: '2027-01-01T00:00:00.000Z' }),
+    ],
+    [
+      'operation deadline',
+      context({ completeOperationDeadline: '2026-09-28T23:00:00.000Z' }),
+    ],
+    [
+      'direction',
+      context({
+        delivery: { ...context().delivery, changeDirection: 'backward' },
+      }),
+    ],
+    [
+      'window start',
+      context({
+        delivery: {
+          ...context().delivery,
+          deliveryWindow: { ...window, startsAt: '2026-09-28T08:00:00.000Z' },
+        },
+      }),
+    ],
+    [
+      'window end',
+      context({
+        delivery: {
+          ...context().delivery,
+          deliveryWindow: { ...window, endsAt: '2026-09-28T20:00:00.000Z' },
+        },
+      }),
+    ],
+  ] as const) {
+    it(`refuses a send when the ${change} changed before it`, async () => {
+      assert.equal(await authorizedAfter(next), false);
+    });
+  }
 
   it('does not catch up after the delivery window', async () => {
     const fixture = operationFixture();
