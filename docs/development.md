@@ -132,14 +132,15 @@ registration needs `EXPO_PUBLIC_REMINDER_REGISTRATION_URL`.
 
 Expo writes every `EXPO_PUBLIC_` value into the bundle, where anyone can read
 it, so never put a secret in one. Git ignores local `.env` files, apart from the
-example. Values are fixed when the app is bundled, so an exported site or a built
-app keeps them until you export or build it again.
+example. An exported site or a built app keeps the values it was bundled with
+until you export or build it again.
 
-Metro caches bundled code with these values inside. After changing or removing a
-value, clear the cache, or the bundle silently keeps the old one:
+The development server applies a changed value when you save `.env`, and needs a
+restart after you remove one. An export is different: Metro caches production
+code with these values inside. After changing or removing a value, clear the
+cache, or the export silently keeps the old one:
 
 ```sh
-npm run web --workspace @daylight-saviour/mobile -- --clear
 npm run web:export -- --clear
 ```
 
