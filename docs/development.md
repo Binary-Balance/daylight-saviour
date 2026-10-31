@@ -348,6 +348,7 @@ Run from root after `npm ci`:
 
 ```sh
 npm run build --workspace @daylight-saviour/copy
+npm run build --workspace @daylight-saviour/domain
 npx --no-install seshat crap --config seshat.packages.json --json > seshat-packages.json
 node scripts/seshat-summary.mjs seshat-packages.json
 ```
