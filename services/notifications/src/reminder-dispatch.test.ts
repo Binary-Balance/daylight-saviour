@@ -400,7 +400,6 @@ describe('reminder dispatch ledger', () => {
     const ledger = createTableReminderDispatchLedgerStore(table);
     const now = new Date(window.startsAt);
     const later = new Date(now.getTime() + 1);
-    const validPack = new Date('2027-01-01T00:00:00.000Z');
     await ledger.prepare({ ...preparation(1, now), packValidUntil: now });
     assert.equal(await ledger.claim(identity, later), null);
     assert.equal((await ledger.get(identity))?.expiryReason, 'pack');
@@ -418,7 +417,7 @@ describe('reminder dispatch ledger', () => {
       (
         await ledger.prepare({
           ...preparation(1, later),
-          packValidUntil: validPack,
+          packValidUntil: later,
         })
       ).status,
       'pending',
@@ -444,7 +443,7 @@ describe('reminder dispatch ledger', () => {
     { kind: 'permanent-failure', invalidToken: false },
     { kind: 'uncertain' },
   ] as const) {
-    it(`does not invalidate a ${outcome.kind} record`, async () => {
+    it(`keeps the ${outcome.kind} status when invalidated`, async () => {
       const { table } = createTable();
       const ledger = createTableReminderDispatchLedgerStore(table);
       const now = new Date(window.startsAt);
@@ -1217,6 +1216,18 @@ describe('reminder dispatch operation', () => {
     });
   }
 
+  it('sends nothing for an unknown direction', async () => {
+    const delivery = {
+      ...context().delivery,
+      changeDirection: 'sideways' as never,
+    };
+    const fixture = operationFixture(context({ delivery }));
+
+    await fixture.operation.dispatch(context({ delivery }));
+
+    assert.deepEqual(fixture.sent, []);
+  });
+
   // Runs the final authorization after the current context has become `next`.
   async function authorizedAfter(next: ReminderDispatchContext) {
     const fixture = operationFixture();
@@ -1246,6 +1257,12 @@ describe('reminder dispatch operation', () => {
   });
 
   for (const [change, next] of [
+    [
+      'registration',
+      context({
+        subscription: { ...subscription, deviceToken: 'fcm-token:rotated' },
+      }),
+    ],
     [
       'pack validity',
       context({ activePackValidUntil: '2027-01-01T00:00:00.000Z' }),

@@ -689,14 +689,12 @@ describe('Azure Table mapping', () => {
   it('uses real clients with the managed identity by default', async (t) => {
     const clients: TableClient[] = [];
     // Keeps the real client from reaching the network.
-    t.mock.method(
-      TableClient.prototype,
-      'getEntity',
-      async function (this: TableClient) {
-        clients.push(this);
-        throw new Error('no network in tests');
-      },
-    );
+    const offline = async function (this: TableClient) {
+      clients.push(this);
+      throw new Error('no network in tests');
+    };
+    t.mock.method(TableClient.prototype, 'getEntity', offline);
+    t.mock.method(TableClient.prototype, 'createEntity', offline);
 
     await assert.rejects(
       createAzureReminderSubscriptionStore({
@@ -710,9 +708,9 @@ describe('Azure Table mapping', () => {
     assert.ok(client);
     assert.equal(client.tableName, 'ReminderRegistrationThrottle');
     assert.equal(client.url, 'https://dlsvstorage.table.core.windows.net');
-    assert.ok(
-      Reflect.get(client, 'credential') instanceof ManagedIdentityCredential,
-    );
+    const credential = Reflect.get(client, 'credential');
+    assert.ok(credential instanceof ManagedIdentityCredential);
+    assert.equal(Reflect.get(credential, 'clientId'), 'runtime-uami-client-id');
   });
 
   it('selects the configured UAMI and shares its credential across both Table clients', () => {
