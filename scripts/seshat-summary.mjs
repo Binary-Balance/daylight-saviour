@@ -99,7 +99,7 @@ if (mutation) {
   const score =
     mutation.score === null ? 'withheld' : `${round(mutation.score)}%`;
   console.log(
-    `\nMutation score: ${score} (killed ${mutation.killed}, survived ${mutation.survived}, unresolved ${mutation.unresolved})`,
+    `\nMutation score: ${score} (killed ${mutation.killed}, counted timeouts ${mutation.countedTimeouts}, survived ${mutation.survived}, unresolved ${mutation.unresolved})`,
   );
 }
 const pseudo = report.result?.pseudoTesting;
