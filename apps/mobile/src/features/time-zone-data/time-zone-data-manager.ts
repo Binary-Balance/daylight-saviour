@@ -53,7 +53,7 @@ export interface TimeZoneDataPackRemoteConfig {
 }
 
 interface HttpResponse {
-  readonly arrayBuffer: () => Promise<ArrayBuffer>;
+  readonly body: ReadableStream<Uint8Array> | null;
   readonly headers: { readonly get: (name: string) => string | null };
   readonly status: number;
 }
@@ -203,17 +203,47 @@ function encodeBase64(bytes: Uint8Array) {
   return chunks.join('');
 }
 
+// Content-Length can be missing or wrong, so the body itself is counted and
+// cancelled as soon as it crosses the maximum. A response with no stream
+// cannot be bounded before its bytes are in memory, so it fails closed
+// instead of falling back to arrayBuffer().
 async function responseBytes(response: HttpResponse, maximum: number) {
   contentLength(response, maximum);
-  let buffer: ArrayBuffer;
-  try {
-    buffer = await response.arrayBuffer();
-  } catch {
-    throw new TimeZoneDataPackTransportError();
+  if (response.body === null) {
+    throw new Error('Response body cannot be read as a stream');
   }
-  const bytes = new Uint8Array(buffer);
-  if (bytes.byteLength > maximum) {
-    throw new Error('Response exceeds maximum byte length');
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch {
+        throw new TimeZoneDataPackTransportError();
+      }
+      if (chunk.done) break;
+      // A chunk that is not bytes cannot be counted, so it is rejected too.
+      if (
+        !(chunk.value instanceof Uint8Array) ||
+        total + chunk.value.byteLength > maximum
+      ) {
+        await reader.cancel();
+        throw new Error('Response exceeds maximum byte length');
+      }
+      total += chunk.value.byteLength;
+      chunks.push(chunk.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
   }
   return bytes;
 }
@@ -255,9 +285,7 @@ export function createTimeZoneDataPackManager(
   options: TimeZoneDataPackManagerOptions,
 ): TimeZoneDataPackManager {
   const now = options.now ?? (() => new Date());
-  const request =
-    options.request ??
-    ((url, init) => fetch(url, init) as unknown as Promise<HttpResponse>);
+  const request = options.request ?? ((url, init) => fetch(url, init));
   const remoteEnabled = options.remoteConfig !== null;
   const bundledPack = activateAustralianTimeZoneDataPack(options.bundledPack);
   let snapshot: TimeZoneDataPackSnapshot = Object.freeze({
@@ -401,10 +429,9 @@ export function createTimeZoneDataPackManager(
       if (packResponse.status !== 200) {
         throw new Error(`Pack request returned ${packResponse.status}`);
       }
-      contentLength(packResponse, manifest.pack.byteLength);
       const packBytes = await beforeDeadline(
         signal,
-        responseBytes(packResponse, maximumTimeZoneDataPackBytes),
+        responseBytes(packResponse, manifest.pack.byteLength),
       );
       const verified = verifySignedTimeZoneDataPackBytes(
         manifest,
@@ -457,6 +484,12 @@ export function createTimeZoneDataPackManager(
       });
     } finally {
       clearTimeout(timer);
+      // Expo buffers an unread body in native memory, and on iOS cancelling a
+      // body stream does not stop the transfer. Aborting ends any request the
+      // check left open, such as one rejected on its headers. It runs after
+      // the outcome is decided, so it cannot turn an oversize body into a lost
+      // connection.
+      deadline.abort();
     }
   }
 
