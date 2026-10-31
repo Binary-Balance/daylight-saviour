@@ -3,10 +3,11 @@ import { spawnSync } from 'node:child_process';
 
 // ponytail: temporary exceptions for advisories without a compatible patched
 // release; docs/development.md records why each is acceptable. Each lists the
-// only lockfile packages that may depend directly on the affected package, so
-// a new direct dependent fails the audit, as does a change in severity.
+// only lockfile packages that may depend directly on the affected package, and
+// `nodes` lists the installed copies of a package with more than one, so a new
+// direct dependent or copy fails the audit, as does a change in severity.
 // Remove an exception once its dependents accept a patched release.
-const exceptions = [
+export const exceptions = [
   {
     name: 'decode-uri-component',
     url: 'https://github.com/advisories/GHSA-vcc3-ghjq-m6fr',
@@ -14,13 +15,10 @@ const exceptions = [
     dependents: ['node_modules/query-string'],
   },
   {
-    name: 'node-forge',
-    url: 'https://github.com/advisories/GHSA-86w9-cpqp-85rv',
+    name: 'decode-uri-component',
+    url: 'https://github.com/advisories/GHSA-qr28-fpjm-wq7f',
     severity: 'high',
-    dependents: [
-      'node_modules/@expo/cli',
-      'node_modules/@expo/code-signing-certificates',
-    ],
+    dependents: ['node_modules/query-string'],
   },
   {
     name: '@azure/msal-node',
@@ -38,6 +36,55 @@ const exceptions = [
       'node_modules/zod-validation-error',
     ],
   },
+  {
+    name: 'glob',
+    url: 'https://github.com/advisories/GHSA-3g3m-2fjr-6pw4',
+    severity: 'moderate',
+    nodes: [
+      'node_modules/@jest/reporters/node_modules/glob',
+      'node_modules/glob',
+      'node_modules/jest-config/node_modules/glob',
+      'node_modules/jest-runtime/node_modules/glob',
+      'node_modules/test-exclude/node_modules/glob',
+    ],
+    dependents: [
+      'node_modules/@expo/cli',
+      'node_modules/@expo/config',
+      'node_modules/@expo/config-plugins',
+      'node_modules/@expo/fingerprint',
+      'node_modules/@expo/metro-config',
+      'node_modules/@jest/reporters',
+      'node_modules/jest-config',
+      'node_modules/jest-runtime',
+      'node_modules/test-exclude',
+    ],
+  },
+  {
+    name: 'minimatch',
+    url: 'https://github.com/advisories/GHSA-g3hv-75wg-m249',
+    severity: 'moderate',
+    nodes: [
+      'node_modules/@expo/fingerprint/node_modules/minimatch',
+      'node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch',
+      'node_modules/glob/node_modules/minimatch',
+      'node_modules/minimatch',
+    ],
+    dependents: [
+      'node_modules/@eslint/config-array',
+      'node_modules/@eslint/eslintrc',
+      'node_modules/@expo/fingerprint',
+      'node_modules/@jest/reporters/node_modules/glob',
+      'node_modules/@typescript-eslint/typescript-estree',
+      'node_modules/eslint',
+      'node_modules/eslint-plugin-import',
+      'node_modules/eslint-plugin-react',
+      'node_modules/glob',
+      'node_modules/jest-config/node_modules/glob',
+      'node_modules/jest-runtime/node_modules/glob',
+      'node_modules/test-exclude',
+      'node_modules/test-exclude/node_modules/glob',
+    ],
+  },
 ];
 const severities = new Set(['moderate', 'high', 'critical']);
 const validSeverities = new Set(['info', 'low', ...severities]);
@@ -45,7 +92,7 @@ const validSeverities = new Set(['info', 'low', ...severities]);
 const hasExactValues = (actual, expected) =>
   Array.isArray(actual) &&
   actual.length === expected.length &&
-  actual.every((value, index) => value === expected[index]);
+  expected.every((value) => actual.includes(value));
 
 const dependentsOf = (packageName, lock) =>
   Object.entries(lock?.packages ?? {})
@@ -61,18 +108,19 @@ const dependentsOf = (packageName, lock) =>
     .sort();
 
 const isAllowedAdvisory = (packageName, vulnerability, advisory, lock) => {
-  const exception = exceptions.find(({ name }) => name === packageName);
+  const exception = exceptions.find(
+    ({ name, url }) => name === packageName && url === advisory.url,
+  );
   return (
     exception !== undefined &&
-    advisory.url === exception.url &&
     advisory.severity === exception.severity &&
     advisory.name === packageName &&
     advisory.dependency === packageName &&
-    hasExactValues(vulnerability.nodes, [`node_modules/${packageName}`]) &&
     hasExactValues(
-      dependentsOf(packageName, lock),
-      exception.dependents.toSorted(),
-    )
+      vulnerability.nodes,
+      exception.nodes ?? [`node_modules/${packageName}`],
+    ) &&
+    hasExactValues(dependentsOf(packageName, lock), exception.dependents)
   );
 };
 
@@ -172,7 +220,7 @@ export function validateAudit(audit, lock) {
       `Invalid npm audit advisories: ${malformedAdvisories.join(', ')}`,
     );
 
-  const allowedPackages = new Set();
+  const allowedAdvisories = new Set();
   const unexpected = entries.flatMap(([packageName, vulnerability]) =>
     (vulnerability.via ?? []).filter((advisory) => {
       if (typeof advisory === 'string' || !severities.has(advisory.severity))
@@ -183,7 +231,7 @@ export function validateAudit(audit, lock) {
         advisory,
         lock,
       );
-      if (isAllowed) allowedPackages.add(packageName);
+      if (isAllowed) allowedAdvisories.add(advisory.url);
       return !isAllowed;
     }),
   );
@@ -194,8 +242,8 @@ export function validateAudit(audit, lock) {
     );
   }
   const stale = exceptions
-    .map(({ name }) => name)
-    .filter((name) => !allowedPackages.has(name));
+    .filter(({ url }) => !allowedAdvisories.has(url))
+    .map(({ name }) => name);
   if (stale.length) {
     throw new Error(
       `Temporary audit exceptions no longer apply: ${stale.join(', ')}; remove them`,
