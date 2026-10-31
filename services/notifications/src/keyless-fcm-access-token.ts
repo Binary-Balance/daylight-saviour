@@ -1,5 +1,3 @@
-import { ManagedIdentityCredential } from '@azure/identity';
-
 import type {
   FcmAccessToken,
   FcmAccessTokenProvider,
@@ -85,10 +83,10 @@ export type KeylessFcmFetch = (
 
 export interface KeylessFcmDependencies {
   readonly clock?: () => Date;
-  readonly createCredential?: (
+  readonly createCredential: (
     clientId: string,
   ) => ManagedIdentityAssertionCredential;
-  readonly fetch?: KeylessFcmFetch;
+  readonly fetch: KeylessFcmFetch;
   readonly logger: KeylessFcmLogger;
   readonly timeoutMs?: number;
 }
@@ -218,27 +216,13 @@ async function readResponse(
   });
 }
 
-function defaultCredential(
-  clientId: string,
-): ManagedIdentityAssertionCredential {
-  return new ManagedIdentityCredential(clientId);
-}
-
-function defaultFetch(
-  input: string,
-  init: KeylessFcmFetchRequest,
-): Promise<KeylessFcmFetchResponse> {
-  return fetch(input, init);
-}
-
 export function createKeylessFcmAccessTokenProvider(
   configuration: KeylessFcmConfiguration,
   dependencies: KeylessFcmDependencies,
 ): FcmAccessTokenProvider {
   assertConfiguration(configuration);
   const clock = dependencies.clock ?? (() => new Date());
-  const createCredential = dependencies.createCredential ?? defaultCredential;
-  const exchangeFetch = dependencies.fetch ?? defaultFetch;
+  const exchangeFetch = dependencies.fetch;
   const timeoutMs = dependencies.timeoutMs ?? defaultTimeoutMs;
   if (
     !Number.isSafeInteger(timeoutMs) ||
@@ -247,7 +231,9 @@ export function createKeylessFcmAccessTokenProvider(
   ) {
     throw new Error('Invalid FCM credential timeout');
   }
-  const credential = createCredential(configuration.managedIdentityClientId);
+  const credential = dependencies.createCredential(
+    configuration.managedIdentityClientId,
+  );
 
   return {
     async getAccessToken(): Promise<FcmAccessToken> {
