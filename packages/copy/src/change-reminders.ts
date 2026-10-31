@@ -111,7 +111,10 @@ export const changeReminders = Object.freeze({
     heading: 'REMINDER REGISTRATION UNCONFIRMED',
     retry: 'Retry registration',
   }),
-  saving: 'Registering reminders…',
+  saving: Object.freeze({
+    body: 'Waiting for confirmation. Reminders are not enabled yet.',
+    heading: 'REGISTERING REMINDERS',
+  }),
   savingPreferences: 'Saving reminder timings…',
   savingZone: 'Updating reminders for your Home Time Zone…',
   timing: Object.freeze({

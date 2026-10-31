@@ -173,18 +173,19 @@ export default function ChangeReminderSection({
     snapshot.kind === 'retry-pending' ||
     snapshot.kind === 'zone-mismatch' ||
     snapshot.kind === 'zone-failed';
-  const pending =
-    snapshot.kind === 'loading' ||
-    snapshot.kind === 'saving' ||
-    snapshot.kind === 'saving-preferences' ||
-    snapshot.kind === 'saving-zone' ||
-    snapshot.kind === 'disabling';
+  const pendingText =
+    snapshot.kind === 'loading'
+      ? copy.changeReminders.loading
+      : snapshot.kind === 'saving'
+        ? copy.changeReminders.saving.body
+        : snapshot.kind === 'disabling'
+          ? copy.changeReminders.disabling
+          : snapshot.kind === 'saving-zone'
+            ? copy.changeReminders.savingZone
+            : copy.changeReminders.savingPreferences;
 
   return (
-    <View
-      accessibilityState={{ busy: pending }}
-      style={[styles.card, { borderColor: palette.rule }]}
-    >
+    <View style={[styles.card, { borderColor: palette.rule }]}>
       <Text
         accessibilityRole="header"
         style={[styles.metadata, { color: palette.secondaryInk }]}
@@ -192,20 +193,30 @@ export default function ChangeReminderSection({
         {copy.changeReminders.heading}
       </Text>
       {content === null ? (
-        <Text
-          accessibilityLiveRegion="none"
-          style={[styles.body, { color: palette.ink }]}
-        >
-          {snapshot.kind === 'loading'
-            ? copy.changeReminders.loading
-            : snapshot.kind === 'saving'
-              ? copy.changeReminders.saving
-              : snapshot.kind === 'disabling'
-                ? copy.changeReminders.disabling
-                : snapshot.kind === 'saving-zone'
-                  ? copy.changeReminders.savingZone
-                  : copy.changeReminders.savingPreferences}
-        </Text>
+        <>
+          {snapshot.kind === 'saving' ? (
+            <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
+              {copy.changeReminders.saving.heading}
+            </Text>
+          ) : null}
+          {/*
+            Text, not a spinner: nothing in this design loops, so reduced
+            motion keeps the same meaning. Registration is announced once,
+            as its pressed button disappears; the text is fixed while busy,
+            so it never repeats. The label keeps Android from reading only
+            "busy".
+          */}
+          <Text
+            accessibilityLabel={pendingText}
+            accessibilityLiveRegion={
+              snapshot.kind === 'saving' ? 'polite' : 'none'
+            }
+            accessibilityState={{ busy: true }}
+            style={[styles.body, { color: palette.ink }]}
+          >
+            {pendingText}
+          </Text>
+        </>
       ) : (
         <>
           {'heading' in content ? (
@@ -214,7 +225,13 @@ export default function ChangeReminderSection({
             </Text>
           ) : null}
           <Text
-            accessibilityLiveRegion={errorState ? 'assertive' : 'none'}
+            accessibilityLiveRegion={
+              errorState
+                ? 'assertive'
+                : snapshot.kind === 'enabled'
+                  ? 'polite'
+                  : 'none'
+            }
             accessibilityRole={errorState ? 'alert' : undefined}
             style={[styles.body, { color: palette.ink }]}
           >
