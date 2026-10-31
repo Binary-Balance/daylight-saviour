@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { validateAudit } from './audit.mjs';
+import { exceptions, validateAudit } from './audit.mjs';
 
 const zodUrl = 'https://github.com/advisories/GHSA-mrhx-c7xc-m3w5';
+const decoderUrl = 'https://github.com/advisories/GHSA-qr28-fpjm-wq7f';
+const nodesOf = (packageName) => [
+  ...exceptions.find(({ name }) => name === packageName).nodes,
+];
 
 const advisory = (name, url, severity) => ({
   source: 1,
@@ -21,7 +25,7 @@ const leaf = (name, url, severity) => ({
 });
 
 const audit = () => ({
-  metadata: { vulnerabilities: { high: 4, moderate: 5 } },
+  metadata: { vulnerabilities: { high: 6, moderate: 2 } },
   vulnerabilities: {
     zod: {
       severity: 'high',
@@ -36,39 +40,60 @@ const audit = () => ({
       nodes: ['node_modules/@expo/cli'],
     },
     'decode-uri-component': {
-      severity: 'moderate',
+      severity: 'high',
       via: [
         advisory(
           'decode-uri-component',
           'https://github.com/advisories/GHSA-vcc3-ghjq-m6fr',
           'moderate',
         ),
+        advisory('decode-uri-component', decoderUrl, 'high'),
       ],
       effects: ['query-string'],
       nodes: ['node_modules/decode-uri-component'],
     },
     'query-string': {
-      severity: 'moderate',
+      severity: 'high',
       via: ['decode-uri-component'],
       effects: ['expo-router'],
       nodes: ['node_modules/query-string'],
     },
     'expo-router': {
-      severity: 'moderate',
+      severity: 'high',
       via: ['query-string'],
       effects: [],
       nodes: ['node_modules/expo-router'],
     },
-    'node-forge': leaf(
-      'node-forge',
-      'https://github.com/advisories/GHSA-86w9-cpqp-85rv',
-      'high',
-    ),
     '@azure/msal-node': leaf(
       '@azure/msal-node',
       'https://github.com/advisories/GHSA-xcx6-jx8p-x3h5',
       'high',
     ),
+    glob: {
+      severity: 'moderate',
+      via: [
+        advisory(
+          'glob',
+          'https://github.com/advisories/GHSA-3g3m-2fjr-6pw4',
+          'moderate',
+        ),
+        'minimatch',
+      ],
+      effects: [],
+      nodes: nodesOf('glob').reverse(),
+    },
+    minimatch: {
+      severity: 'moderate',
+      via: [
+        advisory(
+          'minimatch',
+          'https://github.com/advisories/GHSA-g3hv-75wg-m249',
+          'moderate',
+        ),
+      ],
+      effects: ['glob'],
+      nodes: nodesOf('minimatch'),
+    },
   },
 });
 
@@ -83,23 +108,14 @@ const lock = {
       dependencies: { 'decode-uri-component': '^0.2.2' },
     },
     'node_modules/decode-uri-component': { version: '0.2.2' },
-    'node_modules/@expo/cli': {
-      dependencies: { 'node-forge': '^1.3.3', zod: '^3.25.76' },
-    },
-    'node_modules/@expo/code-signing-certificates': {
-      dependencies: { 'node-forge': '^1.3.3' },
-    },
-    'node_modules/@azure/identity': {
-      dependencies: { '@azure/msal-node': '^5.1.0' },
-    },
-    'node_modules/eslint-plugin-react-hooks': {
-      dependencies: { zod: '^3.25.0 || ^4.0.0' },
-    },
-    'node_modules/zod-validation-error': {
-      peerDependencies: { zod: '^3.25.0 || ^4.0.0' },
-    },
   },
 };
+for (const { name, dependents } of exceptions) {
+  for (const path of dependents) {
+    const entry = (lock.packages[path] ??= {});
+    entry.dependencies = { [name]: '*', ...entry.dependencies };
+  }
+}
 
 const withPackage = (path, entry) => ({
   packages: { ...lock.packages, [path]: entry },
@@ -198,6 +214,23 @@ test('requires every temporary exception to still apply', () => {
   );
 });
 
+test('requires each exception for a package with two advisories', () => {
+  const report = audit();
+  report.vulnerabilities['decode-uri-component'].via.pop();
+  assert.throws(
+    () => validateAudit(report, lock),
+    /no longer apply: decode-uri-component; remove them/i,
+  );
+});
+
+test('rejects an unlisted advisory on a package with an exception', () => {
+  const report = audit();
+  report.vulnerabilities.glob.via.push(
+    advisory('glob', 'https://example.com/other', 'moderate'),
+  );
+  assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
+});
+
 test('rejects an excepted advisory whose severity changed', () => {
   const report = audit();
   report.vulnerabilities.zod.severity = 'critical';
@@ -208,6 +241,24 @@ test('rejects an excepted advisory whose severity changed', () => {
 test('rejects a second installed copy of an excepted package', () => {
   const report = audit();
   report.vulnerabilities.zod.nodes.push('node_modules/other/zod');
+  assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
+});
+
+test('rejects a new installed copy of a package with several', () => {
+  const report = audit();
+  report.vulnerabilities.glob.nodes.push('node_modules/other/glob');
+  assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
+});
+
+test('rejects a removed installed copy of a package with several', () => {
+  const report = audit();
+  report.vulnerabilities.minimatch.nodes.pop();
+  assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
+});
+
+test('rejects a replaced installed copy of a package with several', () => {
+  const report = audit();
+  report.vulnerabilities.minimatch.nodes[0] = 'node_modules/other/minimatch';
   assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
 });
 
