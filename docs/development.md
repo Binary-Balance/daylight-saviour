@@ -368,16 +368,17 @@ Seshat must be able to resolve every mutant, so keep tests and modules in this
 shape:
 
 - Call product code inside tests, not while a test file or module loads. Seshat
-  cannot attribute an implicit error thrown during loading, and it stops the
-  run.
+  cannot attribute an implicit error thrown during loading, so the mutant stays
+  unresolved and the mutation score is withheld.
 - Make a test fail, not hang, when awaited work never settles. In notifications
   and mobile, Seshat treats a timeout as unresolved and withholds the mutation
   score.
 - Avoid reading properties of results in background work that tests do not
   await. If a mutant empties the function that produced the result, or removes
   a `?.`, the read throws an uncaught error. Seshat attributes that error to a
-  test only if the test also fails an assertion; otherwise it stops the run.
-  The token refresh loop therefore only compares its result with `null`.
+  test only if the test also fails an assertion; otherwise the mutant stays
+  unresolved and the score is withheld. The token refresh loop therefore only
+  compares its result with `null`.
 
 Seshat stops each mutant job at a time limit: five times the area's slowest
 baseline test run, at least 30 seconds and at most the setup's `timeoutMs`. That
