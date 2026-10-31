@@ -7,6 +7,7 @@ import { InvocationContext } from '@azure/functions';
 import { activateAustralianTimeZoneDataPack } from '@daylight-saviour/domain/node';
 
 import type { ApnsHttpRequest } from './apns-change-reminder-sender.ts';
+import { createFcmChangeReminderSender } from './fcm-change-reminder-sender.ts';
 import {
   createTableReminderDispatchLedgerStore,
   type ReminderDispatchLedgerStore,
@@ -16,6 +17,7 @@ import {
   createActivePackReader,
   createReminderDispatchProvider,
   createReminderDispatchRunner,
+  dispatcherOwnsCleanup,
   runReminderDispatch,
   type ReminderDispatchBoundaries,
 } from './reminder-dispatch-runtime.ts';
@@ -35,6 +37,7 @@ const during = new Date('2026-09-27T01:00:00.000Z');
 const windowEnd = new Date('2026-09-27T11:00:00.000Z');
 const afterWindow = new Date('2026-09-27T11:00:00.001Z');
 const pageSize = 100;
+const sydney = 'zone=Australia/Sydney';
 const packFile = new URL(
   '../../../packages/time-zone-data/generated/australian-coverage.pack.json',
   import.meta.url,
@@ -108,7 +111,10 @@ function memoryLedgerTable() {
     },
     async *listUnsettledPages() {
       operations.unsettledPages += 1;
-      yield [...rows.values()].map((row) => ({ ...row }));
+      // As the table filter does, this leaves out sweep markers: no status.
+      yield [...rows.values()]
+        .filter((row) => row.status !== undefined)
+        .map((row) => ({ ...row }));
     },
     async *listUpdatedBefore() {
       // Dispatch never purges.
@@ -245,7 +251,7 @@ function harness(
 }
 
 function statuses(test: ReturnType<typeof harness>) {
-  return [...test.ledgerRows.values()].map((row) => row.status);
+  return [...test.ledgerRows.values()].flatMap((row) => row.status ?? []);
 }
 
 const identity = (name: string) => ({
@@ -443,12 +449,14 @@ describe('partitioned reminder dispatch', () => {
     assert.equal(test.operations.queriedZones.length, 8);
     assert.equal(test.operations.pages, 3);
     assert.deepEqual(test.ledgerOperations, {
-      reads: 2_250,
+      reads: 2_258,
       unsettledPages: 1,
-      writes: 1_000,
+      writes: 1_008,
     });
     assert.equal(test.operations.subscriptionReads, 750);
-    assert.deepEqual(test.logs, ['reminder-dispatch-accepted count=250']);
+    assert.deepEqual(test.logs, [
+      `reminder-dispatch-accepted ${sydney} count=250`,
+    ]);
 
     test.logs.length = 0;
     test.state.now = new Date(during.getTime() + 5 * 60 * 1000);
@@ -457,13 +465,13 @@ describe('partitioned reminder dispatch', () => {
     assert.equal(test.sent.length, 250);
     assert.equal(test.operations.pages, 6);
     assert.deepEqual(test.ledgerOperations, {
-      reads: 2_500,
+      reads: 2_516,
       unsettledPages: 2,
-      writes: 1_000,
+      writes: 1_008,
     });
     assert.equal(test.operations.subscriptionReads, 750);
     assert.deepEqual(test.logs, [
-      'reminder-dispatch-already-recorded count=250',
+      `reminder-dispatch-already-recorded ${sydney} count=250`,
     ]);
   });
 
@@ -484,7 +492,7 @@ describe('partitioned reminder dispatch', () => {
 
     assert.equal(test.operations.pages, 50);
     assert.deepEqual(test.logs, [
-      'reminder-dispatch-page-limit-reached count=1',
+      `reminder-dispatch-page-limit-reached ${sydney} count=1`,
     ]);
   });
 
@@ -530,7 +538,9 @@ describe('partitioned reminder dispatch', () => {
 
       await test.run();
       assert.equal(test.sent.length, 0);
-      assert.deepEqual(test.logs, ['reminder-dispatch-stale count=1']);
+      assert.deepEqual(test.logs, [
+        `reminder-dispatch-stale ${sydney} count=1`,
+      ]);
 
       await test.run();
       assert.equal(test.sent[0]?.subscription.attemptGeneration, 2);
@@ -546,10 +556,12 @@ describe('partitioned reminder dispatch', () => {
       await test.run();
 
       assert.deepEqual(test.sent, []);
-      assert.deepEqual(test.logs, ['reminder-dispatch-stale count=1']);
+      assert.deepEqual(test.logs, [
+        `reminder-dispatch-stale ${sydney} count=1`,
+      ]);
     });
 
-    it('refuses a deleted subscription', async () => {
+    it('refuses a deleted subscription, with no false expiry later', async () => {
       const test = harness([row()], {
         prepare: async () => {
           test.subscriptions.delete(key);
@@ -559,7 +571,15 @@ describe('partitioned reminder dispatch', () => {
       await test.run();
 
       assert.deepEqual(test.sent, []);
-      assert.deepEqual(test.logs, ['reminder-dispatch-stale count=1']);
+      assert.deepEqual(test.logs, [
+        `reminder-dispatch-stale ${sydney} count=1`,
+      ]);
+
+      test.logs.length = 0;
+      test.state.now = afterWindow;
+      await test.run();
+
+      assert.deepEqual(test.logs, []);
     });
 
     it('refuses a catch-up send after slow acquisition, and expires it', async () => {
@@ -574,9 +594,26 @@ describe('partitioned reminder dispatch', () => {
       assert.deepEqual(test.sent, []);
       assert.deepEqual(statuses(test), ['expired']);
       assert.deepEqual(test.logs, [
-        'reminder-dispatch-stale count=1',
-        'reminder-dispatch-expired count=1',
+        `reminder-dispatch-expired ${sydney} count=1`,
       ]);
+    });
+
+    it('retries a send refused because its lease lapsed', async () => {
+      const lapsed = new Date(during.getTime() + 61_000);
+      const test = harness([row()], {
+        prepare: async () => {
+          if (test.logs.length === 0) test.state.now = lapsed;
+        },
+      });
+
+      await test.run();
+      assert.deepEqual(test.sent, []);
+      assert.deepEqual(test.logs, [
+        `reminder-dispatch-transient-failure ${sydney} count=1`,
+      ]);
+
+      await test.run();
+      assert.equal(test.sent.length, 1);
     });
   });
 
@@ -605,7 +642,9 @@ describe('partitioned reminder dispatch', () => {
 
       assert.deepEqual(test.sent, []);
       assert.deepEqual(statuses(test), ['uncertain']);
-      assert.deepEqual(test.logs, ['reminder-dispatch-uncertain count=1']);
+      assert.deepEqual(test.logs, [
+        `reminder-dispatch-uncertain ${sydney} count=1`,
+      ]);
     });
 
     it('settles a send intent abandoned after its window closed', async () => {
@@ -622,7 +661,10 @@ describe('partitioned reminder dispatch', () => {
 
       assert.deepEqual(test.sent, []);
       assert.deepEqual(statuses(test), ['uncertain']);
-      assert.deepEqual(test.logs, ['reminder-dispatch-uncertain count=1']);
+      assert.deepEqual(test.logs, [
+        'reminder-dispatch-window-not-swept zone=Pacific/Norfolk timing=one-week count=1',
+        'reminder-dispatch-uncertain count=1',
+      ]);
     });
   });
 
@@ -651,7 +693,9 @@ describe('partitioned reminder dispatch', () => {
         await test.run();
 
         assert.deepEqual(statuses(test), [status]);
-        assert.deepEqual(test.logs, [`reminder-dispatch-${event} count=1`]);
+        assert.deepEqual(test.logs, [
+          `reminder-dispatch-${event} ${sydney} count=1`,
+        ]);
       });
     }
 
@@ -667,8 +711,8 @@ describe('partitioned reminder dispatch', () => {
 
       assert.equal(test.sent.length, 1);
       assert.deepEqual(test.logs, [
-        'reminder-dispatch-uncertain count=1',
-        'reminder-dispatch-already-recorded count=1',
+        `reminder-dispatch-uncertain ${sydney} count=1`,
+        `reminder-dispatch-already-recorded ${sydney} count=1`,
       ]);
     });
 
@@ -713,9 +757,10 @@ describe('partitioned reminder dispatch', () => {
 
       await test.run();
       assert.deepEqual(test.logs, [
-        'reminder-dispatch-permanent-failure count=1',
-        'reminder-dispatch-invalid-token-cleanup-failed count=2',
+        `reminder-dispatch-permanent-failure ${sydney} count=1`,
+        `reminder-dispatch-invalid-token-cleanup-failed ${sydney} count=1`,
         'reminder-dispatch-already-recorded count=1',
+        'reminder-dispatch-invalid-token-cleanup-failed count=1',
       ]);
 
       test.logs.length = 0;
@@ -766,7 +811,10 @@ describe('partitioned reminder dispatch', () => {
 
       assert.ok(test.logs.length > 0);
       for (const line of test.logs) {
-        assert.match(line, /^reminder-dispatch-[a-z-]+ count=\d+$/);
+        assert.match(
+          line,
+          /^reminder-dispatch-[a-z-]+ (zone=[\w/]+ )?count=\d+$/,
+        );
       }
     });
   });
@@ -824,8 +872,8 @@ describe('partitioned reminder dispatch', () => {
 
       assert.equal(test.sent.length, 1);
       assert.deepEqual([...test.logs].sort(), [
-        'reminder-dispatch-accepted count=1',
-        'reminder-dispatch-operation-failed count=1',
+        `reminder-dispatch-accepted ${sydney} count=1`,
+        `reminder-dispatch-operation-failed ${sydney} count=1`,
       ]);
     });
 
@@ -849,9 +897,9 @@ describe('partitioned reminder dispatch', () => {
         test.sent.map((request) => request.homeTimeZone),
         ['Australia/Melbourne'],
       );
-      assert.deepEqual([...test.logs].sort(), [
-        'reminder-dispatch-accepted count=1',
-        'reminder-dispatch-operation-failed count=1',
+      assert.deepEqual(test.logs, [
+        `reminder-dispatch-operation-failed ${sydney} count=1`,
+        'reminder-dispatch-accepted zone=Australia/Melbourne count=1',
       ]);
     });
 
@@ -870,6 +918,251 @@ describe('partitioned reminder dispatch', () => {
         'reminder-dispatch-no-event count=1',
         'reminder-dispatch-operation-failed count=1',
       ]);
+    });
+
+    it('skips a row it cannot read and settles the rest', async () => {
+      const test = harness([], { now: afterWindow });
+      test.ledgerRows.set('invalid', { status: 'pending' });
+      await test.ledger.prepare(preparation('sydney', windowOpen));
+
+      await test.run();
+
+      assert.deepEqual(test.logs.slice(-2), [
+        'reminder-dispatch-ledger-row-invalid count=1',
+        'reminder-dispatch-expired count=1',
+      ]);
+    });
+  });
+
+  describe('counts', () => {
+    it('logs each zone when it finishes', async () => {
+      const test = harness([
+        subscriptionRow('sydney'),
+        subscriptionRow('melbourne', { homeTimeZone: 'Australia/Melbourne' }),
+      ]);
+
+      await test.run();
+
+      assert.deepEqual(test.logs, [
+        `reminder-dispatch-accepted ${sydney} count=1`,
+        'reminder-dispatch-accepted zone=Australia/Melbourne count=1',
+      ]);
+    });
+
+    it('logs each page of settlement when it finishes', async () => {
+      const test = harness([], { now: afterWindow });
+      await test.ledger.prepare(preparation('first', windowOpen));
+      await test.ledger.prepare(preparation('second', windowOpen));
+      const first = await test.ledger.get(identity('first'));
+      const second = await test.ledger.get(identity('second'));
+      assert.ok(first && second);
+      test.dependencies.ledger = {
+        ...test.ledger,
+        async *listUnsettledPages() {
+          yield [first];
+          yield [second];
+        },
+      };
+
+      await test.run();
+
+      assert.deepEqual(test.logs.slice(-2), [
+        'reminder-dispatch-expired count=1',
+        'reminder-dispatch-expired count=1',
+      ]);
+    });
+  });
+
+  describe('closed Delivery Windows', () => {
+    // Every zone that observes daylight saving has this one-week window open
+    // at `during`, and it has closed in all of them an hour or more later.
+    const swept = [
+      'Antarctica/Macquarie',
+      'Australia/Adelaide',
+      'Australia/Broken_Hill',
+      'Australia/Hobart',
+      'Australia/Lord_Howe',
+      'Australia/Melbourne',
+      'Australia/Sydney',
+      'Pacific/Norfolk',
+    ];
+    const hour = 60 * 60 * 1000;
+    const checked = new Date(windowEnd.getTime() + 2 * hour);
+    const events = (event: string) =>
+      swept.map(
+        (zone) =>
+          `reminder-dispatch-window-${event} zone=${zone} timing=one-week count=1`,
+      );
+
+    const windowLogs = (test: ReturnType<typeof harness>) =>
+      test.logs.filter((line) => line.includes('-window-')).sort();
+
+    function limitedQueries(test: ReturnType<typeof harness>) {
+      test.dependencies.subscriptions = {
+        ...test.dependencies.subscriptions,
+        async *listZoneSubscriptionPages() {
+          for (let page = 0; page < 60; page += 1) yield [];
+        },
+      };
+      return test;
+    }
+
+    it('reports a window no run swept, once', async () => {
+      const test = harness([], { now: checked });
+
+      await test.run();
+      assert.equal(test.logs[0], 'reminder-dispatch-no-event count=1');
+      assert.deepEqual(windowLogs(test), events('not-swept'));
+
+      test.logs.length = 0;
+      await test.run();
+      assert.deepEqual(windowLogs(test), []);
+    });
+
+    it('reports a window whose sweeps stopped at the page limit, once', async () => {
+      const test = limitedQueries(harness([]));
+
+      await test.run();
+      test.logs.length = 0;
+      test.state.now = checked;
+      await test.run();
+      assert.deepEqual(windowLogs(test), events('sweep-incomplete'));
+
+      test.logs.length = 0;
+      await test.run();
+      assert.deepEqual(windowLogs(test), []);
+    });
+
+    it('reports a window whose query failed in every sweep', async () => {
+      const test = harness([]);
+      test.dependencies.subscriptions = {
+        ...test.dependencies.subscriptions,
+        async *listZoneSubscriptionPages() {
+          throw azureError(503);
+        },
+      };
+
+      await test.run();
+      test.logs.length = 0;
+      test.state.now = checked;
+      await test.run();
+
+      assert.deepEqual(windowLogs(test), events('sweep-incomplete'));
+    });
+
+    it('says nothing for a window one sweep finished', async () => {
+      const test = limitedQueries(harness([]));
+      const limited = test.dependencies.subscriptions;
+      const { subscriptions } = harness([]).dependencies;
+
+      await test.run();
+      test.dependencies.subscriptions = subscriptions;
+      test.state.now = new Date(during.getTime() + 5 * 60 * 1000);
+      await test.run();
+      test.dependencies.subscriptions = limited;
+      test.state.now = new Date(during.getTime() + 10 * 60 * 1000);
+      await test.run();
+      test.logs.length = 0;
+      test.state.now = checked;
+      await test.run();
+
+      assert.deepEqual(windowLogs(test), []);
+    });
+
+    it('reports once when invocations overlap', async () => {
+      const test = harness([], { now: checked });
+      await settled(Promise.all([test.run(), test.run()]));
+      assert.deepEqual(windowLogs(test), events('not-swept'));
+      assert.ok(!test.logs.some((line) => line.includes('operation-failed')));
+
+      const limited = limitedQueries(harness([]));
+      await limited.run();
+      limited.logs.length = 0;
+      limited.state.now = checked;
+      await settled(Promise.all([limited.run(), limited.run()]));
+      assert.deepEqual(windowLogs(limited), events('sweep-incomplete'));
+      assert.ok(
+        !limited.logs.some((line) => line.includes('operation-failed')),
+      );
+    });
+
+    for (const [name, now] of [
+      ['less than an hour after it closed', new Date(windowEnd.getTime() + 1)],
+      [
+        'more than 13 hours after it closed',
+        new Date(windowEnd.getTime() + 13 * hour + 1),
+      ],
+    ] as const) {
+      it(`leaves a window ${name}`, async () => {
+        const test = harness([], { now });
+
+        await test.run();
+
+        assert.ok(!test.logs.some((line) => line.includes('Sydney')));
+      });
+    }
+
+    it('checks at the last run of the lookback', async () => {
+      const test = harness([], {
+        now: new Date(windowEnd.getTime() + 13 * hour),
+      });
+
+      await test.run();
+
+      assert.ok(test.logs.some((line) => line.includes('Sydney')));
+    });
+
+    it('cannot check without a pack, and catches up when it returns', async () => {
+      const test = harness([], { now: checked });
+      const { readActivePack } = test.dependencies;
+      test.dependencies.readActivePack = async () => {
+        throw new Error('sensitive storage detail');
+      };
+
+      await test.run();
+      assert.deepEqual(test.logs, [
+        'reminder-dispatch-pack-unavailable count=1',
+      ]);
+
+      test.dependencies.readActivePack = readActivePack;
+      await test.run();
+      assert.deepEqual(windowLogs(test), events('not-swept'));
+    });
+
+    it('reports a failed sweep write and still settles', async () => {
+      const test = harness([subscriptionRow('sydney')]);
+      test.dependencies.ledger = {
+        ...test.ledger,
+        recordSweep: async () => {
+          throw azureError(503);
+        },
+      };
+
+      await test.run();
+
+      assert.deepEqual(test.logs.slice(0, 2), [
+        `reminder-dispatch-accepted ${sydney} count=1`,
+        `reminder-dispatch-operation-failed ${sydney} count=1`,
+      ]);
+      assert.equal(test.ledgerOperations.unsettledPages, 1);
+    });
+
+    it('reports a failed check and still settles', async () => {
+      const test = harness([], { now: checked });
+      test.dependencies.ledger = {
+        ...test.ledger,
+        reportClosedWindow: async () => {
+          throw azureError(503);
+        },
+      };
+
+      await test.run();
+
+      assert.deepEqual(test.logs, [
+        'reminder-dispatch-no-event count=1',
+        'reminder-dispatch-operation-failed count=1',
+      ]);
+      assert.equal(test.ledgerOperations.unsettledPages, 1);
     });
   });
 });
@@ -1122,7 +1415,57 @@ describe('reminder dispatch composition', () => {
     assert.deepEqual(statuses(test), ['accepted']);
     assert.deepEqual(logs, [
       'apns-change-reminder-accepted',
-      'reminder-dispatch-accepted count=1',
+      `reminder-dispatch-accepted ${sydney} count=1`,
+    ]);
+  });
+
+  it('leaves removing a rejected FCM token to the dispatcher', async () => {
+    const test = harness([subscriptionRow('android')]);
+    const android = createFcmChangeReminderSender('portable-project', {
+      accessTokenProvider: {
+        getAccessToken: async () => ({
+          expiresAt: new Date(during.getTime() + 60 * 60 * 1000),
+          value: 'access-token',
+        }),
+      },
+      clock: () => test.state.now,
+      logger: { write: (event) => test.logs.push(event) },
+      subscriptionRemover: dispatcherOwnsCleanup,
+      transport: {
+        post: async () => ({
+          body: JSON.stringify({
+            error: {
+              code: 404,
+              details: [
+                {
+                  '@type':
+                    'type.googleapis.com/google.firebase.fcm.v1.FcmError',
+                  errorCode: 'UNREGISTERED',
+                },
+              ],
+              message: 'Rejected',
+              status: 'NOT_FOUND',
+            },
+          }),
+          status: 404,
+        }),
+      },
+    });
+    test.dependencies.provider = createReminderDispatchProvider({
+      android,
+      ios: { send: async () => assert.fail('Sent through the wrong provider') },
+    });
+
+    await test.run();
+
+    assert.equal(test.subscriptions.size, 0);
+    assert.equal(
+      (await test.ledger.get(identity('android')))?.cleanupStatus,
+      'removed',
+    );
+    assert.deepEqual(test.logs, [
+      'fcm-change-reminder-permanent-invalid-token',
+      `reminder-dispatch-permanent-failure ${sydney} count=1`,
     ]);
   });
 

@@ -14,6 +14,9 @@ const tableMutationRetryLimit = 12;
 const defaultClaimLeaseMs = 60_000;
 const maxClaimLeaseMs = 60 * 60 * 1_000;
 const unsettledPageSize = 100;
+// Shorter than any real installation ID, so a sweep marker takes a storage key
+// no delivery can have, and keeps the ledger's retention and purge.
+const sweepInstallationId = 'zone-sweep';
 
 export type ReminderDispatchStatus =
   | 'pending'
@@ -32,6 +35,14 @@ export interface ReminderDispatchIdentity {
   readonly installationId: string;
   readonly timing: ReminderDispatchTiming;
 }
+
+/** The zone, Change Event and timing that one Delivery Window belongs to. */
+export type ReminderDispatchWindow = Omit<
+  ReminderDispatchIdentity,
+  'installationId'
+>;
+
+export type ReminderDispatchWindowReport = 'not-swept' | 'sweep-incomplete';
 
 export type ReminderDispatchExpiryReason =
   | 'event'
@@ -151,15 +162,31 @@ export interface ReminderDispatchLedgerStore {
   /**
    * Yields bounded pages of records no later dispatch will reach: those left
    * open after their Delivery Window, and rejected tokens still to clean up.
+   * A row that cannot be read is skipped and passed to `onInvalidRow`.
    */
   readonly listUnsettledPages: (
     now: Date,
+    onInvalidRow: () => void,
   ) => AsyncIterable<readonly ReminderDispatchLedgerRecord[]>;
   /**
    * Deletes, in one pass, records last updated more than 30 days ago whose
    * Change Event has passed.
    */
   readonly purgeExpired: (now: Date) => Promise<void>;
+  /**
+   * Records a finished sweep of a zone. One sweep that reached the last page
+   * completes the window, whatever the other sweeps did.
+   */
+  readonly recordSweep: (
+    window: ReminderDispatchWindow,
+    reachedLastPage: boolean,
+    now: Date,
+  ) => Promise<void>;
+  /** Says once, to one run, what stopped a closed window being fully swept. */
+  readonly reportClosedWindow: (
+    window: ReminderDispatchWindow,
+    now: Date,
+  ) => Promise<ReminderDispatchWindowReport | null>;
   readonly release: (
     claim: ReminderDispatchClaim,
     now: Date,
@@ -200,6 +227,28 @@ export function reminderDispatchStorageKey(
         normalized.timing,
       ].join(':'),
     ),
+  };
+}
+
+function sweepStorageKey(window: ReminderDispatchWindow) {
+  return reminderDispatchStorageKey({
+    ...window,
+    installationId: sweepInstallationId,
+  });
+}
+
+function sweepEntity(
+  window: ReminderDispatchWindow,
+  sweep: 'complete' | 'incomplete' | 'reported',
+  updatedAt: Date,
+) {
+  return {
+    ...sweepStorageKey(window),
+    changeEventAt: window.changeEventAt,
+    homeTimeZone: window.homeTimeZone,
+    sweep,
+    timing: window.timing,
+    updatedAt,
   };
 }
 
@@ -1150,13 +1199,73 @@ export function createTableReminderDispatchLedgerStore(
 
   async function* listUnsettledPages(
     nowInput: Date,
+    onInvalidRow: () => void,
   ): AsyncGenerator<readonly ReminderDispatchLedgerRecord[], void, unknown> {
     const now = nowDate(nowInput);
     for await (const page of table.listUnsettledPages(now)) {
-      yield page
-        .map(recordFromEntity)
-        .filter((record) => isUnsettled(record, now));
+      yield page.flatMap((entity) => {
+        try {
+          const record = recordFromEntity(entity);
+          return isUnsettled(record, now) ? [record] : [];
+        } catch {
+          // A bad row stays listed until it is purged. Throwing here would
+          // cost every later row, every run, until then.
+          onInvalidRow();
+          return [];
+        }
+      });
     }
+  }
+
+  async function readSweep(window: ReminderDispatchWindow) {
+    const key = sweepStorageKey(window);
+    try {
+      return await table.get(key.partitionKey, key.rowKey);
+    } catch (error) {
+      if (statusCode(error) === 404) return null;
+      throw error;
+    }
+  }
+
+  /** Returns false when an overlapping run wrote first. */
+  async function writeSweep(
+    entity: ReturnType<typeof sweepEntity>,
+    existing: Record<string, unknown> | null,
+  ) {
+    try {
+      if (existing === null) await table.create(entity);
+      else await table.replace(entity, requiredString(existing.etag, 'ETag'));
+      return true;
+    } catch (error) {
+      if (conflict(error)) return false;
+      throw error;
+    }
+  }
+
+  async function recordSweep(
+    window: ReminderDispatchWindow,
+    reachedLastPage: boolean,
+    now: Date,
+  ) {
+    const existing = await readSweep(window);
+    if (
+      existing !== null &&
+      !(reachedLastPage && existing.sweep === 'incomplete')
+    ) {
+      return;
+    }
+    const sweep = reachedLastPage ? 'complete' : 'incomplete';
+    await writeSweep(sweepEntity(window, sweep, nowDate(now)), existing);
+  }
+
+  async function reportClosedWindow(window: ReminderDispatchWindow, now: Date) {
+    const existing = await readSweep(window);
+    if (existing?.sweep === 'complete' || existing?.sweep === 'reported') {
+      return null;
+    }
+    const entity = sweepEntity(window, 'reported', nowDate(now));
+    if (!(await writeSweep(entity, existing))) return null;
+    return existing === null ? 'not-swept' : 'sweep-incomplete';
   }
 
   async function purgeExpired(nowInput: Date) {
@@ -1197,7 +1306,9 @@ export function createTableReminderDispatchLedgerStore(
     listUnsettledPages,
     prepare,
     purgeExpired,
+    recordSweep,
     release,
+    reportClosedWindow,
     beginSend,
     cancelBeforeProvider,
     updateCleanup,

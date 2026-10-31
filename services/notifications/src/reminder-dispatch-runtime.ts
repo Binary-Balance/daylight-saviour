@@ -33,6 +33,7 @@ import {
 import {
   createAzureReminderDispatchLedgerStore,
   type ReminderDispatchLedgerStore,
+  type ReminderDispatchWindowReport,
 } from './reminder-dispatch-ledger.ts';
 import {
   createReminderDispatchOperation,
@@ -55,6 +56,10 @@ const sendConcurrency = 8;
 // each run restarts at the first page. The page-limit event is the signal to
 // add a durable cursor.
 const maxPagesPerQuery = 50;
+// Each window lasts 12 hours, so a window open this long ago has closed, and its
+// last run has had an hour to finish. Every run in the following 12 hours
+// checks it, which outlasts a shorter pack or storage fault after it closes.
+const closedWindowLookbackMs = 13 * 60 * 60 * 1000;
 const packReadTimeoutMs = 10_000;
 const maxManifestBytes = 64 * 1024;
 const everyTiming = { oneDayEnabled: true, oneWeekEnabled: true };
@@ -65,6 +70,7 @@ type ReminderDispatchEvent =
   | 'reminder-dispatch-claimed'
   | 'reminder-dispatch-expired'
   | 'reminder-dispatch-invalid-token-cleanup-failed'
+  | 'reminder-dispatch-ledger-row-invalid'
   | 'reminder-dispatch-no-event'
   | 'reminder-dispatch-not-due'
   | 'reminder-dispatch-operation-failed'
@@ -75,7 +81,8 @@ type ReminderDispatchEvent =
   | 'reminder-dispatch-permanent-failure'
   | 'reminder-dispatch-stale'
   | 'reminder-dispatch-transient-failure'
-  | 'reminder-dispatch-uncertain';
+  | 'reminder-dispatch-uncertain'
+  | `reminder-dispatch-window-${ReminderDispatchWindowReport}`;
 
 const resultEvents: Record<ReminderDispatchResultKind, ReminderDispatchEvent> =
   {
@@ -127,7 +134,7 @@ const productionDispatchBoundaries: ReminderDispatchBoundaries = {
 
 // The dispatcher removes a rejected token itself, fenced by the generation it
 // sent. A sender's unfenced removal could delete a same-token re-registration.
-const dispatcherOwnsCleanup = {
+export const dispatcherOwnsCleanup = {
   removeIfDeviceTokenMatches: async () => 'not-found' as const,
 };
 
@@ -153,6 +160,25 @@ function contextsFor(
     subscription,
   }));
 }
+
+function eventLog(log: (event: string) => void) {
+  const counts = new Map<ReminderDispatchEvent, number>();
+  const count: CountEvent = (event) => {
+    counts.set(event, (counts.get(event) ?? 0) + 1);
+  };
+  // One line for each event, so the log stays bounded however much fails.
+  // Logging as the run goes keeps counts from a run that is killed: the next
+  // run counts an `expired` written by this one as `already-recorded`.
+  const flush = (scope = '') => {
+    for (const [event, occurrences] of counts) {
+      log(`${event} ${scope}count=${occurrences}`);
+    }
+    counts.clear();
+  };
+  return { count, flush };
+}
+
+type EventLog = ReturnType<typeof eventLog>;
 
 async function forEachBounded<T>(
   items: readonly T[],
@@ -186,23 +212,28 @@ async function countResult(
   }
 }
 
+/** Returns whether the pages ran out, rather than a failure or the limit. */
 async function processPages<T>(
   pages: AsyncIterable<readonly T[]>,
   work: (item: T) => Promise<ReminderDispatchResult>,
   count: CountEvent,
+  afterPage?: () => void,
 ) {
   let pagesRead = 0;
   try {
     for await (const page of pages) {
       await forEachBounded(page, (item) => countResult(work(item), count));
+      afterPage?.();
       pagesRead += 1;
       if (pagesRead === maxPagesPerQuery) {
         count('reminder-dispatch-page-limit-reached');
-        return;
+        return false;
       }
     }
+    return true;
   } catch {
     count('reminder-dispatch-operation-failed');
+    return false;
   }
 }
 
@@ -227,12 +258,16 @@ async function readDueZones(
   try {
     const pack = await dependencies.readActivePack();
     const zones = pack.zones
-      .map((zone) => zone.id)
-      .filter(
-        (zone) =>
-          planChangeReminderDeliveries(pack, zone, everyTiming, plannedAt)
-            .length > 0,
-      );
+      .map((zone) => ({
+        plans: planChangeReminderDeliveries(
+          pack,
+          zone.id,
+          everyTiming,
+          plannedAt,
+        ),
+        zone: zone.id,
+      }))
+      .filter(({ plans }) => plans.length > 0);
     if (zones.length === 0) count('reminder-dispatch-no-event');
     return { pack, zones };
   } catch (error) {
@@ -247,12 +282,10 @@ async function readDueZones(
 
 async function dispatchDueZones(
   dependencies: ReminderDispatchRunDependencies,
-  count: CountEvent,
+  { pack, zones }: NonNullable<Awaited<ReturnType<typeof readDueZones>>>,
+  plannedAt: Date,
+  events: EventLog,
 ) {
-  const plannedAt = dependencies.clock();
-  const due = await readDueZones(dependencies, plannedAt, count);
-  if (due === null) return;
-  const { pack, zones } = due;
   // Rechecks plan with the run's fixed instant, so a window closing mid-run
   // reaches the dispatcher's own clock checks and expires, rather than looking
   // like a withdrawn plan. A new pack applies from the next run.
@@ -276,13 +309,52 @@ async function dispatchDueZones(
     },
   );
 
-  for (const zone of zones) {
+  for (const { plans, zone } of zones) {
     const pages = dependencies.subscriptions.listZoneSubscriptionPages(zone);
-    await processPages(
+    const reachedLastPage = await processPages(
       contextPages(pages, pack, plannedAt),
       (context) => operation.dispatch(context),
-      count,
+      events.count,
     );
+    try {
+      for (const plan of plans) {
+        await dependencies.ledger.recordSweep(plan, reachedLastPage, plannedAt);
+      }
+    } catch {
+      events.count('reminder-dispatch-operation-failed');
+    }
+    events.flush(`zone=${zone} `);
+  }
+}
+
+/**
+ * A closed window has no plan, so an outage across all of it leaves no ledger
+ * record to expire. Its sweep marker is the only sign of what happened.
+ */
+async function reportClosedWindows(
+  dependencies: ReminderDispatchRunDependencies,
+  pack: ActivatedTimeZoneDataPack,
+  plannedAt: Date,
+  events: EventLog,
+) {
+  const lookback = new Date(plannedAt.getTime() - closedWindowLookbackMs);
+  try {
+    const windows = pack.zones.flatMap((zone) =>
+      planChangeReminderDeliveries(pack, zone.id, everyTiming, lookback),
+    );
+    for (const window of windows) {
+      const report = await dependencies.ledger.reportClosedWindow(
+        window,
+        plannedAt,
+      );
+      if (report === null) continue;
+      events.count(`reminder-dispatch-window-${report}`);
+      events.flush(`zone=${window.homeTimeZone} timing=${window.timing} `);
+    }
+  } catch {
+    // Storage, or a pack whose coverage starts inside the lookback. The next
+    // run checks again.
+    events.count('reminder-dispatch-operation-failed');
   }
 }
 
@@ -302,23 +374,26 @@ async function* contextPages(
 export async function runReminderDispatch(
   dependencies: ReminderDispatchRunDependencies,
 ) {
-  const counts = new Map<ReminderDispatchEvent, number>();
-  const count: CountEvent = (event) => {
-    counts.set(event, (counts.get(event) ?? 0) + 1);
-  };
+  const events = eventLog(dependencies.log);
+  const plannedAt = dependencies.clock();
+  const due = await readDueZones(dependencies, plannedAt, events.count);
+  events.flush();
+  if (due !== null) {
+    await dispatchDueZones(dependencies, due, plannedAt, events);
+    await reportClosedWindows(dependencies, due.pack, plannedAt, events);
+  }
 
-  await dispatchDueZones(dependencies, count);
   const operation = createOperation(dependencies, async () => null);
   await processPages(
-    dependencies.ledger.listUnsettledPages(dependencies.clock()),
+    dependencies.ledger.listUnsettledPages(dependencies.clock(), () =>
+      events.count('reminder-dispatch-ledger-row-invalid'),
+    ),
     (record) => operation.settle(record),
-    count,
+    events.count,
+    // Settlement runs last, so a timeout is most likely to land here.
+    () => events.flush(),
   );
-
-  // One line for each event, so the log stays bounded however much fails.
-  for (const [event, occurrences] of counts) {
-    dependencies.log(`${event} count=${occurrences}`);
-  }
+  events.flush();
 }
 
 function providerResult(

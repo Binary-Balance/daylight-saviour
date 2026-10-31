@@ -720,11 +720,35 @@ export function createReminderDispatchOperation(
     }
 
     if (outcome.kind === 'not-authorized') {
-      await dependencies.ledger.cancelBeforeProvider(
-        claim,
-        copyDate(clock(), 'clock'),
-      );
-      return { kind: 'stale' };
+      let refused: ReminderDispatchContext | null = finalCurrent;
+      try {
+        refused = await dependencies.readCurrentContext(
+          initial.subscription.installationId,
+          parsed.identity,
+        );
+      } catch {
+        // Unreadable is not changed: the record stays open for a later run.
+      }
+      if (refused === null || !sameProviderContext(refused, finalCurrent)) {
+        await dependencies.ledger.cancelBeforeProvider(
+          claim,
+          copyDate(clock(), 'clock'),
+        );
+        // Left pending, a deleted subscription would later log a false
+        // `expired`: no run revisits it, and settlement cannot tell why.
+        if (!newerSameIdentity(refused, initial)) {
+          await dependencies.ledger.invalidate(
+            parsed.identity,
+            claim.attemptGeneration,
+            copyDate(clock(), 'clock'),
+          );
+        }
+        return { kind: 'stale' };
+      }
+      // Nothing changed, so time or the lease refused it, and nothing was
+      // sent. Completing it as a failure expires it now if its window has
+      // closed, so one delivery cannot log both `stale` and `expired`.
+      outcome = { kind: 'transient-failure' };
     }
 
     let completed;

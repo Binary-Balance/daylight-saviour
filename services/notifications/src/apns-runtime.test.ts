@@ -214,7 +214,7 @@ describe('APNs runtime', () => {
     }
 
     for (const [name, requestTimeoutMs, expected] of [
-      ['shortens', 1_000, 1_000],
+      ['shortens', 1_234, 1_234],
       ['never extends', 60_000, timeoutMs],
     ] as const) {
       it(`${name} its limit for a request deadline`, async (t) => {
