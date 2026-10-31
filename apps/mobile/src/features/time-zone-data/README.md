@@ -26,9 +26,18 @@ offline-valid; HTTP, validation, persistence, and manual failures yield
 retry-failed. Validity Horizon expiry dominates and UI suppresses every
 civil-time claim while retaining pack metadata and recovery control.
 
-Production adapter uses Expo fetch for binary response bytes and one atomic
-AsyncStorage cache record. Remote refresh enables only when both public build
-variables parse successfully:
+Response bodies are read as streams with a running byte count: 64 KiB for the
+manifest and 2 MiB for a pack. The reader cancels a body as soon as it crosses
+its limit, whatever `Content-Length` says, so the app retains at most the limit
+and never parses or verifies an oversize body. The check then fails like any
+other HTTP failure: the active pack stays and manual retry works. A response
+with no stream body fails closed instead of falling back to `arrayBuffer`. When
+a check ends it aborts any request still open, so a response rejected on its
+headers stops downloading.
+
+Production adapter uses Expo fetch, whose native and web responses expose a
+stream body, and one atomic AsyncStorage cache record. Remote refresh enables
+only when both public build variables parse successfully:
 
 - `EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL` — credential-free HTTPS manifest
   URL without query or fragment.
