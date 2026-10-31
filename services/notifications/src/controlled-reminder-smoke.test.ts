@@ -540,11 +540,11 @@ describe('controlled Change Reminder smoke handler', () => {
 
   it('does not expose provider details when delivery fails', async () => {
     const credential = 'short-lived-credential-value';
-    const providerDetail = 'provider response body';
+    const responseBody = 'provider response body';
     const result = await createControlledReminderSmokeHandler(
       runtime({
         send: async () => {
-          throw new Error(`${credential}: ${providerDetail}`);
+          throw new Error(`${credential}: ${responseBody}`);
         },
       }),
     )(request(facts), context());
@@ -552,7 +552,7 @@ describe('controlled Change Reminder smoke handler', () => {
     assert.equal(result.status, 503);
     assert.deepEqual(result.jsonBody, { outcome: 'unavailable' });
     assert.doesNotMatch(JSON.stringify(result), new RegExp(credential));
-    assert.doesNotMatch(JSON.stringify(result), new RegExp(providerDetail));
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(responseBody));
     assert.doesNotMatch(JSON.stringify(result), new RegExp(deviceToken));
   });
 
