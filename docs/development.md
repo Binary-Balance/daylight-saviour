@@ -105,6 +105,36 @@ built-in crypto performs deterministic artifact signing.
 
 The root `allowScripts` policy denies the optional `unrs-resolver@1.12.2` postinstall inherited through `eslint-config-expo`; repository linting works without it. The exact `fsevents@2.3.3` install script is approved for optional native macOS file watching. `strict-allow-scripts=true` makes clean installs fail before any future unreviewed lifecycle script runs. Review and pin a script before approving it.
 
+## Public environment
+
+Expo reads `.env` files only from its project root, `apps/mobile`. A `.env` in the
+repository root does nothing. From the repository root:
+
+```sh
+cp apps/mobile/.env.example apps/mobile/.env
+npm run web
+```
+
+The app runs with the example's placeholders. Replace them to test against a
+real environment. Remote refresh stays off unless both
+`EXPO_PUBLIC_TIME_ZONE_DATA_MANIFEST_URL` and
+`EXPO_PUBLIC_TIME_ZONE_DATA_TRUSTED_KEYS_JSON` are valid, and Change Reminder
+registration needs `EXPO_PUBLIC_REMINDER_REGISTRATION_URL`.
+
+Expo writes every `EXPO_PUBLIC_` value into the bundle, where anyone can read
+it, so never put a secret in one. Git ignores local `.env` files, apart from the
+example. An exported site or a built app keeps the values it was bundled with
+until you export or build it again.
+
+The development server reads `.env` when it starts. Restart it after changing or
+removing a value. It does not need `--clear`. An export is different: Metro caches
+production code with these values inside. After changing or removing a value,
+clear the cache, or the export silently keeps the old one:
+
+```sh
+npm run web:export -- --clear
+```
+
 ## JDK 17
 
 Android Gradle Plugin can run on newer JDKs, but React Native 0.86 requests a Java 17 Gradle toolchain. Use Temurin 17 rather than overriding generated upstream build configuration.
