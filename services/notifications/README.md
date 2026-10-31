@@ -1,14 +1,14 @@
 # Notification service
 
-Azure Functions hosts installation-scoped Change Reminder registration and
-daily [retention cleanup](#stored-data-and-retention). This package also
-provides reusable APNs and FCM senders, and keyless FCM access-token
-primitives. The APNs sender accepts an injected signed provider token and
-HTTP/2 transport; it does not persist or log signing material. No scheduled
-runtime currently composes or invokes them for Change Reminder delivery; the
-owner-gated on-demand handler composes FCM or APNs only when that provider's
-two gates are enabled. No Google service-account key or long-lived FCM
-credential is accepted.
+Azure Functions hosts installation-scoped Change Reminder registration, daily
+[retention cleanup](#stored-data-and-retention) and
+[scheduled dispatch](#scheduled-dispatch), which stays suspended until an
+operator enables it. This package also provides reusable APNs and FCM senders,
+and keyless FCM access-token primitives. The APNs sender accepts an injected
+signed provider token and HTTP/2 transport; it does not persist or log signing
+material. The owner-gated on-demand handler composes FCM or APNs only when that
+provider's two gates are enabled. No Google service-account key or long-lived
+FCM credential is accepted.
 
 The registration HTTP surface accepts a strictly validated `POST`, and the
 installation-scoped `PUT` and `DELETE` endpoints require the current bearer
@@ -78,7 +78,8 @@ queued send passes its expiry, and the sender sets the TTL from the whole
 seconds left just before the request. It rejects an invalid expiry or one more
 than FCM's four-week maximum away. If the expiry has passed by the time of the
 request, it sends nothing and reports the send as expired. The APNs sender
-always sets `apns-expiration: 0`.
+takes the same lifetime: `immediate` sets `apns-expiration: 0`, and a queued
+send sets the expiry in whole seconds, rounded down.
 
 The FCM transport bounds each request, including its response body, to 10
 seconds, and stops waiting even if `fetch` ignores the abort. A
@@ -89,10 +90,143 @@ The APNs transport has the same 10-second default bound, and the APNs sender
 follows the same rule. A failed or invalid provider token stays a transient
 rejection, because nothing was sent.
 
-The senders do not yet implement the complete-operation deadline and
-final-authorization contract. Production timer composition, which bounds each
-FCM expiry by the delivery window, Validity Horizon and Change Event, remains in
-[PUB-73](https://github.com/Binary-Balance/daylight-saviour/issues/73).
+A scheduled send also passes a guard. After credentials are ready, each sender
+calls the dispatcher's final authorization, then gives the transport only the
+time left before the complete-operation deadline, within its 10-second bound.
+If the deadline has passed, it sends nothing and reports the send as expired.
+
+## Scheduled dispatch
+
+The `reminder-dispatch` timer runs every five minutes. It sends only when
+`REMINDER_DISPATCH_ENABLED` is exactly `true`. Any other value, or none, logs
+`reminder-dispatch-suspended` and stops: nothing is read, sent or recorded, so
+deploying the function cannot send anything. The audited kill switch is
+[PUB-75](https://github.com/Binary-Balance/daylight-saviour/issues/75).
+
+An enabled run:
+
+1. Reads and verifies the signed manifest and pack, within 10 seconds. A failure
+   stops planning for that run, and the next run retries. A pack promoted
+   meanwhile applies from the next run.
+2. Plans each pack zone at the run's start, and queries subscriptions only in
+   zones with an open Delivery Window. Each query reads pages of up to 100 rows,
+   at most 50 pages, with at most 8 dispatches in flight.
+3. Dispatches each subscription's planned reminders. The provider expiry and
+   complete-operation deadline are both the earliest of the Delivery Window end,
+   Validity Horizon and Change Event. When a zone's query ends, the run records
+   a sweep marker for that zone's open windows.
+4. [Checks windows that closed recently](#closed-delivery-windows) against their
+   sweep markers.
+5. Settles records no later plan will reach, up to 50 pages of 100: a pending or
+   claimed record whose window has closed, and a rejected token whose cleanup is
+   unfinished. This needs no pack and makes no provider send. A cleanup that
+   keeps failing retries until the daily purge removes its record, 30 days after
+   its last update.
+
+Overlapping runs are safe: ledger claims admit one worker for each delivery, and
+a send intent left by an interrupted run becomes uncertain and is not replayed.
+
+The run logs as it goes, so a killed run keeps what it has already counted. That
+matters because the next run counts an `expired` written by this one as
+`already-recorded`. It logs `reminder-dispatch-<event> zone=<zone> count=<n>`
+after each due zone, and `reminder-dispatch-<event> count=<n>` for planning and
+after each page of settlement. That is at most one line for each event in each
+zone and settlement page, with no installation identifier, token, payload or
+provider detail:
+
+| Event                           | Meaning                                                                                                                                                   |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `accepted`                      | The provider accepted a send.                                                                                                                             |
+| `uncertain`                     | The provider may have accepted a send. It is not repeated.                                                                                                |
+| `transient-failure`             | A send failed safely, or final authorization refused it for time or its lease, and it retries in a later run, inside its window.                          |
+| `permanent-failure`             | The provider rejected a send for good.                                                                                                                    |
+| `invalid-token-cleanup-failed`  | A rejected token is still stored. A later run retries without sending.                                                                                    |
+| `expired`                       | **Eligible work was not delivered.** Alert on this event.                                                                                                 |
+| `window-not-swept`              | **No run finished this zone during this window, so its reminders were not sent.** Logged once for each window, with its zone and timing.                  |
+| `window-sweep-incomplete`       | **No sweep of this zone reached its last page during this window, so later rows got no reminder.** Logged once for each window, with its zone and timing. |
+| `stale`                         | Registration or plan changed before the send, so nothing was sent.                                                                                        |
+| `claimed`, `pending`, `not-due` | Another worker holds the record, or there was nothing to do yet.                                                                                          |
+| `already-recorded`              | An earlier run recorded this delivery. It is not counted twice.                                                                                           |
+| `no-event`                      | No zone has an open Delivery Window.                                                                                                                      |
+| `pack-unavailable`              | **The pack could not be read or verified, so nothing was planned.**                                                                                       |
+| `pack-horizon-invalid`          | **The run's time is outside the active pack's coverage or Validity Horizon, so nothing was planned.**                                                     |
+| `operation-failed`              | A storage call failed. The ledger keeps the delivery safe to retry.                                                                                       |
+| `page-limit-reached`            | **A query stopped at 50 pages, so later rows were not reached.**                                                                                          |
+| `ledger-row-invalid`            | **A ledger row could not be read, so settlement skipped it.** Repeats each run until the row is purged.                                                   |
+
+Senders still write their own fixed events, such as
+`fcm-credential-sts-denied`, to the same invocation log.
+
+### Closed Delivery Windows
+
+`expired` needs a ledger record, and the planner returns nothing once a window
+closes. So an outage across a whole window, whether of the timer, the pack or
+the runtime load, leaves no record to expire. An outage under 12 hours only
+delays sends, so this is the one case that loses reminders.
+
+A sweep marker covers it. It is one ledger row for each zone, Change Event and
+timing, with no installation data. A run writes it when it finishes a due zone,
+recording whether that sweep reached the last page. One sweep that did completes
+the window, and a later sweep cannot undo that.
+
+Each run then plans every pack zone for the instant 13 hours ago. A window lasts
+12 hours, so any window open then has closed, and its last run has had an hour to
+finish. Every run from 1 to 13 hours after a window closes therefore checks it,
+so a fault that clears in that time is still reported. Older windows are not
+checked, which keeps this to a few reads a run.
+
+| Marker               | Event                     |
+| -------------------- | ------------------------- |
+| None                 | `window-not-swept`        |
+| No sweep finished it | `window-sweep-incomplete` |
+| A sweep finished it  | None                      |
+
+The check marks the window reported with a conditional write, so one run raises
+each event once, even when runs overlap. A window that closed while dispatch was
+suspended is reported by the first enabled run within the lookback, which is
+accurate. A pack promoted after a window closed can report a window that no
+earlier pack planned.
+
+The check needs the pack. A run that cannot read it, or whose time is outside
+its coverage, skips the check and logs `pack-unavailable` or
+`pack-horizon-invalid`. Every run during the fault logs that, so alert on those
+events. If the fault clears within 13 hours of a window closing, the next run
+reports the window too. If it lasts longer, those events are the only record. A
+failed runtime load is the same, with `reminder-dispatch-unavailable`. A timer
+that does not run at all logs nothing, so an outage that outlasts a window by
+more than 13 hours needs an alert on missing runs.
+
+### Measured limits
+
+Storage requests measured with local stores and injected providers, for 250
+subscriptions in one zone, 3 pages and 8 due zones:
+
+| Work                     | First run: each send | Later runs: each subscription |
+| ------------------------ | -------------------- | ----------------------------- |
+| Ledger reads             | 9                    | 1                             |
+| Ledger writes            | 4                    | 0                             |
+| Subscription point reads | 3                    | 0                             |
+
+Sweep markers add 1 ledger read each run for each due zone, 1 write the first
+time and 1 more if a later sweep completes it. The 250-subscription run above
+therefore totals 2,258 reads and 1,008 writes, then 258 reads and no writes. A
+closed window adds 1 ledger read each run for 12 hours, and 1 write if reported.
+
+Provider requests come from the code path, not a live measurement. Each FCM send
+makes 1 FCM request, plus an STS and an impersonation request, because the
+provider has no token cache, and asks for a managed-identity token, which the
+Azure SDK may answer from its cache. Each APNs send opens 1 HTTP/2 session for 1
+request. A run also makes 2 pack requests, and at most 8 sends are in flight, so
+up to 24 FCM credential requests can run at once.
+
+These counts do not yet justify token caching, connection pooling or new
+infrastructure. Revisit them when a zone reaches thousands of subscriptions. At
+5,000 in one zone a run reaches the page limit, and later rows are never reached
+because each run starts at the first page. `page-limit-reached` and
+`window-sweep-incomplete` are the signals to add a durable cursor. The filter is on a non-key column, so Azure scans the
+shared partition; a sparse zone can use extra pages, including empty ones, and
+these count towards the limit.
+
 Portable tests use injected stores, time and providers; they provide no
 live-send or deployment evidence.
 
@@ -104,6 +238,7 @@ live-send or deployment evidence.
 | Retired-identity marker (`ReminderSubscriptions`)      | Stop a delayed registration recreating a removed identity | Installation ID, generation and retirement time                                                                                                           | 30 days after the subscription is removed               |
 | Registration throttle (`ReminderRegistrationThrottle`) | Limit registration, update and deletion requests          | Hashed client IP address or installation ID, ten-minute window and request count                                                                          | 30 days after its window starts                         |
 | Dispatch ledger (`ReminderDispatchLedger`)             | Send each reminder at most once and record its outcome    | Installation ID, Home Time Zone, Change Event, timing, generation, delivery window, pack horizon, status, claim, expiry and cleanup state, and timestamps | 30 days after its last update                           |
+| Sweep marker (`ReminderDispatchLedger`)                | Report a Delivery Window that no run fully swept          | Home Time Zone, Change Event, timing, sweep state and last update                                                                                         | 30 days after its last update                           |
 
 Uninstalling the app does not tell the service. An uninstalled app's
 subscription stays until APNs or FCM rejects its token as permanently invalid,
@@ -133,7 +268,10 @@ wait until it is repaired.
 
 The deployed registration functions read the reminder settings below. The
 owner-gated on-demand handler reads provider settings only after both of that
-provider's gates are enabled.
+provider's gates are enabled. Enabled scheduled dispatch needs all the FCM and
+APNs provider settings and both pack settings; if any is missing it logs
+`reminder-dispatch-unavailable` and sends nothing. It does not depend on the
+test gates.
 
 | Setting                               | Purpose                                                                                            |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -143,6 +281,9 @@ provider's gates are enabled.
 | `FCM_WORKLOAD_IDENTITY_PROVIDER`      | Reserved Google workload identity provider resource beginning `//iam.googleapis.com/projects/…`.   |
 | `FCM_SERVICE_ACCOUNT_EMAIL`           | Reserved exact Google service account to impersonate for FCM.                                      |
 | `FCM_PROJECT_ID`                      | Reserved exact Firebase/Google project for FCM HTTP v1 send URLs.                                  |
+| `REMINDER_DISPATCH_ENABLED`           | Enables scheduled dispatch when exactly `true`. Anything else suspends it.                         |
+| `TIME_ZONE_DATA_MANIFEST_URL`         | Signed Time-Zone Data Pack manifest. Read only when dispatch is enabled.                           |
+| `TIME_ZONE_DATA_TRUSTED_KEYS_JSON`    | JSON object of pack key IDs and Ed25519 public keys. Read only when dispatch is enabled.           |
 | `FCM_RUNTIME_ENABLED`                 | Enables the retained owner-controlled Android Change Reminder test composition.                    |
 | `FCM_TEST_SEND_ENABLED`               | Existing default-disabled owner test-send gate shared by Android and iOS smoke sends.              |
 | `APNS_RUNTIME_ENABLED`                | Enables the retained owner-controlled iOS Change Reminder test composition.                        |

@@ -9,7 +9,7 @@ import {
   type FcmHttpRequest,
   type FcmHttpResponse,
   type FcmChangeReminderSubscription,
-  type FcmMessageLifetime,
+  type ChangeReminderLifetime,
   type FcmSubscriptionRemovalResult,
 } from './fcm-change-reminder-sender.ts';
 
@@ -327,7 +327,7 @@ describe('FCM Change Reminder sender', () => {
         test.instance.send(
           subscription,
           facts,
-          lifetime as unknown as FcmMessageLifetime,
+          lifetime as unknown as ChangeReminderLifetime,
         ),
         { message: 'Invalid FCM message lifetime' },
       );
@@ -785,5 +785,138 @@ describe('FCM Change Reminder sender', () => {
       cleanupStatus: 'token-replaced',
     });
     assert.deepEqual(test.removalRequests, [subscription]);
+  });
+
+  describe('a scheduled send', () => {
+    const accepted = response(
+      200,
+      JSON.stringify({ name: 'projects/portable-project/messages/1' }),
+    );
+    const expiresAt = new Date(now.getTime() + 60_000);
+    const authorized = {
+      authorizeBeforeExternalSend: async () => true,
+      completeOperationDeadline: new Date(now.getTime() + 2_500),
+    };
+
+    it('passes the time left before the deadline to the transport', async () => {
+      const test = sender(accepted);
+
+      assert.deepEqual(
+        await test.instance.send(
+          subscription,
+          facts,
+          until(expiresAt),
+          authorized,
+        ),
+        { kind: 'accepted' },
+      );
+      assert.equal(test.requests[0]?.timeoutMs, 2_500);
+    });
+
+    it('sends nothing when the complete-operation deadline has passed', async () => {
+      const test = sender(accepted);
+
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, until(expiresAt), {
+          ...authorized,
+          completeOperationDeadline: now,
+        }),
+        { kind: 'expired' },
+      );
+      assert.deepEqual(test.requests, []);
+    });
+
+    it('authorizes after credentials and before the request', async () => {
+      const steps: string[] = [];
+      const test = sender(accepted, {
+        accessToken: async () => {
+          steps.push('credential');
+          return {
+            expiresAt: new Date(now.getTime() + 60_000),
+            value: fullCredential,
+          };
+        },
+        post: async () => {
+          steps.push('request');
+          return accepted;
+        },
+      });
+
+      await test.instance.send(subscription, facts, until(expiresAt), {
+        ...authorized,
+        authorizeBeforeExternalSend: async () => {
+          steps.push('authorize');
+          return true;
+        },
+      });
+
+      assert.deepEqual(steps, ['credential', 'authorize', 'request']);
+    });
+
+    it('takes the TTL from the clock after authorization', async () => {
+      let current = now;
+      const test = sender(accepted, { clock: () => current });
+
+      await test.instance.send(subscription, facts, until(expiresAt), {
+        ...authorized,
+        authorizeBeforeExternalSend: async () => {
+          current = new Date(now.getTime() + 1_000);
+          return true;
+        },
+      });
+
+      assert.equal(test.requests[0]?.payload.message.android.ttl, '59s');
+    });
+
+    it('reports a refused send without calling FCM', async () => {
+      const test = sender(accepted);
+
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, until(expiresAt), {
+          ...authorized,
+          authorizeBeforeExternalSend: async () => false,
+        }),
+        { kind: 'not-authorized' },
+      );
+      assert.deepEqual(test.requests, []);
+      assert.deepEqual(test.logs, ['fcm-change-reminder-not-authorized']);
+    });
+
+    for (const [name, timeoutMs, firesAfterMs] of [
+      ['shortens', 1_000, 1_000],
+      ['never extends', 60_000, 10_000],
+    ] as const) {
+      it(`${name} the transport limit for a request deadline`, async () => {
+        mock.timers.enable({ apis: ['setTimeout'] });
+        try {
+          const outcome = { settled: false };
+          void createFetchFcmHttpTransport(
+            () =>
+              new Promise(() => {
+                // Never answers, like a stalled connection.
+              }),
+          )
+            .post({
+              accessToken: fullCredential,
+              endpoint: fcmSendEndpoint('portable-project'),
+              payload: {} as FcmHttpRequest['payload'],
+              timeoutMs,
+            })
+            .catch(() => undefined)
+            .finally(() => {
+              outcome.settled = true;
+            });
+
+          mock.timers.tick(firesAfterMs - 1);
+          await new Promise(setImmediate);
+          assert.equal(outcome.settled, false);
+          mock.timers.tick(1);
+          await new Promise(setImmediate);
+          assert.equal(outcome.settled, true);
+        } finally {
+          mock.timers.reset();
+        }
+      });
+    }
   });
 });

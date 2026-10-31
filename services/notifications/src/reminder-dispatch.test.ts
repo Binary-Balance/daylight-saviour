@@ -96,6 +96,10 @@ function createTable() {
       if (row === undefined) throw azureError(404);
       return { ...row };
     },
+    // Lists every row: the store must not trust the server-side filter.
+    async *listUnsettledPages() {
+      yield [...rows.values()].map((row) => ({ ...row }));
+    },
     // Lists every row, not only old ones: the store must apply the retention
     // boundary itself rather than trust the server-side filter.
     async *listUpdatedBefore() {
@@ -880,6 +884,239 @@ function operationFixture(
   };
 }
 
+describe('reminder dispatch sweep markers', () => {
+  const sweptWindow = {
+    changeEventAt: identity.changeEventAt,
+    homeTimeZone: identity.homeTimeZone,
+    timing: identity.timing,
+  };
+  const now = new Date(window.startsAt);
+  const dayMilliseconds = 24 * 60 * 60 * 1000;
+
+  it('stores no installation data', async () => {
+    const { rows, table } = createTable();
+    await createTableReminderDispatchLedgerStore(table).recordSweep(
+      sweptWindow,
+      true,
+      now,
+    );
+
+    const {
+      etag: _etag,
+      partitionKey: _partition,
+      rowKey: _row,
+      ...fields
+    } = [...rows.values()][0]!;
+    assert.deepEqual(fields, {
+      ...sweptWindow,
+      sweep: 'complete',
+      updatedAt: now,
+    });
+  });
+
+  it('never shares a key with a delivery', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+
+    await ledger.prepare(preparation());
+    await ledger.recordSweep(sweptWindow, true, now);
+
+    assert.equal(rows.size, 2);
+  });
+
+  it('keeps one marker for each zone, Change Event and timing', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+
+    await ledger.recordSweep(sweptWindow, true, now);
+    await ledger.recordSweep({ ...sweptWindow, timing: 'one-day' }, true, now);
+    await ledger.recordSweep(
+      { ...sweptWindow, homeTimeZone: 'Australia/Hobart' },
+      true,
+      now,
+    );
+    await ledger.recordSweep(
+      { ...sweptWindow, changeEventAt: '2027-04-03T16:00:00.000Z' },
+      true,
+      now,
+    );
+
+    assert.equal(rows.size, 4);
+  });
+
+  it('writes nothing for a window already finished or reported', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+
+    await ledger.recordSweep(sweptWindow, true, now);
+    const [before] = [...rows.values()];
+    await ledger.recordSweep(sweptWindow, false, now);
+    await ledger.recordSweep(sweptWindow, true, now);
+
+    assert.deepEqual([...rows.values()], [before]);
+  });
+
+  it('propagates a storage failure rather than reporting', async () => {
+    const { table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore({
+      ...table,
+      create: async () => {
+        throw azureError(503);
+      },
+      get: async () => {
+        throw azureError(404);
+      },
+    });
+
+    await assert.rejects(ledger.reportClosedWindow(sweptWindow, now));
+    await assert.rejects(ledger.recordSweep(sweptWindow, true, now));
+  });
+
+  it('propagates a failed read', async () => {
+    const { table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore({
+      ...table,
+      get: async () => {
+        throw azureError(503);
+      },
+    });
+
+    await assert.rejects(ledger.reportClosedWindow(sweptWindow, now));
+  });
+
+  it('is purged like any ledger row', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    await ledger.recordSweep(sweptWindow, true, now);
+
+    await ledger.purgeExpired(new Date(now.getTime() + 29 * dayMilliseconds));
+    assert.equal(rows.size, 1);
+
+    await ledger.purgeExpired(new Date(now.getTime() + 31 * dayMilliseconds));
+    assert.equal(rows.size, 0);
+  });
+});
+
+describe('unsettled reminder dispatch records', () => {
+  const closedAt = new Date(Date.parse(window.endsAt) + 1);
+
+  async function unsettled(
+    ledger: ReturnType<typeof createTableReminderDispatchLedgerStore>,
+    now: Date,
+  ) {
+    const records = [];
+    for await (const page of ledger.listUnsettledPages(now, () => undefined)) {
+      records.push(...page);
+    }
+    return records;
+  }
+
+  it('skips a row it cannot read and keeps the rest of the page', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    rows.set('invalid', { status: 'pending' });
+    await ledger.prepare(preparation());
+    let invalid = 0;
+
+    const pages = [];
+    for await (const page of ledger.listUnsettledPages(closedAt, () => {
+      invalid += 1;
+    })) {
+      pages.push(page.map((record) => record.installationId));
+    }
+
+    assert.deepEqual(pages, [[identity.installationId]]);
+    assert.equal(invalid, 1);
+  });
+
+  for (const status of ['pending', 'claimed', 'transient-failure'] as const) {
+    it(`lists a ${status} record only after its window closes`, async () => {
+      const { rows, table } = createTable();
+      const ledger = createTableReminderDispatchLedgerStore(table);
+      await ledger.prepare(preparation());
+      const row = [...rows.values()][0]!;
+      row.status = status;
+
+      assert.deepEqual(await unsettled(ledger, new Date(window.endsAt)), []);
+      assert.equal((await unsettled(ledger, closedAt)).length, 1);
+    });
+  }
+
+  for (const [cleanupStatus, listed] of [
+    [undefined, 0],
+    ['pending', 1],
+    ['failed', 1],
+    ['removed', 0],
+    ['not-found', 0],
+    ['token-replaced', 0],
+  ] as const) {
+    it(`lists a rejected token with cleanup ${cleanupStatus} ${listed} times`, async () => {
+      const { rows, table } = createTable();
+      const ledger = createTableReminderDispatchLedgerStore(table);
+      await ledger.prepare(preparation());
+      const row = [...rows.values()][0]!;
+      row.status = 'permanent-failure';
+      if (cleanupStatus !== undefined) row.cleanupStatus = cleanupStatus;
+
+      assert.equal(
+        (await unsettled(ledger, new Date(window.startsAt))).length,
+        listed,
+      );
+    });
+  }
+
+  for (const status of ['accepted', 'expired', 'uncertain'] as const) {
+    it(`does not list a ${status} record`, async () => {
+      const { rows, table } = createTable();
+      const ledger = createTableReminderDispatchLedgerStore(table);
+      await ledger.prepare(preparation());
+      [...rows.values()][0]!.status = status;
+
+      assert.deepEqual(await unsettled(ledger, closedAt), []);
+    });
+  }
+
+  it('asks Azure for bounded pages of unsettled records', async () => {
+    let filter = '';
+    let pageSize: number | undefined;
+    const ledger = createAzureReminderDispatchLedgerStore(
+      {
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      },
+      {
+        createCredential: () => ({
+          getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+        }),
+        createTableClient: () =>
+          ({
+            listEntities: (options: {
+              readonly queryOptions: { readonly filter: string };
+            }) => {
+              filter = options.queryOptions.filter;
+              return {
+                byPage: (settings: { readonly maxPageSize: number }) => {
+                  pageSize = settings.maxPageSize;
+                  return (async function* () {
+                    yield [];
+                  })();
+                },
+              };
+            },
+          }) as never,
+      },
+    );
+
+    await unsettled(ledger, closedAt);
+
+    assert.equal(
+      filter,
+      "((status eq 'pending' or status eq 'claimed' or status eq 'transient-failure') and deliveryWindowEndsAt lt datetime'2026-09-28T21:00:00.001Z') or (status eq 'permanent-failure' and (cleanupStatus eq 'pending' or cleanupStatus eq 'failed'))",
+    );
+    assert.equal(pageSize, 100);
+  });
+});
+
 describe('reminder dispatch operation', () => {
   it('passes explicit provider expiry and bounded completion deadline', async () => {
     const fixture = operationFixture();
@@ -1118,7 +1355,10 @@ describe('reminder dispatch operation', () => {
 
     assert.equal((await dispatch).kind, 'stale');
     assert.equal(sends, 0);
-    assert.equal((await fixture.ledger.get(identity))?.status, 'pending');
+    assert.equal(
+      (await fixture.ledger.get(identity))?.expiryReason,
+      'superseded',
+    );
   });
 
   it('performs ownership reconciliation before the final authorization check', async () => {
@@ -1228,15 +1468,23 @@ describe('reminder dispatch operation', () => {
     assert.deepEqual(fixture.sent, []);
   });
 
-  // Runs the final authorization after the current context has become `next`.
-  async function authorizedAfter(next: ReminderDispatchContext) {
-    const fixture = operationFixture();
+  // Runs the final authorization at `at`, on a claim taken at `from`, after the
+  // current context has become `next`.
+  async function authorizedAfter(
+    next: ReminderDispatchContext,
+    initial = context(),
+    from = window.startsAt,
+    at = from,
+  ) {
+    const fixture = operationFixture(initial);
+    let now = new Date(from);
     let authorized: boolean | undefined;
     const operation = createReminderDispatchOperation({
       ledger: fixture.ledger,
       provider: {
         send: async (_request, authorize) => {
           fixture.setCurrent(next);
+          now = new Date(at);
           authorized = await authorize();
           return { kind: authorized ? 'accepted' : 'not-authorized' };
         },
@@ -1246,9 +1494,9 @@ describe('reminder dispatch operation', () => {
         getSubscriptionSnapshot: async () => fixture.getCurrent().subscription,
         removeIfDeviceTokenAndGenerationMatches: async () => 'removed',
       },
-      clock: () => new Date(window.startsAt),
+      clock: () => now,
     });
-    await operation.dispatch(context());
+    await operation.dispatch(initial);
     return authorized;
   }
 
@@ -1300,6 +1548,165 @@ describe('reminder dispatch operation', () => {
       assert.equal(await authorizedAfter(next), false);
     });
   }
+
+  // Each row breaks one bound and keeps the others, so no check can hide
+  // another. The default lease is 60 seconds.
+  describe('final authorization bounds', () => {
+    const later = (at: string, milliseconds: number) =>
+      new Date(Date.parse(at) + milliseconds).toISOString();
+    const lastSecond = later(window.endsAt, -1_000);
+    const deadline = later(window.startsAt, 30_000);
+    const early = context({ completeOperationDeadline: deadline });
+
+    for (const [name, current, from, at, expected] of [
+      ['at the window end', context(), lastSecond, window.endsAt, true],
+      [
+        'past the window end, within the lease',
+        context(),
+        lastSecond,
+        later(window.endsAt, 1),
+        false,
+      ],
+      [
+        'in the last moment of the lease',
+        context(),
+        window.startsAt,
+        later(window.startsAt, 59_999),
+        true,
+      ],
+      [
+        'at the lease end, inside the window',
+        context(),
+        window.startsAt,
+        later(window.startsAt, 60_000),
+        false,
+      ],
+      [
+        'before the deadline',
+        early,
+        window.startsAt,
+        later(deadline, -1),
+        true,
+      ],
+      [
+        'at the deadline, inside the window',
+        early,
+        window.startsAt,
+        deadline,
+        false,
+      ],
+    ] as const) {
+      it(`answers ${expected} ${name}`, async () => {
+        assert.equal(
+          await authorizedAfter(current, current, from, at),
+          expected,
+        );
+      });
+    }
+  });
+
+  describe('a send refused at final authorization', () => {
+    // Refuses the send at `at`, once the context has become `next`.
+    function refusedAt(
+      at: Date,
+      next: () => Promise<ReminderDispatchContext | null>,
+    ) {
+      const fixture = operationFixture();
+      let now = new Date(window.startsAt);
+      let refused = false;
+      const operation = createReminderDispatchOperation({
+        ledger: fixture.ledger,
+        provider: {
+          send: async () => {
+            refused = true;
+            now = at;
+            return { kind: 'not-authorized' };
+          },
+        },
+        readCurrentContext: async () => (refused ? next() : context()),
+        subscriptionStore: {
+          getSubscriptionSnapshot: async () => subscription,
+          removeIfDeviceTokenAndGenerationMatches: async () => 'removed',
+        },
+        clock: () => now,
+      });
+      return { dispatch: () => operation.dispatch(context()), fixture };
+    }
+
+    const inWindow = new Date(window.startsAt);
+    const closed = new Date(Date.parse(window.endsAt) + 1);
+
+    it('closes the record when the subscription has gone', async () => {
+      const { dispatch, fixture } = refusedAt(inWindow, async () => null);
+
+      assert.equal((await dispatch()).kind, 'stale');
+
+      const record = await fixture.ledger.get(identity);
+      assert.equal(record?.status, 'expired');
+      assert.equal(record?.expiryReason, 'superseded');
+    });
+
+    it('closes the record when the plan has changed', async () => {
+      const { dispatch, fixture } = refusedAt(inWindow, async () =>
+        context({
+          delivery: { ...context().delivery, changeDirection: 'backward' },
+        }),
+      );
+
+      assert.equal((await dispatch()).kind, 'stale');
+
+      assert.equal(
+        (await fixture.ledger.get(identity))?.expiryReason,
+        'superseded',
+      );
+    });
+
+    it('expires it, and only that, when the window has closed', async () => {
+      const { dispatch, fixture } = refusedAt(closed, async () => context());
+
+      assert.equal((await dispatch()).kind, 'expired');
+
+      assert.equal(
+        (await fixture.ledger.get(identity))?.expiryReason,
+        'window',
+      );
+    });
+
+    it('prefers a deleted subscription to a closed window', async () => {
+      const { dispatch, fixture } = refusedAt(closed, async () => null);
+
+      assert.equal((await dispatch()).kind, 'stale');
+
+      assert.equal(
+        (await fixture.ledger.get(identity))?.expiryReason,
+        'superseded',
+      );
+    });
+
+    it('keeps it open for a later run when nothing changed', async () => {
+      const { dispatch, fixture } = refusedAt(inWindow, async () => context());
+
+      assert.equal((await dispatch()).kind, 'transient-failure');
+
+      assert.equal(
+        (await fixture.ledger.get(identity))?.status,
+        'transient-failure',
+      );
+    });
+
+    it('keeps it open for a later run when the context is unreadable', async () => {
+      const { dispatch, fixture } = refusedAt(inWindow, async () => {
+        throw new Error('sensitive storage detail');
+      });
+
+      assert.equal((await dispatch()).kind, 'transient-failure');
+
+      assert.equal(
+        (await fixture.ledger.get(identity))?.status,
+        'transient-failure',
+      );
+    });
+  });
 
   it('does not catch up after the delivery window', async () => {
     const fixture = operationFixture();

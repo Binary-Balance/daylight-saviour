@@ -77,6 +77,11 @@ export type ReminderDispatchResultKind =
   | 'uncertain';
 
 export interface ReminderDispatchResult {
+  /**
+   * The outcome was recorded by an earlier run. Each run revisits every
+   * subscription in a due zone, so this keeps a past outcome from counting again.
+   */
+  readonly alreadyRecorded?: true;
   readonly cleanupStatus?: ReminderDispatchCleanupStatus;
   readonly kind: ReminderDispatchResultKind;
 }
@@ -211,7 +216,11 @@ function parsedContext(context: ReminderDispatchContext) {
   } as const;
 }
 
-function effectiveExpiry(endsAt: Date, packValidUntil: Date, eventAt: Date) {
+export function effectiveExpiry(
+  endsAt: Date,
+  packValidUntil: Date,
+  eventAt: Date,
+) {
   return new Date(
     Math.min(endsAt.getTime(), packValidUntil.getTime(), eventAt.getTime()),
   );
@@ -475,6 +484,7 @@ export function createReminderDispatchOperation(
       return {
         ...resultForRecord(preparation),
         ...(cleanupStatus === undefined ? {} : { cleanupStatus }),
+        alreadyRecorded: true,
       };
     }
 
@@ -710,11 +720,35 @@ export function createReminderDispatchOperation(
     }
 
     if (outcome.kind === 'not-authorized') {
-      await dependencies.ledger.cancelBeforeProvider(
-        claim,
-        copyDate(clock(), 'clock'),
-      );
-      return { kind: 'stale' };
+      let refused: ReminderDispatchContext | null = finalCurrent;
+      try {
+        refused = await dependencies.readCurrentContext(
+          initial.subscription.installationId,
+          parsed.identity,
+        );
+      } catch {
+        // Unreadable is not changed: the record stays open for a later run.
+      }
+      if (refused === null || !sameProviderContext(refused, finalCurrent)) {
+        await dependencies.ledger.cancelBeforeProvider(
+          claim,
+          copyDate(clock(), 'clock'),
+        );
+        // Left pending, a deleted subscription would later log a false
+        // `expired`: no run revisits it, and settlement cannot tell why.
+        if (!newerSameIdentity(refused, initial)) {
+          await dependencies.ledger.invalidate(
+            parsed.identity,
+            claim.attemptGeneration,
+            copyDate(clock(), 'clock'),
+          );
+        }
+        return { kind: 'stale' };
+      }
+      // Nothing changed, so time or the lease refused it, and nothing was
+      // sent. Completing it as a failure expires it now if its window has
+      // closed, so one delivery cannot log both `stale` and `expired`.
+      outcome = { kind: 'transient-failure' };
     }
 
     let completed;
@@ -743,5 +777,28 @@ export function createReminderDispatchOperation(
     return resultForRecord(record);
   }
 
-  return { dispatch, retryInvalidTokenCleanup };
+  /**
+   * Finishes a record that no later dispatch will reach, without a provider
+   * send: planning stops once a Delivery Window closes.
+   */
+  async function settle(
+    record: ReminderDispatchLedgerRecord,
+  ): Promise<ReminderDispatchResult> {
+    if (record.status === 'permanent-failure') {
+      const cleanupStatus = await retryInvalidTokenCleanup(record);
+      return {
+        ...(cleanupStatus === undefined ? {} : { cleanupStatus }),
+        alreadyRecorded: true,
+        kind: 'permanent-failure',
+      };
+    }
+    await dependencies.ledger.claim(
+      record,
+      copyDate(clock(), 'clock'),
+      claimLeaseMs,
+    );
+    return resultForRecord(await dependencies.ledger.get(record));
+  }
+
+  return { dispatch, retryInvalidTokenCleanup, settle };
 }
