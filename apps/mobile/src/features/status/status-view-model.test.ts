@@ -81,6 +81,30 @@ describe('createStatusViewModel', () => {
     expect(viewModel.packVersion).toBe('2026c-solar-gold-test');
   });
 
+  it('rethrows errors other than an unavailable civil-time decision', () => {
+    const failure = new Error('tap unreadable');
+
+    expect(() =>
+      createStatusViewModel(
+        activateAustralianTimeZoneDataPack(bundledAustralianDataPack),
+        'current',
+        'Australia/Sydney',
+        new Date('2026-07-19T00:00:00.000Z'),
+        false,
+        'test-installation',
+        null,
+        {
+          changeDirection: 'forward',
+          get changeEventAt(): string {
+            throw failure;
+          },
+          homeTimeZone: 'Australia/Sydney',
+          reminderTiming: 'one-week',
+        },
+      ),
+    ).toThrow(failure);
+  });
+
   it('reopens exact upcoming and recent past reminder events', () => {
     const pack = activateAustralianTimeZoneDataPack(bundledAustralianDataPack);
     const tap = {
