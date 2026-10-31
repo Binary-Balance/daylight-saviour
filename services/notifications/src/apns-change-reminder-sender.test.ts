@@ -294,6 +294,20 @@ describe('APNs Change Reminder sender', () => {
     });
   });
 
+  it('reports a failed or timed-out request as uncertain, not rejected', async () => {
+    const test = sender(undefined, {
+      post: async () => {
+        throw new Error('APNs transport timeout');
+      },
+    });
+
+    assert.deepEqual(await test.instance.send(subscription, facts), {
+      kind: 'uncertain',
+    });
+    assert.deepEqual(test.removalRequests, []);
+    assert.deepEqual(test.logs, ['apns-change-reminder-uncertain']);
+  });
+
   it('treats unavailable or invalid injected provider tokens as transient', async () => {
     for (const getProviderToken of [
       async () => {

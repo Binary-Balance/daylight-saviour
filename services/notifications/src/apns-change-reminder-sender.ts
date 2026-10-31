@@ -123,7 +123,8 @@ export type ApnsChangeReminderLogEvent =
   | 'apns-change-reminder-malformed-response'
   | 'apns-change-reminder-permanent-invalid-token'
   | 'apns-change-reminder-permanent-rejection'
-  | 'apns-change-reminder-transient-rejection';
+  | 'apns-change-reminder-transient-rejection'
+  | 'apns-change-reminder-uncertain';
 
 export interface ApnsChangeReminderLogger {
   readonly write: (event: ApnsChangeReminderLogEvent) => void;
@@ -142,7 +143,8 @@ export type ApnsChangeReminderResult =
       readonly invalidTokenReason?: 'unregistered';
     }
   | { readonly kind: 'permanent-rejection' }
-  | { readonly kind: 'transient-rejection' };
+  | { readonly kind: 'transient-rejection' }
+  | { readonly kind: 'uncertain' };
 
 export interface ApnsChangeReminderSender {
   readonly send: (
@@ -315,6 +317,7 @@ function report(
     'permanent-invalid-token': 'apns-change-reminder-permanent-invalid-token',
     'permanent-rejection': 'apns-change-reminder-permanent-rejection',
     'transient-rejection': 'apns-change-reminder-transient-rejection',
+    uncertain: 'apns-change-reminder-uncertain',
   };
   try {
     logger.write(events[result.kind]);
@@ -386,7 +389,9 @@ export function createApnsChangeReminderSender(
           payload: buildPayload(facts),
         });
       } catch {
-        return report(dependencies.logger, { kind: 'transient-rejection' });
+        // APNs may have accepted a request that failed in transit, so a retry
+        // could deliver the same reminder twice.
+        return report(dependencies.logger, { kind: 'uncertain' });
       }
 
       if (response.status === 200 && response.body === '') {

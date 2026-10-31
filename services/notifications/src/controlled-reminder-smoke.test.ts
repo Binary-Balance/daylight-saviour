@@ -449,6 +449,7 @@ describe('controlled Change Reminder smoke handler', () => {
         kind: 'permanent-invalid-token' as const,
       },
       { kind: 'transient-rejection' as const },
+      { kind: 'uncertain' as const },
       { kind: 'malformed-response' as const },
       { kind: 'permanent-rejection' as const },
     ]) {

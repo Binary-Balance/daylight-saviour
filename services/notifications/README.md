@@ -85,6 +85,10 @@ seconds, and stops waiting even if `fetch` ignores the abort. A
 request that fails or times out in transit is reported as uncertain, not as a
 rejection, because FCM may still have accepted it.
 
+The APNs transport has the same 10-second default bound, and the APNs sender
+follows the same rule. A failed or invalid provider token stays a transient
+rejection, because nothing was sent.
+
 The senders do not yet implement the complete-operation deadline and
 final-authorization contract. Production timer composition, which bounds each
 FCM expiry by the delivery window, Validity Horizon and Change Event, remains in
