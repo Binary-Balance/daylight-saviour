@@ -135,10 +135,10 @@ it, so never put a secret in one. Git ignores local `.env` files, apart from the
 example. An exported site or a built app keeps the values it was bundled with
 until you export or build it again.
 
-The development server applies a changed value when you save `.env`, and needs a
-restart after you remove one. An export is different: Metro caches production
-code with these values inside. After changing or removing a value, clear the
-cache, or the export silently keeps the old one:
+The development server reads `.env` when it starts. Restart it after changing or
+removing a value. It does not need `--clear`. An export is different: Metro caches
+production code with these values inside. After changing or removing a value,
+clear the cache, or the export silently keeps the old one:
 
 ```sh
 npm run web:export -- --clear
