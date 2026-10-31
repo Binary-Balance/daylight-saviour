@@ -181,6 +181,105 @@ describe('activateTimeZoneDataPack', () => {
     ],
     ['missing zones', (pack) => (pack.zones = []), /at least one zone/],
     [
+      'unknown initial state fields',
+      (pack) => (pack.zones[0].initial.surprise = true),
+      /\$\.zones\[0\]\.initial: expected keys/,
+    ],
+    [
+      'unknown transition fields',
+      (pack) => (pack.zones[0].transitions[0].surprise = true),
+      /\$\.zones\[0\]\.transitions\[0\]: expected keys/,
+    ],
+    [
+      'unknown zone fields',
+      (pack) => (pack.zones[0].surprise = true),
+      /\$\.zones\[0\]: expected keys/,
+    ],
+    [
+      'unknown coverage fields',
+      (pack) => (pack.coverage.surprise = true),
+      /\$\.coverage: expected keys/,
+    ],
+    [
+      'unknown source fields',
+      (pack) => (pack.source.surprise = true),
+      /\$\.source: expected keys/,
+    ],
+    [
+      'invalid abbreviations',
+      (pack) => (pack.zones[0].initial.abbreviation = 'aedt'),
+      /expected a civil-time abbreviation/,
+    ],
+    [
+      'transitions that are not arrays',
+      (pack) => (pack.zones[0].transitions = {}),
+      /transitions: expected an array/,
+    ],
+    [
+      'transitions earlier than the previous transition',
+      (pack) => {
+        const later = {
+          abbreviation: 'AEST',
+          at: '2025-10-04T16:00:00.000Z',
+          daylightSaving: false,
+          offsetBeforeSeconds: 39_600,
+          utcOffsetSeconds: 36_000,
+        };
+        const earlier = {
+          abbreviation: 'AEDT',
+          at: '2025-04-05T16:00:00.000Z',
+          daylightSaving: true,
+          offsetBeforeSeconds: 36_000,
+          utcOffsetSeconds: 39_600,
+        };
+        pack.zones[0].transitions = [later, earlier];
+      },
+      /transitions\[1\]\.at: transitions must be strictly ordered/,
+    ],
+    [
+      'transitions that change no offset',
+      (pack) => (pack.zones[0].transitions[0].utcOffsetSeconds = 39_600),
+      /transition changes no offset/,
+    ],
+    [
+      'transitions that keep Daylight Saving Status',
+      (pack) => (pack.zones[0].transitions[0].daylightSaving = true),
+      /must change Daylight Saving Status/,
+    ],
+    [
+      'uppercase archive digests',
+      (pack) =>
+        (pack.source.archiveSha256 = pack.source.archiveSha256.toUpperCase()),
+      /expected a lowercase SHA-256 digest/,
+    ],
+    [
+      'duplicate source files',
+      (pack) => (pack.source.files = ['australasia', 'australasia']),
+      /source files must be unique/,
+    ],
+    [
+      'unsupported sources',
+      (pack) => (pack.source.name = 'Other Time Zone Database'),
+      /unsupported source/,
+    ],
+    [
+      'invalid source versions',
+      (pack) => (pack.source.version = '2026'),
+      /expected an IANA release version/,
+    ],
+    [
+      'source URLs for another version',
+      (pack) =>
+        (pack.source.versionUrl =
+          'https://data.iana.org/time-zones/releases/tzdata2026d.tar.gz'),
+      /URL does not match source version/,
+    ],
+    [
+      'pack versions for another source version',
+      (pack) => (pack.packVersion = '2026d-test-pack'),
+      /version does not identify source version/,
+    ],
+    [
       'identifier without region',
       (pack) => (pack.zones[0].id = 'Sydney'),
       /IANA-style/,

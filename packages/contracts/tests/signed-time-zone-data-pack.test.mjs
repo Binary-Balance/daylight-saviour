@@ -11,10 +11,12 @@ import { describe, it } from 'node:test';
 import {
   activateSignedTimeZoneDataPackManifestBytes,
   activateSignedTimeZoneDataPackManifest,
+  activateTimeZoneDataPack,
   maximumTimeZoneDataPackBytes,
   SignedTimeZoneDataPackValidationError,
   verifySignedTimeZoneDataPackBytes,
 } from '../src/index.ts';
+import { verifySignedTimeZoneDataPackBytes as verifySignedBytes } from '../src/signed-time-zone-data-pack.ts';
 
 const testOnlyPrivateKey = createPrivateKey(`-----BEGIN PRIVATE KEY-----
 MC4CAQAwBQYDK2VwBCIEIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f
@@ -289,6 +291,38 @@ describe('signed Time-Zone Data Pack contract', () => {
       (fixture) => (fixture.manifest.signature.value = 'AAAA'),
       /expected 64 decoded bytes/,
     ],
+    [
+      'unknown pack fields',
+      (fixture) => (fixture.manifest.pack.surprise = true),
+      /\$\.pack: expected keys/,
+    ],
+    [
+      'unsupported pack schemas',
+      (fixture) => (fixture.manifest.pack.schemaVersion = 3),
+      /\$\.pack\.schemaVersion: unsupported version 3/,
+    ],
+    [
+      'uppercase pack digests',
+      (fixture) =>
+        (fixture.manifest.pack.sha256 =
+          fixture.manifest.pack.sha256.toUpperCase()),
+      /expected a lowercase SHA-256 digest/,
+    ],
+    [
+      'unknown signature fields',
+      (fixture) => (fixture.manifest.signature.surprise = true),
+      /\$\.signature: expected keys/,
+    ],
+    [
+      'unsupported signature algorithms',
+      (fixture) => (fixture.manifest.signature.algorithm = 'Ed448'),
+      /unsupported algorithm/,
+    ],
+    [
+      'key identifiers that are not portable',
+      (fixture) => (fixture.manifest.signature.keyId = 'test/only'),
+      /expected a portable key identifier/,
+    ],
   ]) {
     it(`rejects ${name}`, () => {
       const fixture = signedFixture();
@@ -324,9 +358,12 @@ describe('signed Time-Zone Data Pack contract', () => {
       /signature mismatch/,
     ],
     [
-      'manifest metadata inconsistent with signed pack',
-      (fixture) => (fixture.manifest.pack.packVersion = '2026c-test-v2'),
-      /must identify pack version|does not match signed pack/,
+      'manifest pack versions that differ from the signed pack',
+      (fixture) => {
+        fixture.manifest.pack.packVersion = '2026c-test-v2';
+        fixture.manifest.pack.path = 'packs/2026c-test-v2.pack.json';
+      },
+      /\$\.pack\.packVersion: does not match signed pack/,
     ],
   ]) {
     it(`rejects ${name}`, () => {
@@ -345,6 +382,23 @@ describe('signed Time-Zone Data Pack contract', () => {
       );
     });
   }
+  it('rejects a signed pack whose schema differs from its manifest', () => {
+    const fixture = signedFixture();
+
+    assert.throws(
+      () =>
+        verifySignedBytes(
+          activateSignedTimeZoneDataPackManifest(fixture.manifest),
+          fixture.bytes,
+          { 'test-only-2026-a': rawPublicKey(testOnlyPrivateKey) },
+          // The manifest and the pack must each equal the one supported
+          // version, so only a stubbed activation can make them disagree.
+          (value) => ({ ...activateTimeZoneDataPack(value), schemaVersion: 3 }),
+        ),
+      /\$\.pack\.schemaVersion: does not match signed pack/,
+    );
+  });
+
   it('rejects a small-order key that would verify any pack', () => {
     // The identity point with a zero scalar satisfies the cofactored
     // ZIP-215 equation for every message; strict verification refuses it.
