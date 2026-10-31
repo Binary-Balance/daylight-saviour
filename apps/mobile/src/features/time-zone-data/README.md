@@ -27,10 +27,13 @@ retry-failed. Validity Horizon expiry dominates and UI suppresses every
 civil-time claim while retaining pack metadata and recovery control.
 
 Response bodies are read as streams with a running byte count: 64 KiB for the
-manifest and 2 MiB for a pack. The reader cancels a body as soon as it crosses
-its limit, whatever `Content-Length` says, so the app retains at most the limit
-and never parses or verifies an oversize body. The check then fails like any
-other HTTP failure: the active pack stays and manual retry works. A response
+manifest, and for a pack the length its manifest declares, at most 2 MiB. The
+reader cancels a body as soon as it crosses its limit, whatever `Content-Length`
+says, so it keeps at most the limit and never parses or verifies an oversize
+body. Bytes Expo has received but the reader has not yet counted can exceed the
+limit briefly: native code queues them without a limit before the first read,
+and a busy JavaScript thread widens that window later. The check then fails like
+any other HTTP failure: the active pack stays and manual retry works. A response
 with no stream body fails closed instead of falling back to `arrayBuffer`. When
 a check ends it aborts any request still open, so a response rejected on its
 headers stops downloading.

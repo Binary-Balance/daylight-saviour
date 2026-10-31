@@ -666,6 +666,28 @@ describe('Time-Zone Data Pack download bounds', () => {
     expect(body.locked).toBe(false);
   });
 
+  it('rejects a body that Expo delivers as one oversize chunk', async () => {
+    const served = response(200, [new Uint8Array(64 * 1024 + 1)]);
+
+    const { manager } = await check('manifest', served);
+
+    expect(served.reads).toEqual({ cancelled: true, pulled: 1 });
+    expect(served.body.locked).toBe(false);
+    expectRetryFailed(manager);
+  });
+
+  it('stops a pack body at the length its manifest declares', async () => {
+    const artifacts = signedArtifacts();
+    const space = new Uint8Array(1).fill(0x20);
+    const served = response(200, [artifacts.bytes, space, space]);
+
+    const { manager } = await check('pack', served, artifacts);
+
+    expect(served.reads).toEqual({ cancelled: true, pulled: 2 });
+    expect(served.body.locked).toBe(false);
+    expectRetryFailed(manager);
+  });
+
   it('rejects a chunk that is not bytes and cancels the body', async () => {
     const served = response(200, ['not bytes' as never, new Uint8Array(1)]);
 

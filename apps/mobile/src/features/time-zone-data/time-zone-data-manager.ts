@@ -429,10 +429,9 @@ export function createTimeZoneDataPackManager(
       if (packResponse.status !== 200) {
         throw new Error(`Pack request returned ${packResponse.status}`);
       }
-      contentLength(packResponse, manifest.pack.byteLength);
       const packBytes = await beforeDeadline(
         signal,
-        responseBytes(packResponse, maximumTimeZoneDataPackBytes),
+        responseBytes(packResponse, manifest.pack.byteLength),
       );
       const verified = verifySignedTimeZoneDataPackBytes(
         manifest,
@@ -485,10 +484,10 @@ export function createTimeZoneDataPackManager(
       });
     } finally {
       clearTimeout(timer);
-      // Expo buffers an unread body in native memory, and cancelling a body
-      // stream does not stop the transfer. Aborting ends any request the check
-      // left open, such as one rejected on its headers. It runs after the
-      // outcome is decided, so it cannot turn an oversize body into a lost
+      // Expo buffers an unread body in native memory, and on iOS cancelling a
+      // body stream does not stop the transfer. Aborting ends any request the
+      // check left open, such as one rejected on its headers. It runs after
+      // the outcome is decided, so it cannot turn an oversize body into a lost
       // connection.
       deadline.abort();
     }
