@@ -4,12 +4,16 @@ import {
   getAustralianZone,
   resolveCivilTimeReportEvent,
   type ChangeDirection,
+  type ChangeEvent,
   type CivilTimeDecisionUnavailableReason,
   type DaylightSavingStatus,
   type CivilTimeReportPhase,
 } from '@daylight-saviour/domain';
 import type { ActivatedTimeZoneDataPack } from '@daylight-saviour/contracts';
-import { australianEnglish as copy } from '@daylight-saviour/copy';
+import {
+  australianEnglish as copy,
+  type HourCycleContext,
+} from '@daylight-saviour/copy';
 
 import type { TimeZoneDataPackFreshness } from '../time-zone-data/time-zone-data-manager';
 import type { ReviewedNotificationTap } from '../change-reminders/change-reminder-notification-runtime';
@@ -63,6 +67,119 @@ export type StatusViewModel =
       readonly zoneId: string;
     };
 
+type ReadyStatusViewModel = Extract<StatusViewModel, { availability: 'ready' }>;
+
+const unmatchedTapContexts = {
+  'aged-out': { kind: 'aged-out' },
+  'direction-mismatch': { kind: 'event-mismatch' },
+  missing: { kind: 'event-unavailable' },
+} as const;
+
+const unavailableFreshness: Record<
+  CivilTimeDecisionUnavailableReason,
+  'decision-unavailable' | 'expired'
+> = {
+  'before-coverage': 'decision-unavailable',
+  'invalid-instant': 'decision-unavailable',
+  'unsupported-zone': 'decision-unavailable',
+  'validity-expired': 'expired',
+};
+
+function resolveNotificationTap(
+  notificationTap: ReviewedNotificationTap | null,
+  activePack: ActivatedTimeZoneDataPack,
+  zoneId: string,
+  now: Date,
+): {
+  readonly context: ChangeReminderTapContext | null;
+  readonly requestedEventAt: string | null;
+} {
+  if (notificationTap === null) {
+    return { context: null, requestedEventAt: null };
+  }
+  if (notificationTap.homeTimeZone !== zoneId) {
+    return { context: { kind: 'zone-mismatch' }, requestedEventAt: null };
+  }
+
+  const resolution = resolveCivilTimeReportEvent(
+    activePack,
+    zoneId,
+    notificationTap.changeEventAt,
+    notificationTap.changeDirection === 'forward'
+      ? 'Forward Change'
+      : 'Backward Change',
+    now,
+  );
+  if (resolution.kind === 'upcoming' || resolution.kind === 'recent-past') {
+    return {
+      context: {
+        kind: 'matched',
+        relation: resolution.kind === 'recent-past' ? 'past' : 'upcoming',
+      },
+      requestedEventAt: notificationTap.changeEventAt,
+    };
+  }
+  return {
+    context: unmatchedTapContexts[resolution.kind],
+    requestedEventAt: null,
+  };
+}
+
+function changeEventViewModel(
+  event: ChangeEvent,
+  completed: boolean,
+  hourCycleContext: HourCycleContext,
+): NonNullable<ReadyStatusViewModel['event']> {
+  return {
+    countdown: completed
+      ? null
+      : copy.civilTimeReport.changeEvent.countdown(event.secondsUntil),
+    countdownAccessibilityLabel: completed
+      ? null
+      : copy.civilTimeReport.accessibility.countdown(event.secondsUntil),
+    date: copy.civilTimeReport.changeEvent.date(event.localAfter),
+    direction: event.direction,
+    elapsed: completed
+      ? copy.civilTimeReport.changeEvent.elapsed(event.secondsUntil)
+      : null,
+    instant: event.at,
+    clockMovement: copy.civilTimeReport.changeEvent.clocksMove(
+      event.offsetDeltaSeconds,
+    ),
+    offsetChange: copy.civilTimeReport.changeEvent.offsetChange({
+      afterSeconds: event.offsetAfterSeconds,
+      beforeSeconds: event.offsetBeforeSeconds,
+    }),
+    relation: completed ? 'completed' : 'upcoming',
+    wallTimeChange: copy.civilTimeReport.changeEvent.localTimeChange({
+      after: event.localAfter,
+      before: event.localBefore,
+      context: hourCycleContext,
+    }),
+  };
+}
+
+function unavailableViewModel(
+  reason: CivilTimeDecisionUnavailableReason,
+  zoneId: string,
+  packDetails: Pick<StatusViewModel, 'packVersion' | 'validUntil'>,
+  notificationTap: ReviewedNotificationTap | null,
+): StatusViewModel {
+  return {
+    availability: 'unavailable',
+    friendlyZoneLabel:
+      getAustralianZone(zoneId)?.friendlyLabel ??
+      copy.civilTimeReport.decisionUnavailable.fallbackZoneLabel,
+    freshness: unavailableFreshness[reason],
+    message: copy.civilTimeReport.decisionUnavailable.message(reason),
+    ...packDetails,
+    notificationContext:
+      notificationTap === null ? null : { kind: 'report-unavailable' },
+    unavailabilityReason: reason,
+    zoneId,
+  };
+}
+
 export function createStatusViewModel(
   activePack: ActivatedTimeZoneDataPack,
   dataFreshness: TimeZoneDataPackFreshness,
@@ -78,48 +195,18 @@ export function createStatusViewModel(
     validUntil: activePack.coverage.validUntil,
   } as const;
   try {
-    let notificationContext: ChangeReminderTapContext | null = null;
-    let requestedEventAt: string | null = null;
-    if (notificationTap !== null) {
-      if (notificationTap.homeTimeZone !== zoneId) {
-        notificationContext = { kind: 'zone-mismatch' };
-      } else {
-        const expectedDirection =
-          notificationTap.changeDirection === 'forward'
-            ? 'Forward Change'
-            : 'Backward Change';
-        const resolution = resolveCivilTimeReportEvent(
-          activePack,
-          zoneId,
-          notificationTap.changeEventAt,
-          expectedDirection,
-          now,
-        );
-        if (
-          resolution.kind === 'upcoming' ||
-          resolution.kind === 'recent-past'
-        ) {
-          requestedEventAt = notificationTap.changeEventAt;
-          notificationContext = {
-            kind: 'matched',
-            relation: resolution.kind === 'recent-past' ? 'past' : 'upcoming',
-          };
-        } else if (resolution.kind === 'aged-out') {
-          notificationContext = { kind: 'aged-out' };
-        } else if (resolution.kind === 'direction-mismatch') {
-          notificationContext = { kind: 'event-mismatch' };
-        } else {
-          notificationContext = { kind: 'event-unavailable' };
-        }
-      }
-    }
+    const tap = resolveNotificationTap(
+      notificationTap,
+      activePack,
+      zoneId,
+      now,
+    );
     const report = createCivilTimeReport(activePack, zoneId, now, {
       acknowledgedEventAt,
-      requestedEventAt,
+      requestedEventAt: tap.requestedEventAt,
     });
     const decision = report.civilTime;
     const event = report.featuredEvent;
-    const completed = report.phase === 'aftermath';
     const hourCycleContext = {
       homeTimeZone: decision.zoneId,
       uses24hourClock,
@@ -138,41 +225,15 @@ export function createStatusViewModel(
       event:
         event === null
           ? null
-          : {
-              countdown: completed
-                ? null
-                : copy.civilTimeReport.changeEvent.countdown(
-                    event.secondsUntil,
-                  ),
-              countdownAccessibilityLabel: completed
-                ? null
-                : copy.civilTimeReport.accessibility.countdown(
-                    event.secondsUntil,
-                  ),
-              date: copy.civilTimeReport.changeEvent.date(event.localAfter),
-              direction: event.direction,
-              elapsed: completed
-                ? copy.civilTimeReport.changeEvent.elapsed(event.secondsUntil)
-                : null,
-              instant: event.at,
-              clockMovement: copy.civilTimeReport.changeEvent.clocksMove(
-                event.offsetDeltaSeconds,
-              ),
-              offsetChange: copy.civilTimeReport.changeEvent.offsetChange({
-                afterSeconds: event.offsetAfterSeconds,
-                beforeSeconds: event.offsetBeforeSeconds,
-              }),
-              relation: completed ? 'completed' : 'upcoming',
-              wallTimeChange: copy.civilTimeReport.changeEvent.localTimeChange({
-                after: event.localAfter,
-                before: event.localBefore,
-                context: hourCycleContext,
-              }),
-            },
+          : changeEventViewModel(
+              event,
+              report.phase === 'aftermath',
+              hourCycleContext,
+            ),
       friendlyZoneLabel: decision.friendlyZoneLabel,
       freshness: dataFreshness,
       ...packDetails,
-      notificationContext,
+      notificationContext: tap.context,
       phase: report.phase,
       phaseLabel: copy.civilTimeReport.phaseLabel(report.phase),
       secondaryLine: copy.civilTimeReport.secondary.select({
@@ -194,29 +255,11 @@ export function createStatusViewModel(
       throw error;
     }
 
-    const unavailableFreshness: Record<
-      CivilTimeDecisionUnavailableReason,
-      'decision-unavailable' | 'expired'
-    > = {
-      'before-coverage': 'decision-unavailable',
-      'invalid-instant': 'decision-unavailable',
-      'unsupported-zone': 'decision-unavailable',
-      'validity-expired': 'expired',
-    };
-    const freshness = unavailableFreshness[error.reason];
-
-    return {
-      availability: 'unavailable',
-      friendlyZoneLabel:
-        getAustralianZone(zoneId)?.friendlyLabel ??
-        copy.civilTimeReport.decisionUnavailable.fallbackZoneLabel,
-      freshness,
-      message: copy.civilTimeReport.decisionUnavailable.message(error.reason),
-      ...packDetails,
-      notificationContext:
-        notificationTap === null ? null : { kind: 'report-unavailable' },
-      unavailabilityReason: error.reason,
+    return unavailableViewModel(
+      error.reason,
       zoneId,
-    };
+      packDetails,
+      notificationTap,
+    );
   }
 }
