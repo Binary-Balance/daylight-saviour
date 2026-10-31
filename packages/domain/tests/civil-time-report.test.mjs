@@ -225,6 +225,20 @@ describe('createCivilTimeReport', () => {
     assert.equal(report.featuredEvent.direction, 'Backward Change');
   });
 
+  it('rejects resolving an event from an unactivated pack', () => {
+    assert.throws(
+      () =>
+        resolveCivilTimeReportEvent(
+          { ...packJson },
+          'Australia/Sydney',
+          '2026-10-03T16:00:00.000Z',
+          'Forward Change',
+          atSecondsBefore(86_400),
+        ),
+      /must be activated/,
+    );
+  });
+
   it('ignores a requested event missing from the pack', () => {
     const report = createCivilTimeReport(
       pack(),
