@@ -352,7 +352,7 @@ npx --no-install seshat crap --config seshat.packages.json --json > seshat-packa
 node scripts/seshat-summary.mjs seshat-packages.json
 ```
 
-Use `check` instead of `crap` to add mutation testing. It is slow: about 15
+Use `check` instead of `crap` to add mutation testing. It is slow: about 20
 minutes for packages on a four-core CI runner, and hours for mobile. Exit
 status 0 means complete with thresholds met, 1 means a threshold was missed and
 2 means the run was incomplete or invalid. For an area that is not yet
@@ -368,19 +368,29 @@ Seshat must be able to resolve every mutant, so keep tests and modules in this
 shape:
 
 - Call product code inside tests, not while a test file or module loads. Seshat
-  cannot attribute an implicit error thrown during loading, and it stops the
-  run.
-- Make a test fail, not hang, when awaited work never settles. Seshat treats a
-  timeout as unresolved and withholds the mutation score.
+  cannot attribute an implicit error thrown during loading, so the mutant stays
+  unresolved and the mutation score is withheld.
+- Make a test fail, not hang, when awaited work never settles. In notifications
+  and mobile, Seshat treats a timeout as unresolved and withholds the mutation
+  score.
 - Avoid reading properties of results in background work that tests do not
   await. If a mutant empties the function that produced the result, or removes
   a `?.`, the read throws an uncaught error. Seshat attributes that error to a
-  test only if the test also fails an assertion; otherwise it stops the run.
-  The token refresh loop therefore only compares its result with `null`.
+  test only if the test also fails an assertion; otherwise the mutant stays
+  unresolved and the score is withheld. The token refresh loop therefore only
+  compares its result with `null`.
+
+Seshat stops each mutant job at a time limit: five times the area's slowest
+baseline test run, at least 30 seconds and at most the setup's `timeoutMs`. That
+is 30 seconds for packages and notifications, and about 80 seconds for mobile.
+A mutant whose tests are still running at the limit is a timeout, even if they
+would have finished.
 
 Some mutants hang no matter how the tests are written. Removing
 `index += decoded.width;` from `strictUtf8` in the contracts package makes its
-loop endless. Seshat stops a run after any job timeout, so
-`seshat.packages.json` leaves out Seshat's `statement` mutants, which remove
-whole statements. Restore them once Seshat can count timeouts as detected
-([#181](https://github.com/Binary-Balance/daylight-saviour/issues/181)).
+loop endless, and the test runner's own timer cannot stop synchronous code.
+`seshat.packages.json` therefore sets `countTimeoutsAsKilled`: a mutant that
+reaches the limit and stops cleanly counts as detected. The report keeps its
+`timed-out` verdict and adds it to `countedTimeouts`, which the summary shows.
+The cost is that a slow mutant that would have survived also counts as detected,
+so check any new counted timeout. Notifications and mobile leave the setting off.

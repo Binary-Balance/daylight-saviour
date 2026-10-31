@@ -47,7 +47,7 @@ function settled<T>(work: Promise<T>): Promise<T> {
 
 // Waits until a dispatch reaches a test barrier. A dispatch that settles
 // first fails the test, rather than leaving its rejection unhandled: Seshat
-// counts an unhandled rejection as an execution error and stops the run.
+// counts an unhandled rejection as an execution error and withholds the score.
 function reached(barrier: Promise<void>, dispatch: Promise<unknown>) {
   return settled(
     Promise.race([
