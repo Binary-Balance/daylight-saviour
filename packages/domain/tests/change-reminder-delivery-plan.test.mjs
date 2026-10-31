@@ -237,6 +237,16 @@ describe('planChangeReminderDeliveries', () => {
     assert.ok(reminderFor(reminders, '2026-10-06T16:00:00.000Z', 'one-week'));
   });
 
+  it('rejects an unactivated pack even for an unknown Home Time Zone', () => {
+    assert.throws(
+      () =>
+        plan('Mars/Olympus', '2026-01-01T00:00:00.000Z', enabled, {
+          ...packJson,
+        }),
+      /must be activated/,
+    );
+  });
+
   it('fails closed before and after coverage, including invalid instants', () => {
     assert.doesNotThrow(() =>
       plan('Australia/Sydney', pack().coverage.validUntil),
