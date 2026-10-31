@@ -1,5 +1,10 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { AccessibilityInfo, ScrollView } from 'react-native';
+import {
+  AccessibilityInfo,
+  AppState,
+  ScrollView,
+  type AppStateStatus,
+} from 'react-native';
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
 import appConfig from '../../../app.json';
@@ -73,6 +78,10 @@ function createAdapters({
 }
 
 const now = new Date('2026-07-19T00:00:00.000Z');
+
+// Sydney's Forward Change in October 2026; its Aftermath lasts 48 hours.
+const changeEventAt = '2026-10-03T16:00:00.000Z';
+const duringAftermath = new Date('2026-10-03T17:00:00.000Z');
 
 describe('HomeTimeZoneScreen', () => {
   beforeEach(() => {
@@ -352,6 +361,194 @@ describe('HomeTimeZoneScreen', () => {
       await screen.findByTestId('ordinary-civil-time-report'),
     ).toBeTruthy();
     expect(screen.queryByTestId('aftermath-civil-time-report')).toBeNull();
+  });
+
+  describe('when the app returns from the background', () => {
+    // The screen and the reminder section it shows each add an AppState
+    // listener, and Jest's AppState mock otherwise ignores them.
+    const listeners = new Set<(state: AppStateStatus) => void>();
+
+    function setAppState(...states: AppStateStatus[]) {
+      act(() => {
+        for (const state of states) {
+          for (const listener of [...listeners]) listener(state);
+        }
+      });
+    }
+
+    beforeEach(() => {
+      jest
+        .mocked(AppState.addEventListener)
+        .mockImplementation((_type, listener) => {
+          listeners.add(listener);
+          return { remove: () => listeners.delete(listener) };
+        });
+    });
+
+    afterEach(() => {
+      listeners.clear();
+      jest
+        .mocked(AppState.addEventListener)
+        .mockImplementation(() => ({ remove: jest.fn() }));
+      jest.useRealTimers();
+    });
+
+    it('moves on from an Aftermath it has already acknowledged', async () => {
+      const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+      render(<HomeTimeZoneScreen adapters={adapters} now={duringAftermath} />);
+
+      expect(
+        await screen.findByTestId('aftermath-civil-time-report'),
+      ).toBeTruthy();
+      expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalledWith(
+        'Australia/Sydney',
+        changeEventAt,
+      );
+      await act(async () => undefined);
+      setAppState('background');
+      expect(screen.getByTestId('aftermath-civil-time-report')).toBeTruthy();
+      const motionReads = jest.mocked(AccessibilityInfo.isReduceMotionEnabled)
+        .mock.calls.length;
+
+      setAppState('active');
+
+      expect(screen.getByTestId('ordinary-civil-time-report')).toBeTruthy();
+      expect(screen.queryByTestId('aftermath-civil-time-report')).toBeNull();
+      // A remounted report would read the motion preference again.
+      expect(AccessibilityInfo.isReduceMotionEnabled).toHaveBeenCalledTimes(
+        motionReads,
+      );
+    });
+
+    it('keeps the next-event report through repeated returns', async () => {
+      const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+      render(<HomeTimeZoneScreen adapters={adapters} now={duringAftermath} />);
+      await screen.findByTestId('aftermath-civil-time-report');
+
+      for (const states of [
+        ['background', 'active'],
+        ['inactive', 'background', 'active'],
+        ['background', 'active'],
+      ] as const) {
+        setAppState(...states);
+        expect(screen.getByTestId('ordinary-civil-time-report')).toBeTruthy();
+      }
+      expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the Aftermath while the app is only inactive', async () => {
+      const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+      const refresh = jest.spyOn(adapters.timeZoneDataPacks, 'refresh');
+      render(<HomeTimeZoneScreen adapters={adapters} now={duringAftermath} />);
+      await screen.findByTestId('aftermath-civil-time-report');
+
+      setAppState('inactive', 'active', 'active');
+
+      expect(screen.getByTestId('aftermath-civil-time-report')).toBeTruthy();
+      expect(refresh).not.toHaveBeenCalled();
+
+      setAppState('background', 'active', 'active');
+
+      expect(screen.getByTestId('ordinary-civil-time-report')).toBeTruthy();
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledWith('foreground');
+    });
+
+    it('resumes the next-event report after a cold restart', async () => {
+      const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+      const first = render(
+        <HomeTimeZoneScreen adapters={adapters} now={duringAftermath} />,
+      );
+      await screen.findByTestId('aftermath-civil-time-report');
+      first.unmount();
+
+      render(<HomeTimeZoneScreen adapters={adapters} now={duringAftermath} />);
+
+      expect(
+        await screen.findByTestId('ordinary-civil-time-report'),
+      ).toBeTruthy();
+      expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows and acknowledges the Aftermath at the exact event instant', async () => {
+      jest.useFakeTimers({ now: new Date('2026-10-03T15:59:59.000Z') });
+      const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+      render(<HomeTimeZoneScreen adapters={adapters} />);
+      await screen.findByTestId('reminder-day-civil-time-report');
+      expect(adapters.aftermathAcknowledgements.save).not.toHaveBeenCalled();
+
+      act(() => jest.advanceTimersByTime(1_000));
+
+      expect(screen.getByTestId('aftermath-civil-time-report')).toBeTruthy();
+      expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalledWith(
+        'Australia/Sydney',
+        changeEventAt,
+      );
+
+      setAppState('background', 'active');
+
+      expect(screen.getByTestId('ordinary-civil-time-report')).toBeTruthy();
+    });
+
+    it('ends the Aftermath in place at the exact 48-hour boundary', async () => {
+      jest.useFakeTimers({ now: new Date('2026-10-05T15:59:59.000Z') });
+      const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+      render(<HomeTimeZoneScreen adapters={adapters} />);
+      await screen.findByTestId('aftermath-civil-time-report');
+      expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalledTimes(1);
+
+      act(() => jest.advanceTimersByTime(1_000));
+
+      expect(screen.getByTestId('ordinary-civil-time-report')).toBeTruthy();
+    });
+
+    it.each([
+      ['before the event instant', 'reminder-day', '2026-10-03T15:59:59.999Z'],
+      ['at the event instant', 'aftermath', '2026-10-03T16:00:00.000Z'],
+      ['before 48 hours', 'aftermath', '2026-10-05T15:59:59.999Z'],
+      ['at 48 hours', 'ordinary', '2026-10-05T16:00:00.000Z'],
+    ] as const)(
+      'opens %s with the %s report',
+      async (_case, phase, instant) => {
+        const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+        render(
+          <HomeTimeZoneScreen adapters={adapters} now={new Date(instant)} />,
+        );
+
+        expect(
+          await screen.findByTestId(`${phase}-civil-time-report`),
+        ).toBeTruthy();
+        expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalledTimes(
+          phase === 'aftermath' ? 1 : 0,
+        );
+      },
+    );
+
+    it('reopens the Aftermath for a verified reminder tap', async () => {
+      const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+      const view = render(
+        <HomeTimeZoneScreen adapters={adapters} now={duringAftermath} />,
+      );
+      await screen.findByTestId('aftermath-civil-time-report');
+      setAppState('background', 'active');
+      expect(screen.getByTestId('ordinary-civil-time-report')).toBeTruthy();
+
+      view.rerender(
+        <HomeTimeZoneScreen
+          adapters={adapters}
+          notificationTap={{
+            changeDirection: 'forward',
+            changeEventAt,
+            homeTimeZone: 'Australia/Sydney',
+            reminderTiming: 'one-week',
+          }}
+          now={duringAftermath}
+        />,
+      );
+
+      expect(screen.getByTestId('aftermath-civil-time-report')).toBeTruthy();
+      expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('rerenders report when session data-pack snapshot changes', async () => {
