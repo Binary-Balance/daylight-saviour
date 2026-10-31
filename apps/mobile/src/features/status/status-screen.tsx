@@ -28,8 +28,8 @@ interface StatusScreenProps {
   readonly onAcknowledgeAftermath?: (eventAt: string) => void;
   readonly onChooseZone?: () => void;
   readonly onRetryDataPack?: () => void | Promise<void>;
-  // The caller keeps this fixed within one opening of the app, so
-  // acknowledging an Aftermath does not replace it on screen.
+  // The caller does not update this when an Aftermath is acknowledged, so the
+  // Aftermath stays on screen.
   readonly openingAcknowledgedEventAt?: string | null;
   readonly reducedMotion?: boolean;
   readonly secondaryCopySeed: string;
