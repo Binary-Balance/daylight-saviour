@@ -37,5 +37,7 @@ variables parse successfully:
 
 Missing or invalid configuration disables network refresh and reports valid
 bundled data as current. Actual endpoints and production keys are environment-owned
-configuration and are never committed here. Root `.env.example` contains only
-reserved-domain and deliberately unusable placeholders.
+configuration and are never committed here. `apps/mobile/.env.example` contains
+only reserved-domain and deliberately unusable placeholders. The
+[development guide](../../../../../docs/development.md#public-environment)
+explains how to use it.
