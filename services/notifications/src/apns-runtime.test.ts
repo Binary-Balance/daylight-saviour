@@ -234,8 +234,8 @@ describe('APNs runtime', () => {
         t,
         (stream, session) => {
           stream.emit('response', { ':status': 200 });
-          stream.emit('error', failure);
-          session.emit('error', new Error('second failure'));
+          session.emit('error', failure);
+          stream.emit('error', new Error('second failure'));
           stream.emit('end');
         },
       );
