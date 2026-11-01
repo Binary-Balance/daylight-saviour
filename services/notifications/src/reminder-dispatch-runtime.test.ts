@@ -1233,6 +1233,119 @@ describe('partitioned reminder dispatch', () => {
   });
 });
 
+describe('reminder dispatch warning', () => {
+  const day = 24 * 60 * 60 * 1000;
+  // `during` is when the run is planned.
+  const daysBefore = (days: number) => new Date(during.getTime() - days * day);
+  const sydneyKey = identity('sydney').installationId;
+
+  for (const [name, row, warned] of [
+    [
+      'a contact a millisecond short of 365 days ago',
+      { lastContactAt: new Date(daysBefore(365).getTime() + 1) },
+      false,
+    ],
+    [
+      'a contact exactly 365 days ago',
+      { lastContactAt: daysBefore(365) },
+      true,
+    ],
+    ['a contact two years ago', { lastContactAt: daysBefore(730) }, true],
+    ['a contact just now', { lastContactAt: during }, false],
+    [
+      'an old registration after a recent contact',
+      { lastContactAt: daysBefore(1), registeredAt: daysBefore(800) },
+      false,
+    ],
+    [
+      'a row saved before last contact existed, registered 400 days ago',
+      { registeredAt: daysBefore(400) },
+      true,
+    ],
+    [
+      'a row saved before last contact existed, registered yesterday',
+      { registeredAt: daysBefore(1) },
+      false,
+    ],
+    ['a row with no readable time', {}, false],
+    [
+      'a last contact that is not a date',
+      { lastContactAt: new Date('invalid') },
+      false,
+    ],
+  ] as const) {
+    it(`${warned ? 'warns' : 'does not warn'} for ${name}`, async () => {
+      const test = harness([subscriptionRow('sydney', row)]);
+
+      await test.run();
+
+      assert.deepEqual(
+        test.sent.map((request) => request.warned),
+        [warned],
+      );
+    });
+  }
+
+  it('compares with the time the run was planned, not the time of the send', async () => {
+    // Short of 365 days when the run was planned, and past it by the send.
+    const test = harness([
+      subscriptionRow('sydney', {
+        lastContactAt: new Date(daysBefore(365).getTime() + 15_000),
+      }),
+    ]);
+    const read = test.dependencies.subscriptions.getSubscriptionSnapshot;
+    test.dependencies.subscriptions = {
+      ...test.dependencies.subscriptions,
+      async getSubscriptionSnapshot(installationId) {
+        test.state.now = new Date(during.getTime() + 30_000);
+        return read(installationId);
+      },
+    };
+
+    await test.run();
+
+    assert.deepEqual(
+      test.sent.map((request) => request.warned),
+      [false],
+    );
+  });
+
+  for (const [name, madeContact, expected] of [
+    ['stops warning once the installation makes contact', true, [true, false]],
+    ['warns again while the installation stays silent', false, [true, true]],
+  ] as const) {
+    it(`a retry of the same delivery ${name}`, async () => {
+      let attempts = 0;
+      const test = harness(
+        [subscriptionRow('sydney', { lastContactAt: daysBefore(365) })],
+        {
+          outcome: async () => ({
+            kind: (attempts += 1) === 1 ? 'transient-failure' : 'accepted',
+          }),
+        },
+      );
+      await test.run();
+
+      if (madeContact) {
+        test.subscriptions.set(sydneyKey, {
+          ...test.subscriptions.get(sydneyKey),
+          lastContactAt: during,
+        });
+      }
+      test.state.now = new Date(during.getTime() + 5 * 60 * 1000);
+      await test.run();
+
+      assert.deepEqual(
+        test.sent.map((request) => request.warned),
+        expected,
+      );
+      // The warning is not part of the delivery's identity: one record serves
+      // both sends.
+      assert.deepEqual(statuses(test), ['accepted']);
+    });
+  }
+});
+
 describe('reminder dispatch provider', () => {
   const request: ReminderDispatchProviderRequest = {
     changeDirection: 'forward',
@@ -1250,6 +1363,7 @@ describe('reminder dispatch provider', () => {
       platform: 'android',
     },
     timing: 'one-week',
+    warned: false,
   };
   const authorize = async () => true;
   const invalidatedAt = new Date(0);
@@ -1319,6 +1433,7 @@ describe('reminder dispatch provider', () => {
         changeEventAt: new Date(changeEventAt),
         homeTimeZone: 'Australia/Sydney',
         timing: 'one-week',
+        warned: false,
       },
       { expiresAt: windowEnd, kind: 'until' },
       {
@@ -1327,6 +1442,39 @@ describe('reminder dispatch provider', () => {
       },
     ]);
   });
+
+  for (const platform of ['android', 'ios'] as const) {
+    it(`tells the ${platform} sender when the reminder is warned`, async () => {
+      let facts: unknown;
+      const sender = {
+        async send(_subscription: unknown, reviewedFacts: unknown) {
+          facts = reviewedFacts;
+          return { kind: 'accepted' } as const;
+        },
+      };
+      const provider = createReminderDispatchProvider({
+        android: sender,
+        ios: sender,
+      });
+
+      await provider.send(
+        {
+          ...request,
+          subscription: { ...request.subscription, platform },
+          warned: true,
+        },
+        authorize,
+      );
+
+      assert.deepEqual(facts, {
+        changeDirection: 'forward',
+        changeEventAt: new Date(changeEventAt),
+        homeTimeZone: 'Australia/Sydney',
+        timing: 'one-week',
+        warned: true,
+      });
+    });
+  }
 });
 
 describe('active Time-Zone Data Pack reader', () => {
@@ -1500,6 +1648,32 @@ describe('reminder dispatch composition', () => {
       'apns-change-reminder-accepted',
       `reminder-dispatch-accepted ${sydney} count=1`,
     ]);
+  });
+
+  it('warns through the real APNs sender after a year of silence', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: during.getTime() });
+    const test = harness([
+      subscriptionRow('apple', {
+        deviceToken: 'a'.repeat(64),
+        lastContactAt: new Date(during.getTime() - 365 * 24 * 60 * 60 * 1000),
+        platform: 'ios',
+      }),
+    ]);
+    const requests: ApnsHttpRequest[] = [];
+
+    await runComposed(test, {
+      createApnsTransport: () => ({
+        post: async (request) => {
+          requests.push(request);
+          return { body: '', status: 200 };
+        },
+      }),
+    });
+
+    assert.equal(
+      requests[0]?.payload.aps.alert.body,
+      'Your Home Time Zone changes soon. Tap to keep Change Reminders on.',
+    );
   });
 
   // A sender that removed the token itself would leave the dispatcher's fenced

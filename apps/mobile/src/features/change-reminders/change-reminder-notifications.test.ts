@@ -21,6 +21,10 @@ const content: ChangeReminderNotificationContent = {
   title: 'Change Reminder',
 };
 
+// Sent instead of the body above once a subscription has been silent a year.
+const warnedBody =
+  'Your Home Time Zone changes soon. Tap to keep Change Reminders on.';
+
 function response(overrides: Partial<ChangeReminderNotificationContent> = {}) {
   return {
     actionIdentifier: 'default',
@@ -123,6 +127,43 @@ describe('Change Reminder notification runtime', () => {
     expect(test.notifications.setNotificationHandler).toHaveBeenLastCalledWith(
       null,
     );
+  });
+
+  it('shows a reminder that carries the warned body', async () => {
+    const test = harness();
+    const stop = await test.runtime.start();
+    const handler = test.notificationHandler();
+    if (handler === undefined) throw new Error('Expected notification handler');
+
+    await expect(
+      handler.handleNotification({
+        request: { content: { ...content, body: warnedBody } },
+      }),
+    ).resolves.toEqual({
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    });
+    stop();
+  });
+
+  it('opens a tap on a reminder that carries the warned body', async () => {
+    const test = harness({ coldResponse: response({ body: warnedBody }) });
+    await test.runtime.start();
+
+    expect(test.taps).toEqual([
+      {
+        changeDirection: 'forward',
+        changeEventAt: '2026-10-03T16:00:00.000Z',
+        homeTimeZone: 'Australia/Sydney',
+        reminderTiming: 'one-week',
+      },
+    ]);
+    test.emitResponse(
+      response({ body: warnedBody, title: 'Unreviewed title' }),
+    );
+    expect(test.taps).toHaveLength(1);
   });
 
   it('consumes one cold-start response and opens only valid default taps', async () => {

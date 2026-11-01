@@ -39,8 +39,9 @@ The [ledger](src/reminder-dispatch-ledger.ts) and
 [dispatcher](src/reminder-dispatch.ts) consume planner facts and current
 registration state through injected boundaries. Delivery identity is the
 installation, canonical Home Time Zone, Change Event instant and reminder
-timing. Token rotation, registration generation and pack updates do not create
-a second delivery identity. Accepted and uncertain records stay closed when
+timing. Token rotation, registration generation, pack updates and the
+[warning](#warning-a-silent-subscription) do not create a second delivery
+identity. Accepted and uncertain records stay closed when
 registration changes.
 
 Conditional creates and ETag updates give one worker a claim. Before calling
@@ -210,6 +211,26 @@ failed runtime load is the same, with `reminder-dispatch-unavailable`. A timer
 that does not run at all logs nothing, so an outage that outlasts a window by
 more than 13 hours needs an alert on missing runs.
 
+### Warning a silent subscription
+
+[ADR 0022](../../docs/adr/0022-expire-silent-reminder-subscriptions-after-warning.md)
+requires a warning before a subscription with no contact can expire. A reminder
+for a subscription whose last contact was 365 days or more before the start of
+the run says `Your Home Time Zone changes soon. Tap to keep Change Reminders
+on.` in place of `Your Home Time Zone changes soon.` The FCM notification body
+and the APNs alert body change; the title, the data and the rest of the payload
+do not. Both payloads stay far below the 4096 bytes that FCM and APNs allow.
+
+Last contact is the subscription's last contact time, or its registration time
+for a row saved before contact was recorded. With neither, nothing is warned.
+The warning is not stored and is no part of a delivery's identity. It follows
+the subscription as read for each send, so a retry of the same delivery stops
+being warned once the installation has made contact.
+
+On Android the device shows FCM's notification body, in the foreground through
+Expo as well as in the background, so the app only has to accept the warned body
+as reviewed copy.
+
 ### Kill switch
 
 `REMINDER_DISPATCH_ENABLED` is the kill switch from
@@ -293,7 +314,8 @@ live-send or deployment evidence.
 The last contact time is set at registration and by every authenticated update
 or check-in. The app checks in on its next return to the foreground once 30
 days have passed since its last successful contact. A subscription saved before
-the service recorded contact has no last contact time until its next contact.
+the service recorded contact has no last contact time until its next contact, so
+[dispatch](#warning-a-silent-subscription) judges it on its registration time.
 [ADR 0022](../../docs/adr/0022-expire-silent-reminder-subscriptions-after-warning.md)
 uses it for the warning and expiry it describes.
 

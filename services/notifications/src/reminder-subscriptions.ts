@@ -55,6 +55,7 @@ interface SubscriptionEntity {
   readonly deviceToken?: string | undefined;
   readonly etag: string;
   readonly homeTimeZone?: string | undefined;
+  readonly lastContactAt?: Date | undefined;
   readonly oneDayEnabled?: boolean | undefined;
   readonly oneWeekEnabled?: boolean | undefined;
   readonly platform?: 'android' | 'ios' | undefined;
@@ -204,6 +205,7 @@ export interface ReminderSubscriptionSnapshot extends StoredReminderSubscription
   readonly homeTimeZone: string;
   readonly oneDayEnabled: boolean;
   readonly oneWeekEnabled: boolean;
+  readonly lastContactAt?: Date;
   readonly registeredAt?: Date;
 }
 
@@ -669,6 +671,9 @@ function subscriptionSnapshot(
     homeTimeZone: existing.homeTimeZone,
     oneDayEnabled: existing.oneDayEnabled,
     oneWeekEnabled: existing.oneWeekEnabled,
+    ...(existing.lastContactAt === undefined
+      ? {}
+      : { lastContactAt: existing.lastContactAt }),
     ...(existing.registeredAt === undefined
       ? {}
       : { registeredAt: existing.registeredAt }),
@@ -1086,6 +1091,7 @@ interface SubscriptionRow {
   credentialHash?: string;
   deviceToken?: string;
   homeTimeZone?: string;
+  lastContactAt?: unknown;
   oneDayEnabled?: boolean;
   oneWeekEnabled?: boolean;
   platform?: 'android' | 'ios';
@@ -1110,6 +1116,8 @@ function subscriptionEntityFromRow(
     etag: entity.etag,
     homeTimeZone:
       typeof entity.homeTimeZone === 'string' ? entity.homeTimeZone : undefined,
+    lastContactAt:
+      entity.lastContactAt instanceof Date ? entity.lastContactAt : undefined,
     oneDayEnabled:
       typeof entity.oneDayEnabled === 'boolean'
         ? entity.oneDayEnabled

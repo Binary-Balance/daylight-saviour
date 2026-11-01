@@ -115,6 +115,7 @@ function subscriptionTable(
       readonly deviceToken?: string;
       readonly etag: string;
       readonly homeTimeZone?: string;
+      readonly lastContactAt?: Date;
       readonly oneDayEnabled?: boolean;
       readonly oneWeekEnabled?: boolean;
       readonly partitionKey: string;
@@ -1143,6 +1144,7 @@ describe('Azure Table mapping', () => {
       deviceToken: 'device-token',
       etag: 'etag',
       homeTimeZone: zone,
+      lastContactAt: new Date('2026-08-02T00:00:00.000Z'),
       oneDayEnabled: true,
       oneWeekEnabled: false,
       partitionKey: 'subscriptions-v1',
@@ -1196,6 +1198,7 @@ describe('Azure Table mapping', () => {
           deviceToken: 'device-token',
           homeTimeZone: zone,
           installationId: 'first',
+          lastContactAt: row.lastContactAt,
           oneDayEnabled: true,
           oneWeekEnabled: false,
           platform: 'ios',
@@ -1209,6 +1212,69 @@ describe('Azure Table mapping', () => {
       "PartitionKey eq 'subscriptions-v1' and homeTimeZone eq 'Australia/Sydney'",
     );
     assert.equal(pageSize, 100);
+  });
+
+  // Dispatch warns on last contact, so a value it cannot read must not reach
+  // it as a time.
+  it('leaves last contact out of a snapshot when the row has no readable time', async () => {
+    const row = {
+      attemptGeneration: 3,
+      credentialHash: 'hash',
+      deviceToken: 'device-token',
+      etag: 'etag',
+      homeTimeZone: 'Australia/Sydney',
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
+      partitionKey: 'subscriptions-v1',
+      platform: 'ios',
+    };
+    const azureStore = createAzureReminderSubscriptionStore(
+      {
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      },
+      {
+        createCredential: () => ({
+          getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+        }),
+        createTableClient: () =>
+          ({
+            listEntities: () => ({
+              byPage: () =>
+                (async function* () {
+                  yield [
+                    { ...row, lastContactAt: 'yesterday', rowKey: 'text' },
+                    {
+                      ...row,
+                      lastContactAt: 1_785_000_000_000,
+                      rowKey: 'number',
+                    },
+                    { ...row, rowKey: 'absent' },
+                  ];
+                })(),
+            }),
+          }) as never,
+      },
+    );
+
+    const snapshots = [];
+    for await (const page of azureStore.listZoneSubscriptionPages(
+      'Australia/Sydney',
+    )) {
+      snapshots.push(...page);
+    }
+
+    assert.deepEqual(
+      snapshots.map((snapshot) => [
+        snapshot.installationId,
+        'lastContactAt' in snapshot,
+      ]),
+      [
+        ['text', false],
+        ['number', false],
+        ['absent', false],
+      ],
+    );
   });
 
   it('uses a fixed subscription partition and retains canonical zone as data', async () => {
@@ -1314,6 +1380,7 @@ describe('Azure Table mapping', () => {
 
   it('returns a validated snapshot with dispatch fields', async () => {
     const registeredAt = new Date('2026-07-24T05:00:00.000Z');
+    const lastContactAt = new Date('2026-08-24T05:00:00.000Z');
     const tableStore = createTableReminderSubscriptionStore(
       subscriptionTable({
         get: async () => ({
@@ -1321,6 +1388,7 @@ describe('Azure Table mapping', () => {
           deviceToken: validRegistration.deviceToken,
           etag: 'etag',
           homeTimeZone: 'Australia/Sydney',
+          lastContactAt,
           oneDayEnabled: true,
           oneWeekEnabled: false,
           partitionKey: 'subscriptions-v1',
@@ -1339,6 +1407,7 @@ describe('Azure Table mapping', () => {
         deviceToken: validRegistration.deviceToken,
         homeTimeZone: 'Australia/Sydney',
         installationId: 'installation-id',
+        lastContactAt,
         oneDayEnabled: true,
         oneWeekEnabled: false,
         platform: 'android',
@@ -1602,6 +1671,8 @@ describe('generation-ordered subscription persistence', () => {
           etag: String(row.etag),
           homeTimeZone:
             typeof row.homeTimeZone === 'string' ? row.homeTimeZone : undefined,
+          lastContactAt:
+            row.lastContactAt instanceof Date ? row.lastContactAt : undefined,
           oneDayEnabled:
             typeof row.oneDayEnabled === 'boolean'
               ? row.oneDayEnabled
@@ -2140,10 +2211,11 @@ describe('generation-ordered subscription persistence', () => {
     assert.deepEqual(withoutContact(after), withoutContact(before));
     assert.deepEqual(after.lastContactAt, contactAt);
     assert.notEqual(after.lastContactAt, before.lastContactAt);
-    // Dispatch reads the row too, and must see the same subscription.
+    // Dispatch reads the row too. It sees the new contact time and the same
+    // subscription otherwise.
     assert.deepEqual(
       await registrationStore.getSubscriptionSnapshot(current.installationId),
-      snapshotBefore,
+      { ...snapshotBefore, lastContactAt: contactAt },
     );
   });
 
@@ -2181,7 +2253,7 @@ describe('generation-ordered subscription persistence', () => {
     assert.deepEqual(after.lastContactAt, contactAt);
     assert.deepEqual(
       await registrationStore.getSubscriptionSnapshot(legacy.installationId),
-      snapshotBefore,
+      { ...snapshotBefore, lastContactAt: contactAt },
     );
   });
 

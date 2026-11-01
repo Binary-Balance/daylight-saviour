@@ -11,6 +11,7 @@ import {
   type FcmChangeReminderSubscription,
   type ChangeReminderLifetime,
   type FcmSubscriptionRemovalResult,
+  type ReviewedChangeReminderFacts,
 } from './fcm-change-reminder-sender.ts';
 
 const now = new Date('2026-07-26T00:00:00.000Z');
@@ -1215,4 +1216,78 @@ describe('FCM Change Reminder sender', () => {
       });
     }
   });
+});
+
+describe('FCM Change Reminder warning', () => {
+  // The payload as it was sent before the warning existed. Comparing bytes,
+  // not objects, also catches a change in key order.
+  const unwarnedJson =
+    '{"message":{"android":{"notification":{"channel_id":"change-reminders","sound":"default"},"priority":"HIGH","ttl":"0s"},"data":{"changeDirection":"forward","changeEventAt":"2026-10-04T16:00:00.000Z","homeTimeZone":"Australia/Sydney","reminderKind":"change-reminder","reminderTiming":"one-week"},"notification":{"body":"Your Home Time Zone changes soon.","title":"Change Reminder"},"token":"fcm-token:with_valid.characters-123"}}';
+
+  async function sentPayload(
+    reviewedFacts: ReviewedChangeReminderFacts,
+    target: FcmChangeReminderSubscription = subscription,
+  ) {
+    const test = sender(response(200, acceptedBody));
+    await test.instance.send(target, reviewedFacts, immediate);
+    return test.requests[0]?.payload;
+  }
+
+  for (const [name, reviewedFacts] of [
+    ['no warning', facts],
+    ['a warning of false', { ...facts, warned: false }],
+  ] as const) {
+    it(`sends the bytes it sent before for ${name}`, async () => {
+      assert.equal(
+        JSON.stringify(await sentPayload(reviewedFacts)),
+        unwarnedJson,
+      );
+    });
+  }
+
+  it('sends the warned body and changes nothing else', async () => {
+    assert.deepEqual(await sentPayload({ ...facts, warned: true }), {
+      message: {
+        android: {
+          notification: {
+            channel_id: 'change-reminders',
+            sound: 'default',
+          },
+          priority: 'HIGH',
+          ttl: '0s',
+        },
+        data: {
+          changeDirection: 'forward',
+          changeEventAt: '2026-10-04T16:00:00.000Z',
+          homeTimeZone: 'Australia/Sydney',
+          reminderKind: 'change-reminder',
+          reminderTiming: 'one-week',
+        },
+        notification: {
+          body: 'Your Home Time Zone changes soon. Tap to keep Change Reminders on.',
+          title: 'Change Reminder',
+        },
+        token: fullDeviceToken,
+      },
+    });
+  });
+
+  // FCM allows a payload of 4096 bytes. Measuring the whole request body with
+  // a token longer than FCM issues, the longest zone and a backward change is
+  // stricter than the limit.
+  for (const warned of [false, true]) {
+    it(`keeps ${warned ? 'a warned' : 'an unwarned'} payload within 4096 bytes`, async () => {
+      const payload = await sentPayload(
+        {
+          ...facts,
+          changeDirection: 'backward',
+          homeTimeZone: 'Australia/Broken_Hill',
+          warned,
+        },
+        { ...subscription, deviceToken: 'a'.repeat(200) },
+      );
+
+      assert.ok(Buffer.byteLength(JSON.stringify(payload)) <= 4096);
+    });
+  }
 });

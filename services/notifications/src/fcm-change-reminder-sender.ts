@@ -36,6 +36,8 @@ export interface ReviewedChangeReminderFacts {
   readonly changeEventAt: Date;
   readonly homeTimeZone: string;
   readonly timing: ChangeReminderTiming;
+  /** Sends the body that says tapping keeps Change Reminders on (ADR 0022). */
+  readonly warned?: boolean;
 }
 
 export interface FcmAccessToken {
@@ -392,7 +394,9 @@ function buildPayload(
         reminderTiming: facts.timing,
       },
       notification: {
-        body: changeReminderNotification.body,
+        body: facts.warned
+          ? changeReminderNotification.warnedBody
+          : changeReminderNotification.body,
         title: changeReminderNotification.title,
       },
       token: subscription.deviceToken,

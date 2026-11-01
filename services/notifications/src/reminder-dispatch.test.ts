@@ -855,6 +855,7 @@ function context(
       timing: identity.timing,
     },
     subscription,
+    warned: false,
     ...overrides,
   };
 }
@@ -1273,6 +1274,24 @@ describe('reminder dispatch operation', () => {
       window.endsAt,
     );
   });
+
+  // A registration can make contact after the plan was read, and the send
+  // follows the subscription as last read. That read is not a changed plan.
+  for (const [name, planned, read] of [
+    ['stops warning', true, false],
+    ['starts warning', false, true],
+  ] as const) {
+    it(`${name} when the read before the send says so`, async () => {
+      const fixture = operationFixture(context({ warned: read }));
+
+      const result = await fixture.operation.dispatch(
+        context({ warned: planned }),
+      );
+
+      assert.equal(result.kind, 'accepted');
+      assert.equal(fixture.sent[0]?.warned, read);
+    });
+  }
 
   it('keeps unknown provider acknowledgement terminal and does not replay', async () => {
     let calls = 0;
