@@ -591,6 +591,14 @@ function terminalStatus(status: ReminderDispatchStatus) {
   );
 }
 
+function cleanupSettled(status: ReminderDispatchCleanupStatus | undefined) {
+  return (
+    status === 'removed' ||
+    status === 'not-found' ||
+    status === 'token-replaced'
+  );
+}
+
 function terminalExpiryCanReset(record: ReminderDispatchLedgerRecord) {
   return record.status === 'expired' && record.expiryReason === 'superseded';
 }
@@ -665,6 +673,16 @@ function preparedReplacement(
   return existing.status === 'claimed' && existing.sendStartedAt !== undefined
     ? uncertainRecord(existing, base.updatedAt)
     : base;
+}
+
+/**
+ * What invalidation leaves: uncertain if a send may have started, otherwise
+ * expired as superseded.
+ */
+function supersededRecord(record: ReminderDispatchLedgerRecord, now: Date) {
+  return record.status === 'claimed' && record.sendStartedAt !== undefined
+    ? uncertainRecord(record, now)
+    : expiredRecord(record, 'superseded', now);
 }
 
 function leaseLapsed(record: ReminderDispatchLedgerRecord, now: Date) {
@@ -1205,31 +1223,19 @@ export function createTableReminderDispatchLedgerStore(
       const existing = await get(normalized);
       if (existing === null) return { kind: 'stale' as const };
       if (existing.attemptGeneration !== attemptGeneration) {
-        return { kind: 'stale' as const, record: existing };
+        return stale(existing);
       }
       if (
         terminalStatus(existing.status) &&
-        !(existing.status === 'expired' && terminalExpiryCanReset(existing))
+        !terminalExpiryCanReset(existing)
       ) {
         return { kind: 'updated' as const, record: existing };
       }
-      const next =
-        existing.status === 'claimed' && existing.sendStartedAt !== undefined
-          ? uncertainRecord(existing, now)
-          : {
-              ...withoutClaim(existing),
-              expiryReason: 'superseded' as const,
-              status: 'expired' as const,
-              updatedAt: now,
-            };
-      try {
-        await replace(next, existing.etag);
-        const updated = await get(normalized);
-        if (updated !== null)
-          return { kind: 'updated' as const, record: updated };
-      } catch (error) {
-        if (!conflict(error)) throw error;
-      }
+      const invalidated = await replaceAndRead(
+        supersededRecord(existing, now),
+        existing,
+      );
+      if (invalidated !== undefined) return invalidated;
     }
     throw new Error(
       'Reminder dispatch invalidation contention exceeded retry limit',
@@ -1251,39 +1257,20 @@ export function createTableReminderDispatchLedgerStore(
         existing.attemptGeneration !== attemptGeneration ||
         existing.status !== 'permanent-failure'
       ) {
-        return { kind: 'stale' as const, record: existing ?? undefined };
+        return stale(existing);
       }
       if (
-        existing.cleanupStatus === 'removed' ||
-        existing.cleanupStatus === 'not-found' ||
-        existing.cleanupStatus === 'token-replaced'
+        cleanupSettled(existing.cleanupStatus) ||
+        existing.cleanupStatus === cleanupStatus
       ) {
         return { kind: 'updated' as const, record: existing };
       }
-      if (existing.cleanupStatus === cleanupStatus) {
-        return { kind: 'updated' as const, record: existing };
-      }
-      try {
-        await replace(
-          {
-            ...existing,
-            cleanupStatus,
-            updatedAt: now,
-          },
-          existing.etag,
-        );
-        const updated = await get(normalized);
-        if (updated !== null)
-          return { kind: 'updated' as const, record: updated };
-      } catch (error) {
-        if (!conflict(error)) {
-          const reconciled = await get(normalized);
-          if (reconciled?.cleanupStatus === cleanupStatus) {
-            return { kind: 'updated' as const, record: reconciled };
-          }
-          throw error;
-        }
-      }
+      const updated = await replaceAndReconcile(
+        { ...existing, cleanupStatus, updatedAt: now },
+        existing,
+        (record) => record.cleanupStatus === cleanupStatus,
+      );
+      if (updated !== undefined) return updated;
     }
     throw new Error(
       'Reminder dispatch cleanup contention exceeded retry limit',
