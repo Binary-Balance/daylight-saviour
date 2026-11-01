@@ -602,6 +602,43 @@ function registrationRequest(
   };
 }
 
+function pendingRestoreResult(
+  saved: Extract<
+    StoredChangeReminderState,
+    { state: 'pending' | 'pending-update' }
+  >,
+): ChangeReminderRestoreResult {
+  return {
+    homeTimeZone: saved.homeTimeZone,
+    kind: 'pending',
+    ...(saved.state === 'pending-update' &&
+    saved.confirmedOneDayEnabled !== undefined &&
+    saved.confirmedOneWeekEnabled !== undefined
+      ? {
+          pendingPreferences: {
+            confirmed: {
+              oneDayEnabled: saved.confirmedOneDayEnabled,
+              oneWeekEnabled: saved.confirmedOneWeekEnabled,
+            },
+            proposed: {
+              oneDayEnabled: saved.oneDayEnabled,
+              oneWeekEnabled: saved.oneWeekEnabled,
+            },
+          },
+        }
+      : {}),
+    ...(saved.state === 'pending-update' &&
+    saved.confirmedHomeTimeZone !== undefined
+      ? {
+          pendingHomeTimeZone: {
+            confirmed: saved.confirmedHomeTimeZone,
+            proposed: saved.homeTimeZone,
+          },
+        }
+      : {}),
+  };
+}
+
 export function createProductionChangeReminderAdapters({
   createRegistrationRequestId,
   endpoint,
@@ -1052,6 +1089,60 @@ export function createProductionChangeReminderAdapters({
     }
   }
 
+  async function forgetPreviousInstall(
+    saved: Exclude<
+      StoredChangeReminderState,
+      StoredChangeReminderPendingDelete
+    >,
+  ): Promise<ChangeReminderRestoreResult> {
+    const registrationEndpoint = parseReminderRegistrationEndpoint(endpoint);
+    // ponytail: a failed delete is not retried, so the old subscription
+    // waits for provider cleanup; keep a pending deletion if that matters.
+    if (saved.state !== 'pending' && registrationEndpoint !== null) {
+      await deleteRegistration(registrationEndpoint, saved).catch(() => {});
+    }
+    await secureStore.deleteItemAsync(registrationKey);
+    return { kind: 'unregistered' };
+  }
+
+  async function reconcileDeviceToken(
+    saved: Extract<StoredChangeReminderState, { state: 'registered' }>,
+    currentToken: string,
+  ): Promise<ChangeReminderRestoreResult> {
+    const result = await enqueue(async () => {
+      const latest = await loadStoredState();
+      return synchronize(
+        latest?.homeTimeZone ?? saved.homeTimeZone,
+        currentToken,
+        true,
+        latest === null
+          ? {
+              oneDayEnabled: saved.oneDayEnabled,
+              oneWeekEnabled: saved.oneWeekEnabled,
+            }
+          : {
+              oneDayEnabled: latest.oneDayEnabled,
+              oneWeekEnabled: latest.oneWeekEnabled,
+            },
+        saved.registrationRequestId,
+        saved.installationId,
+      );
+    });
+    if (result.kind === 'unregistered') return result;
+    if (result.kind !== 'enabled') {
+      return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
+    }
+    const refreshed = await loadStoredState();
+    if (refreshed?.state !== 'registered' || refreshed.version !== 4) {
+      return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
+    }
+    return {
+      kind: 'registered',
+      notificationPermissionGranted: true,
+      registration: refreshed,
+    };
+  }
+
   return {
     async restore() {
       if (platform === 'web') return { kind: 'unavailable' };
@@ -1075,46 +1166,10 @@ export function createProductionChangeReminderAdapters({
       // guarantee. A pending deletion
       // above is kept: finishing it honours the user's intent.
       if (permission.status === Notifications.PermissionStatus.UNDETERMINED) {
-        const registrationEndpoint =
-          parseReminderRegistrationEndpoint(endpoint);
-        // ponytail: a failed delete is not retried, so the old subscription
-        // waits for provider cleanup; keep a pending deletion if that matters.
-        if (saved.state !== 'pending' && registrationEndpoint !== null) {
-          await deleteRegistration(registrationEndpoint, saved).catch(() => {});
-        }
-        await secureStore.deleteItemAsync(registrationKey);
-        return { kind: 'unregistered' };
+        return forgetPreviousInstall(saved);
       }
       if (saved.state === 'pending' || saved.state === 'pending-update') {
-        return {
-          homeTimeZone: saved.homeTimeZone,
-          kind: 'pending',
-          ...(saved.state === 'pending-update' &&
-          saved.confirmedOneDayEnabled !== undefined &&
-          saved.confirmedOneWeekEnabled !== undefined
-            ? {
-                pendingPreferences: {
-                  confirmed: {
-                    oneDayEnabled: saved.confirmedOneDayEnabled,
-                    oneWeekEnabled: saved.confirmedOneWeekEnabled,
-                  },
-                  proposed: {
-                    oneDayEnabled: saved.oneDayEnabled,
-                    oneWeekEnabled: saved.oneWeekEnabled,
-                  },
-                },
-              }
-            : {}),
-          ...(saved.state === 'pending-update' &&
-          saved.confirmedHomeTimeZone !== undefined
-            ? {
-                pendingHomeTimeZone: {
-                  confirmed: saved.confirmedHomeTimeZone,
-                  proposed: saved.homeTimeZone,
-                },
-              }
-            : {}),
-        };
+        return pendingRestoreResult(saved);
       }
       if (!permission.granted) {
         return checkInWhenDue({
@@ -1133,38 +1188,7 @@ export function createProductionChangeReminderAdapters({
         return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
       }
       if (saved.version !== 4 || saved.deviceToken !== currentToken) {
-        const result = await enqueue(async () => {
-          const latest = await loadStoredState();
-          return synchronize(
-            latest?.homeTimeZone ?? saved.homeTimeZone,
-            currentToken,
-            true,
-            latest === null
-              ? {
-                  oneDayEnabled: saved.oneDayEnabled,
-                  oneWeekEnabled: saved.oneWeekEnabled,
-                }
-              : {
-                  oneDayEnabled: latest.oneDayEnabled,
-                  oneWeekEnabled: latest.oneWeekEnabled,
-                },
-            saved.registrationRequestId,
-            saved.installationId,
-          );
-        });
-        if (result.kind === 'unregistered') return result;
-        if (result.kind !== 'enabled') {
-          return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
-        }
-        const refreshed = await loadStoredState();
-        if (refreshed?.state !== 'registered' || refreshed.version !== 4) {
-          return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
-        }
-        return {
-          kind: 'registered',
-          notificationPermissionGranted: true,
-          registration: refreshed,
-        };
+        return reconcileDeviceToken(saved, currentToken);
       }
       return checkInWhenDue({
         kind: 'registered',
