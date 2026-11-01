@@ -102,11 +102,11 @@ The `reminder-dispatch` timer runs every five minutes. It sends only when
 before anything is read, sent or recorded, so deploying the function cannot send
 anything:
 
-| Value                  | Event                            | Meaning                                                                                       |
-| ---------------------- | -------------------------------- | --------------------------------------------------------------------------------------------- |
-| `true`                 | None                             | Dispatch runs.                                                                                |
-| `false`                | `reminder-dispatch-suspended`    | An operator stopped dispatch. Alert on this event once dispatch is live.                      |
-| Anything else, or none | `reminder-dispatch-gate-invalid` | **The setting is missing or malformed, so dispatch stopped with no decision.** Alert on this. |
+| Value                  | Event                            | Meaning                                                                                          |
+| ---------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `true`                 | None                             | Dispatch runs.                                                                                   |
+| `false`                | `reminder-dispatch-suspended`    | Dispatch is stopped on purpose, or was never enabled. Alert on this event once dispatch is live. |
+| Anything else, or none | `reminder-dispatch-gate-invalid` | **The setting is missing or malformed, so dispatch stopped with no decision.** Alert on this.    |
 
 An enabled run:
 
@@ -206,9 +206,11 @@ more than 13 hours needs an alert on missing runs.
 
 `REMINDER_DISPATCH_ENABLED` is the kill switch from
 [ADR 0016](../../docs/adr/0016-provide-a-reminder-dispatch-kill-switch.md). It
-stops new APNs and FCM sends and nothing else. Subscriptions, credentials, the
-ledger and the Time-Zone Data Pack stay as they are. Registration and retention
-cleanup keep running, and the app is not told, so its status does not change.
+stops scheduled reminder sends through APNs and FCM. It does not change
+subscriptions, credentials or the Time-Zone Data Pack, and the app is not told,
+so its status does not change. Registration and retention cleanup keep running.
+The owner-gated test send has [its own gates](#deployment-settings), so turn
+those off separately.
 
 The private operations path sets it through `reminderDispatch.enabled` in the
 [Functions module](../../infra/modules/README.md). Use the deployment that owns
@@ -224,14 +226,17 @@ updates let a run finish, so enabling them would weaken the switch.
 Only an explicit `true` resumes dispatch. A restart or a deployment with the same
 value does not. Sends then continue only inside windows that are still open: a
 closed window has no plan, so it is never replayed. The first enabled run expires
-what the suspension left unsent and [reports each closed window](#closed-delivery-windows)
+what the stop left unsent and [reports each closed window](#closed-delivery-windows)
 within its lookback.
 
-The [Azure Activity Log](https://learn.microsoft.com/en-us/azure/azure-monitor/platform/activity-log)
-records who wrote the app's settings and when. It keeps that for 90 days unless a
-diagnostic setting exports it. The private change record holds the reason. The
-first `suspended` event dates activation and the last dates resumption. None of
-this contains a token or secret.
+Each stop needs a private change record: who decided, why, and the deployment
+run that applied it. The
+[Azure Activity Log](https://learn.microsoft.com/en-us/azure/azure-monitor/platform/activity-log)
+backs that up with when the settings were written, but its caller is the
+deployment identity, not the person who decided, and it keeps entries for 90
+days unless a diagnostic setting exports them. Once dispatch is live, the first
+`suspended` event dates activation and the last dates resumption. These events
+hold no token or secret.
 
 ### Measured limits
 
