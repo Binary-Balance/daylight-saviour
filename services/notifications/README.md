@@ -10,20 +10,28 @@ material. The owner-gated on-demand handler composes FCM or APNs only when that
 provider's two gates are enabled. No Google service-account key or long-lived
 FCM credential is accepted.
 
-The registration HTTP surface accepts a strictly validated `POST`, and the
-installation-scoped `PUT` and `DELETE` endpoints require the current bearer
-credential. Deletes physically remove subscription fields from the Table row
-with an ETag check and retry concurrent mutations. The deleted subscription fields are replaced by a
-credential-free retired-identity marker for 30 days so delayed registration
+The registration HTTP surface accepts a strictly validated `POST`. The
+installation-scoped `PUT` and `DELETE` endpoints, and a body-less `POST` to
+`reminder-subscriptions/{installationId}/check-in`, require the current bearer
+credential. Registration, update and check-in each set the subscription's last
+contact time. A check-in changes nothing else, ignores any request body, and
+counts against the same per-installation throttle as the other
+installation-scoped requests. Deletes physically remove subscription fields
+from the Table row with an ETag check and retry concurrent mutations. The
+deleted subscription fields are replaced by a credential-free
+retired-identity marker for 30 days so delayed registration
 replays cannot recreate the identity; the marker is removed by the existing
 operational cleanup timer. New registrations use versioned, time-bounded
 request IDs, while active legacy rows remain recoverable during the rollout.
 Well-formed missing or mismatched credentials return the same empty `204` as a
 completed delete so idempotent retries do not reveal whether another
 installation exists; malformed requests and storage failures remain coarse
-errors. The mobile and service versions must be rolled out together: old
-backends reject new versioned IDs and new backends do not create absent legacy
-IDs.
+errors. An update or check-in for an installation with no row or a retired
+marker answers `404` with `{"error":"Registration unavailable"}`, and the app
+clears its registration only on that response, never on a bare `404` from the
+platform, such as from a service that predates check-in. The mobile and
+service versions must be rolled out together: old backends reject new versioned
+IDs and new backends do not create absent legacy IDs.
 
 ## Portable reminder dispatch
 
@@ -276,11 +284,18 @@ live-send or deployment evidence.
 
 | Record                                                 | Purpose                                                   | Contents                                                                                                                                                  | Kept until                                              |
 | ------------------------------------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Subscription (`ReminderSubscriptions`)                 | Send reminders and authorise changes to them              | Installation ID, credential hash, push token, platform, Home Time Zone, timing preferences, generation and registration time                              | Disable, deletion or a permanent invalid-token response |
+| Subscription (`ReminderSubscriptions`)                 | Send reminders and authorise changes to them              | Installation ID, credential hash, push token, platform, Home Time Zone, timing preferences, generation, registration time and last contact time           | Disable, deletion or a permanent invalid-token response |
 | Retired-identity marker (`ReminderSubscriptions`)      | Stop a delayed registration recreating a removed identity | Installation ID, generation and retirement time                                                                                                           | 30 days after the subscription is removed               |
-| Registration throttle (`ReminderRegistrationThrottle`) | Limit registration, update and deletion requests          | Hashed client IP address or installation ID, ten-minute window and request count                                                                          | 30 days after its window starts                         |
+| Registration throttle (`ReminderRegistrationThrottle`) | Limit registration, update, check-in and delete requests  | Hashed client IP address or installation ID, ten-minute window and request count                                                                          | 30 days after its window starts                         |
 | Dispatch ledger (`ReminderDispatchLedger`)             | Send each reminder at most once and record its outcome    | Installation ID, Home Time Zone, Change Event, timing, generation, delivery window, pack horizon, status, claim, expiry and cleanup state, and timestamps | 30 days after its last update                           |
 | Sweep marker (`ReminderDispatchLedger`)                | Report a Delivery Window that no run fully swept          | Home Time Zone, Change Event, timing, sweep state and last update                                                                                         | 30 days after its last update                           |
+
+The last contact time is set at registration and by every authenticated update
+or check-in. The app checks in on its next return to the foreground once 30
+days have passed since its last successful contact. A subscription saved before
+the service recorded contact has no last contact time until its next contact.
+[ADR 0022](../../docs/adr/0022-expire-silent-reminder-subscriptions-after-warning.md)
+uses it for the warning and expiry it describes.
 
 Uninstalling the app does not tell the service. An uninstalled app's
 subscription stays until APNs or FCM rejects its token as permanently invalid,

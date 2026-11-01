@@ -11,11 +11,14 @@ export type ChangeReminderEnableResult =
   | { readonly kind: 'permission-denied' }
   | { readonly kind: 'os-blocked' }
   | { readonly kind: 'unavailable' }
-  | { readonly kind: 'failed' };
+  | { readonly kind: 'failed' }
+  /** The service no longer holds the registration; the adapters cleared it. */
+  | { readonly kind: 'unregistered' };
 
 export type ChangeReminderTokenRefreshResult =
   | { readonly kind: 'succeeded' }
-  | { readonly kind: 'failed'; readonly retryable: boolean };
+  | { readonly kind: 'failed'; readonly retryable: boolean }
+  | { readonly kind: 'unregistered' };
 
 interface StoredChangeReminderBase {
   readonly attemptGeneration: number;
@@ -34,6 +37,8 @@ export interface StoredChangeReminderPending extends StoredChangeReminderBase {
 export interface StoredChangeReminderRegistration extends StoredChangeReminderBase {
   readonly credential: string;
   readonly installationId: string;
+  /** ISO time the service last confirmed contact; absent before the app first recorded one. */
+  readonly lastContactAt?: string;
   readonly state: 'registered';
 }
 

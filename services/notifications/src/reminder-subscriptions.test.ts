@@ -5,7 +5,9 @@ import { TableClient } from '@azure/data-tables';
 import { ManagedIdentityCredential } from '@azure/identity';
 
 import {
+  checkInReminderSubscription,
   createAzureReminderSubscriptionStore,
+  createReminderSubscriptionCheckInHandler,
   createReminderSubscriptionDeleteHandler,
   createReminderSubscriptionHandler,
   createReminderSubscriptionUpdateHandler,
@@ -15,6 +17,10 @@ import {
   hashOpaqueValue,
   normalizeClientAddress,
   registerReminderSubscription,
+  reminderSubscriptionCheckInOptions,
+  reminderSubscriptionDeleteOptions,
+  reminderSubscriptionOptions,
+  reminderSubscriptionUpdateOptions,
   updateReminderSubscription,
   type ReminderSubscriptionStore,
 } from './reminder-subscriptions.ts';
@@ -70,6 +76,7 @@ function store(
   overrides: Partial<ReminderSubscriptionStore> = {},
 ): ReminderSubscriptionStore {
   return {
+    checkInSubscription: async () => 'accepted',
     createSubscription: async () => 'accepted',
     deleteSubscription: async () => 'deleted',
     getSubscription: async () => null,
@@ -125,6 +132,10 @@ function subscriptionTable(
       readonly rowKey: string;
       readonly state?: 'retired';
     }>;
+    readonly merge: (
+      entity: Record<string, unknown>,
+      etag: string,
+    ) => Promise<void>;
     readonly replace: (
       entity: Record<string, unknown>,
       etag: string,
@@ -144,6 +155,7 @@ function subscriptionTable(
     listZonePages: async function* () {
       // Subscription-only tests never list a zone.
     },
+    merge: async () => undefined,
     replace: async () => undefined,
     ...overrides,
   };
@@ -204,6 +216,7 @@ describe('reminder subscription registration', () => {
     assert.notEqual(saved?.credentialHash, body.credential);
     assert.equal(saved?.deviceToken, validRegistration.deviceToken);
     assert.equal(saved?.registeredAt, now);
+    assert.equal(saved?.lastContactAt, now);
     assert.equal(saved?.attemptGeneration, 1);
     assert.equal('registrationRequestId' in (saved ?? {}), false);
     assert.equal(new Headers(result.headers).get('Cache-Control'), 'no-store');
@@ -428,6 +441,7 @@ describe('reminder subscription updates', () => {
   const credential = 'c'.repeat(43);
 
   it('stores the update it read from the request', async () => {
+    const now = new Date('2026-07-24T05:00:00.000Z');
     let received:
       | Parameters<ReminderSubscriptionStore['updateSubscription']>[0]
       | undefined;
@@ -440,6 +454,7 @@ describe('reminder subscription updates', () => {
         },
       }),
       installationId,
+      now,
     );
 
     assert.equal(received?.attemptGeneration, update.attemptGeneration);
@@ -448,6 +463,7 @@ describe('reminder subscription updates', () => {
     assert.equal(received?.oneDayEnabled, update.oneDayEnabled);
     assert.equal(received?.oneWeekEnabled, update.oneWeekEnabled);
     assert.equal(received?.platform, update.platform);
+    assert.equal(received?.lastContactAt, now);
   });
 
   it('rejects an update that is not JSON or not a supported zone', async () => {
@@ -688,6 +704,278 @@ describe('reminder subscription delete handler', () => {
     })(deletion());
 
     assert.equal(result.status, 503);
+  });
+});
+
+describe('reminder subscription check-in', () => {
+  const installationId = 'i'.repeat(43);
+  const credential = 'c'.repeat(43);
+  const authorization = `Bearer ${credential}`;
+  const now = new Date('2026-07-24T05:00:00.000Z');
+
+  it('records contact for the authenticated installation without returning secrets', async () => {
+    let received:
+      | {
+          readonly contactAt: Date;
+          readonly credentialHash: string;
+          readonly installationId: string;
+        }
+      | undefined;
+    const result = await checkInReminderSubscription(
+      request('', { authorization }),
+      store({
+        checkInSubscription: async (target, credentialHash, contactAt) => {
+          received = { contactAt, credentialHash, installationId: target };
+          return 'accepted';
+        },
+      }),
+      installationId,
+      now,
+    );
+    assert.equal(result.status, 204);
+    assert.equal(result.jsonBody, undefined);
+    assert.equal(new Headers(result.headers).get('Cache-Control'), 'no-store');
+    assert.deepEqual(received, {
+      contactAt: now,
+      credentialHash: hashOpaqueValue(credential),
+      installationId,
+    });
+    assert.doesNotMatch(JSON.stringify(result), /credential|token/i);
+  });
+
+  it('reads nothing from the request body', async () => {
+    let checkIns = 0;
+    const result = await checkInReminderSubscription(
+      request(
+        { homeTimeZone: 'Australia/Perth' },
+        { authorization, contentType: 'text/plain' },
+      ),
+      store({ checkInSubscription: async () => ((checkIns += 1), 'accepted') }),
+      installationId,
+      now,
+    );
+    assert.equal(result.status, 204);
+    assert.equal(checkIns, 1);
+  });
+
+  for (const unusable of [
+    undefined,
+    'Bearer short',
+    `Basic ${credential}`,
+  ] as const) {
+    it(`rejects ${String(unusable)} without recording contact`, async () => {
+      let checkIns = 0;
+      const result = await checkInReminderSubscription(
+        request('', { authorization: unusable }),
+        store({
+          checkInSubscription: async () => ((checkIns += 1), 'accepted'),
+        }),
+        installationId,
+        now,
+      );
+      assert.equal(result.status, 401);
+      assert.deepEqual(result.jsonBody, { error: 'Unauthorized' });
+      assert.equal(checkIns, 0);
+    });
+  }
+
+  for (const target of [undefined, 'short', `${'i'.repeat(42)}!`] as const) {
+    it(`rejects installation ${String(target)} without recording contact`, async () => {
+      let checkIns = 0;
+      const result = await checkInReminderSubscription(
+        request('', { authorization }),
+        store({
+          checkInSubscription: async () => ((checkIns += 1), 'accepted'),
+        }),
+        target,
+        now,
+      );
+      assert.equal(result.status, 401);
+      assert.equal(checkIns, 0);
+    });
+  }
+
+  it('reports a wrong credential as unauthorized, without secrets', async () => {
+    const result = await checkInReminderSubscription(
+      request('', { authorization }),
+      store({ checkInSubscription: async () => 'unauthorized' }),
+      installationId,
+      now,
+    );
+    assert.equal(result.status, 401);
+    assert.deepEqual(result.jsonBody, { error: 'Unauthorized' });
+    assert.doesNotMatch(JSON.stringify(result), /c{43}/);
+  });
+
+  // The app clears its registration only on this exact response.
+  it('reports a removed installation as unavailable', async () => {
+    const result = await checkInReminderSubscription(
+      request('', { authorization }),
+      store({ checkInSubscription: async () => 'not-found' }),
+      installationId,
+      now,
+    );
+    assert.equal(result.status, 404);
+    assert.deepEqual(result.jsonBody, { error: 'Registration unavailable' });
+    assert.equal(new Headers(result.headers).get('Cache-Control'), 'no-store');
+  });
+
+  it('takes the source and installation allowances before checking the credential', async () => {
+    const calls: unknown[] = [];
+    await checkInReminderSubscription(
+      request('', { authorization }),
+      store({
+        checkInSubscription: async () => {
+          calls.push('check-in');
+          return 'accepted';
+        },
+        takeInstallationAllowance: async (target, at) => {
+          calls.push(['installation', target, at]);
+          return true;
+        },
+        takeSourceAllowance: async (sourceHash, at) => {
+          calls.push(['source', sourceHash, at]);
+          return true;
+        },
+      }),
+      installationId,
+      now,
+    );
+    assert.deepEqual(calls, [
+      ['source', hashOpaqueValue('198.51.100.7'), now],
+      ['installation', installationId, now],
+      'check-in',
+    ]);
+  });
+
+  it('throttles check-in source and installation attempts before credential lookup', async () => {
+    let checkIns = 0;
+    const checkInSubscription = async () => {
+      checkIns += 1;
+      return 'accepted' as const;
+    };
+    const sourceLimited = await checkInReminderSubscription(
+      request('', { authorization }),
+      store({ checkInSubscription, takeSourceAllowance: async () => false }),
+      installationId,
+      now,
+    );
+    const installationLimited = await checkInReminderSubscription(
+      request('', { authorization }),
+      store({
+        checkInSubscription,
+        takeInstallationAllowance: async () => false,
+      }),
+      installationId,
+      now,
+    );
+    for (const limited of [sourceLimited, installationLimited]) {
+      assert.equal(limited.status, 429);
+      assert.deepEqual(limited.jsonBody, { error: 'Try again later' });
+      assert.equal(new Headers(limited.headers).get('Retry-After'), '600');
+    }
+    assert.equal(checkIns, 0);
+  });
+
+  it('does not spend the installation allowance when the source is refused', async () => {
+    let installationAllowances = 0;
+    await checkInReminderSubscription(
+      request('', { authorization }),
+      store({
+        takeInstallationAllowance: async () => (
+          (installationAllowances += 1),
+          true
+        ),
+        takeSourceAllowance: async () => false,
+      }),
+      installationId,
+      now,
+    );
+    assert.equal(installationAllowances, 0);
+  });
+
+  it('fails closed when a check-in has no trusted source address', async () => {
+    let checkIns = 0;
+    const result = await checkInReminderSubscription(
+      request('', { authorization, source: null }),
+      store({ checkInSubscription: async () => ((checkIns += 1), 'accepted') }),
+      installationId,
+      now,
+    );
+    assert.equal(result.status, 503);
+    assert.deepEqual(result.jsonBody, { error: 'Registration unavailable' });
+    assert.equal(checkIns, 0);
+  });
+
+  it('keeps a storage failure coarse', async () => {
+    const result = await checkInReminderSubscription(
+      request('', { authorization }),
+      store({
+        checkInSubscription: async () => {
+          throw azureError(500);
+        },
+      }),
+      installationId,
+      now,
+    );
+    assert.equal(result.status, 503);
+    assert.deepEqual(result.jsonBody, { error: 'Registration unavailable' });
+  });
+});
+
+describe('reminder subscription check-in handler', () => {
+  const installationId = 'i'.repeat(43);
+  const checkIn = () =>
+    Object.assign(request('', { authorization: `Bearer ${'c'.repeat(43)}` }), {
+      params: { installationId },
+    });
+
+  it('routes a check-in to the requested installation', async () => {
+    let target: string | undefined;
+    const result = await createReminderSubscriptionCheckInHandler(() =>
+      store({
+        checkInSubscription: async (selectedInstallationId) => {
+          target = selectedInstallationId;
+          return 'accepted';
+        },
+      }),
+    )(checkIn());
+
+    assert.equal(result.status, 204);
+    assert.equal(target, installationId);
+  });
+
+  it('reports a coarse failure when its store is unavailable', async () => {
+    const result = await createReminderSubscriptionCheckInHandler(() => {
+      throw new Error('store unavailable');
+    })(checkIn());
+
+    assert.equal(result.status, 503);
+    assert.deepEqual(result.jsonBody, { error: 'Registration unavailable' });
+  });
+});
+
+describe('reminder subscription routes', () => {
+  // The app builds these URLs, so a change here is a change to the contract.
+  it('puts check-in beside update and delete under the installation', () => {
+    assert.deepEqual(
+      [
+        reminderSubscriptionOptions,
+        reminderSubscriptionUpdateOptions,
+        reminderSubscriptionDeleteOptions,
+        reminderSubscriptionCheckInOptions,
+      ].map(({ authLevel, methods, route }) => [authLevel, methods, route]),
+      [
+        ['anonymous', ['POST'], 'reminder-subscriptions'],
+        ['anonymous', ['PUT'], 'reminder-subscriptions/{installationId}'],
+        ['anonymous', ['DELETE'], 'reminder-subscriptions/{installationId}'],
+        [
+          'anonymous',
+          ['POST'],
+          'reminder-subscriptions/{installationId}/check-in',
+        ],
+      ],
+    );
   });
 });
 
@@ -949,6 +1237,7 @@ describe('Azure Table mapping', () => {
         ...validRegistration,
         credentialHash: 'credential-hash',
         installationId: 'installation-id',
+        lastContactAt: new Date('2026-07-24T05:00:00.000Z'),
         registeredAt: new Date('2026-07-24T05:00:00.000Z'),
       },
       validRegistration.registrationRequestId,
@@ -957,6 +1246,10 @@ describe('Azure Table mapping', () => {
     assert.equal(entity?.partitionKey, 'subscriptions-v1');
     assert.doesNotMatch(String(entity?.partitionKey), /[\\/#?]/);
     assert.equal(entity?.homeTimeZone, 'Australia/Sydney');
+    assert.deepEqual(
+      entity?.lastContactAt,
+      new Date('2026-07-24T05:00:00.000Z'),
+    );
     assert.equal(entity?.attemptGeneration, 1);
     assert.equal('registrationRequestId' in (entity ?? {}), false);
     assert.equal(entity?.rowKey, 'installation-id');
@@ -1168,6 +1461,59 @@ describe('Azure Table mapping', () => {
     );
     assert.deepEqual(deletions, []);
   });
+
+  // Replace mode would drop every column the entity omits, including ones this
+  // code does not know about.
+  it('checks in by merging only last contact into the row', async () => {
+    const writes: unknown[][] = [];
+    const subscriptions = {
+      getEntity: async () => ({
+        attemptGeneration: 1,
+        credentialHash: hashOpaqueValue('credential-current'),
+        deviceToken: validRegistration.deviceToken,
+        etag: 'matching-etag',
+      }),
+      updateEntity: async (...args: unknown[]) => {
+        writes.push(args);
+      },
+    };
+    const azureStore = createAzureReminderSubscriptionStore(
+      {
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      },
+      {
+        createCredential: () => ({
+          getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+        }),
+        createTableClient: (_endpoint, tableName) =>
+          tableName === 'ReminderSubscriptions'
+            ? (subscriptions as never)
+            : ({} as never),
+      },
+    );
+    const contactAt = new Date('2026-09-01T00:00:00.000Z');
+
+    assert.equal(
+      await azureStore.checkInSubscription(
+        'installation-id',
+        hashOpaqueValue('credential-current'),
+        contactAt,
+      ),
+      'accepted',
+    );
+    assert.deepEqual(writes, [
+      [
+        {
+          lastContactAt: contactAt,
+          partitionKey: 'subscriptions-v1',
+          rowKey: 'installation-id',
+        },
+        'Merge',
+        { etag: 'matching-etag' },
+      ],
+    ]);
+  });
 });
 
 describe('source address normalization', () => {
@@ -1205,6 +1551,9 @@ describe('generation-ordered subscription persistence', () => {
       deviceToken: `${validRegistration.deviceToken}-${attemptGeneration}`,
       homeTimeZone: validRegistration.homeTimeZone,
       installationId: deriveInstallationId(registrationRequestId),
+      // Later than registeredAt, so a store that derived one from the other
+      // would be caught.
+      lastContactAt: new Date(`2026-07-24T06:00:0${attemptGeneration}.000Z`),
       oneDayEnabled: true,
       oneWeekEnabled: true,
       platform: validRegistration.platform,
@@ -1272,6 +1621,17 @@ describe('generation-ordered subscription persistence', () => {
           rowKey,
           state: row.state === 'retired' ? ('retired' as const) : undefined,
         };
+      },
+      // Azure's Merge mode: columns the entity omits keep their values.
+      merge: async (entity: Record<string, unknown>, expectedEtag: string) => {
+        await pause();
+        // A merge is a write like a replace, so tests race both the same way.
+        await beforeReplace?.();
+        const key = `${String(entity.partitionKey)}/${String(entity.rowKey)}`;
+        const row = rows.get(key);
+        if (row === undefined) throw azureError(404);
+        if (row.etag !== expectedEtag) throw azureError(412);
+        rows.set(key, { ...row, ...entity, etag: String(++nextEtag) });
       },
       replace: async (
         entity: Record<string, unknown>,
@@ -1701,6 +2061,279 @@ describe('generation-ordered subscription persistence', () => {
     );
   });
 
+  it('stamps last contact when a subscription is registered, replayed and updated', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    await registrationStore.createSubscription(
+      record(1),
+      validRegistration.registrationRequestId,
+    );
+    assert.deepEqual(
+      onlyRow(subscriptions.rows).lastContactAt,
+      record(1).lastContactAt,
+    );
+
+    const replay = {
+      ...record(1),
+      attemptGeneration: 2,
+      lastContactAt: new Date('2026-07-25T00:00:00.000Z'),
+    };
+    assert.equal(
+      await registrationStore.createSubscription(
+        replay,
+        validRegistration.registrationRequestId,
+      ),
+      'accepted',
+    );
+    assert.deepEqual(
+      onlyRow(subscriptions.rows).lastContactAt,
+      replay.lastContactAt,
+    );
+
+    assert.equal(
+      await updateSubscription(registrationStore, record(3), 'credential-1'),
+      'accepted',
+    );
+    assert.deepEqual(
+      onlyRow(subscriptions.rows).lastContactAt,
+      record(3).lastContactAt,
+    );
+  });
+
+  // What a check-in must leave alone: the row's version tag changes on every
+  // write, and the contact time is the one thing it may change.
+  function withoutContact(row: Record<string, unknown>) {
+    const { etag: _etag, lastContactAt: _lastContactAt, ...rest } = row;
+    return rest;
+  }
+
+  it('checks in by changing only last contact', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const current = record(2, 'credential-current');
+    await registrationStore.createSubscription(
+      current,
+      validRegistration.registrationRequestId,
+    );
+    const before = { ...onlyRow(subscriptions.rows) };
+    const snapshotBefore = await registrationStore.getSubscriptionSnapshot(
+      current.installationId,
+    );
+    const contactAt = new Date('2026-09-01T00:00:00.000Z');
+
+    assert.equal(
+      await registrationStore.checkInSubscription(
+        current.installationId,
+        'credential-current',
+        contactAt,
+      ),
+      'accepted',
+    );
+
+    const after = onlyRow(subscriptions.rows);
+    assert.deepEqual(withoutContact(after), withoutContact(before));
+    assert.deepEqual(after.lastContactAt, contactAt);
+    assert.notEqual(after.lastContactAt, before.lastContactAt);
+    // Dispatch reads the row too, and must see the same subscription.
+    assert.deepEqual(
+      await registrationStore.getSubscriptionSnapshot(current.installationId),
+      snapshotBefore,
+    );
+  });
+
+  it('gives a row written before last contact existed its first contact time', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const { lastContactAt: _absent, ...legacy } = record(1, 'credential-old');
+    await subscriptions.create({
+      ...legacy,
+      partitionKey: 'subscriptions-v1',
+      rowKey: legacy.installationId,
+    });
+    const before = { ...onlyRow(subscriptions.rows) };
+    const snapshotBefore = await registrationStore.getSubscriptionSnapshot(
+      legacy.installationId,
+    );
+    assert.equal('lastContactAt' in before, false);
+    assert.notEqual(snapshotBefore, null);
+    const contactAt = new Date('2026-09-01T00:00:00.000Z');
+
+    assert.equal(
+      await registrationStore.checkInSubscription(
+        legacy.installationId,
+        'credential-old',
+        contactAt,
+      ),
+      'accepted',
+    );
+
+    const after = onlyRow(subscriptions.rows);
+    assert.deepEqual(withoutContact(after), withoutContact(before));
+    assert.deepEqual(after.lastContactAt, contactAt);
+    assert.deepEqual(
+      await registrationStore.getSubscriptionSnapshot(legacy.installationId),
+      snapshotBefore,
+    );
+  });
+
+  it('rejects a check-in with the wrong credential and leaves the row alone', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const current = record(1, 'credential-current');
+    await registrationStore.createSubscription(
+      current,
+      validRegistration.registrationRequestId,
+    );
+    const before = { ...onlyRow(subscriptions.rows) };
+
+    assert.equal(
+      await registrationStore.checkInSubscription(
+        current.installationId,
+        'credential-stale',
+        new Date('2026-09-01T00:00:00.000Z'),
+      ),
+      'unauthorized',
+    );
+    assert.deepEqual(onlyRow(subscriptions.rows), before);
+  });
+
+  it('reports a check-in for an absent installation as not found, creating nothing', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+
+    assert.equal(
+      await registrationStore.checkInSubscription(
+        record(1).installationId,
+        'credential-1',
+        new Date('2026-09-01T00:00:00.000Z'),
+      ),
+      'not-found',
+    );
+    assert.equal(subscriptions.rows.size, 0);
+  });
+
+  it('reports a retired installation as not found, leaving its marker alone', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const current = record(1, 'credential-current');
+    await registrationStore.createSubscription(
+      current,
+      validRegistration.registrationRequestId,
+    );
+    await registrationStore.deleteSubscription(
+      current.installationId,
+      'credential-current',
+    );
+    const marker = { ...onlyRow(subscriptions.rows) };
+    assert.equal(marker.state, 'retired');
+
+    assert.equal(
+      await registrationStore.checkInSubscription(
+        current.installationId,
+        'credential-current',
+        new Date('2026-09-01T00:00:00.000Z'),
+      ),
+      'not-found',
+    );
+    assert.equal(
+      await registrationStore.updateSubscription(
+        record(2, 'credential-current'),
+        'credential-current',
+      ),
+      'not-found',
+    );
+    assert.deepEqual(onlyRow(subscriptions.rows), marker);
+  });
+
+  it('keeps a concurrent update when a check-in loses the race to it', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const current = record(1, 'credential-current');
+    await registrationStore.createSubscription(
+      current,
+      validRegistration.registrationRequestId,
+    );
+    const contactAt = new Date('2026-09-01T00:00:00.000Z');
+    subscriptions.setBeforeReplace(async () => {
+      subscriptions.setBeforeReplace(undefined);
+      assert.equal(
+        await updateSubscription(
+          registrationStore,
+          record(2, 'credential-current'),
+          'credential-current',
+        ),
+        'accepted',
+      );
+    });
+
+    assert.equal(
+      await registrationStore.checkInSubscription(
+        current.installationId,
+        'credential-current',
+        contactAt,
+      ),
+      'accepted',
+    );
+
+    const stored = onlyRow(subscriptions.rows);
+    assert.equal(stored.attemptGeneration, 2);
+    assert.equal(stored.deviceToken, record(2).deviceToken);
+    assert.deepEqual(stored.lastContactAt, contactAt);
+  });
+
+  it('bounds check-in contention', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const current = record(1, 'credential-current');
+    await registrationStore.createSubscription(
+      current,
+      validRegistration.registrationRequestId,
+    );
+    const before = { ...onlyRow(subscriptions.rows) };
+    let attempts = 0;
+    subscriptions.setBeforeReplace(async () => {
+      attempts += 1;
+      // Retries that lose their bound must fail this test, not hang it.
+      if (attempts > 20) throw new Error('check-in retried without a bound');
+      throw azureError(412);
+    });
+
+    await assert.rejects(
+      registrationStore.checkInSubscription(
+        current.installationId,
+        'credential-current',
+        new Date('2026-09-01T00:00:00.000Z'),
+      ),
+      /Subscription update contention exceeded retry limit/,
+    );
+    assert.equal(attempts, 12);
+    assert.deepEqual(onlyRow(subscriptions.rows), before);
+  });
+
   it('removes an exact token and generation with conditional cleanup', async () => {
     const subscriptions = concurrentSubscriptionTable();
     const registrationStore = createTableReminderSubscriptionStore(
@@ -2065,6 +2698,56 @@ describe('durable throttle', () => {
     );
     assert.equal(results.filter(Boolean).length, 5);
     assert.equal(results.filter((allowed) => !allowed).length, 5);
+  });
+
+  it('spends one installation allowance across updates and check-ins', async () => {
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable(),
+      createConcurrentTable(),
+    );
+    const installationId = 'i'.repeat(43);
+    const authorization = `Bearer ${'c'.repeat(43)}`;
+    const now = new Date('2026-07-24T05:00:00.000Z');
+    const update = {
+      attemptGeneration: 2,
+      deviceToken: validRegistration.deviceToken,
+      homeTimeZone: validRegistration.homeTimeZone,
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
+      platform: 'android',
+    };
+
+    const statuses: (number | undefined)[] = [];
+    for (const [index, kind] of [
+      'check-in',
+      'update',
+      'check-in',
+      'update',
+      'check-in',
+      'check-in',
+    ].entries()) {
+      // Each request comes from its own address, so only the installation's
+      // allowance runs out.
+      const source = `198.51.100.${index + 1}`;
+      const result =
+        kind === 'update'
+          ? await updateReminderSubscription(
+              request(update, { authorization, source }),
+              tableStore,
+              installationId,
+              now,
+            )
+          : await checkInReminderSubscription(
+              request('', { authorization, source }),
+              tableStore,
+              installationId,
+              now,
+            );
+      statuses.push(result.status);
+    }
+
+    // The table holds no subscription, so an allowed request is a 404.
+    assert.deepEqual(statuses, [404, 404, 404, 404, 404, 429]);
   });
 
   it('distinguishes missing rows, races, and Azure service errors', async () => {
