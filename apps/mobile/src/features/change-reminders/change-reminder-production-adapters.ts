@@ -18,7 +18,10 @@ import type {
   StoredChangeReminderPending,
   StoredChangeReminderPendingDelete,
   StoredChangeReminderPendingUpdate,
+  StoredChangeReminderRegistration,
   StoredChangeReminderState,
+  StoredV3ChangeReminderPending,
+  StoredV3ChangeReminderRegistration,
 } from './change-reminder-adapters';
 
 const registrationKey = 'change-reminder-registration-v2';
@@ -442,6 +445,163 @@ async function fetchWithTimeout(
   }
 }
 
+type SavedRegistration = Extract<
+  StoredChangeReminderState,
+  { state: 'pending-update' | 'registered' }
+>;
+type RegistrationAttempt =
+  | StoredChangeReminderPending
+  | StoredChangeReminderPendingUpdate;
+
+// The caller read a registration earlier and must still find that same one.
+function registrationReplaced(
+  saved: StoredChangeReminderState | null,
+  expectedRegistrationRequestId: string | undefined,
+  expectedInstallationId: string | undefined,
+) {
+  return (
+    expectedRegistrationRequestId !== undefined &&
+    (saved?.registrationRequestId !== expectedRegistrationRequestId ||
+      (expectedInstallationId !== undefined &&
+        saved?.state !== 'pending' &&
+        saved?.installationId !== expectedInstallationId))
+  );
+}
+
+function registrationMatches(
+  saved: StoredChangeReminderState | null,
+  deviceToken: string,
+  forceTokenReplacement: boolean,
+  preferences: ChangeReminderPreferences,
+): saved is
+  | StoredChangeReminderRegistration
+  | StoredV3ChangeReminderRegistration {
+  return (
+    saved?.state === 'registered' &&
+    saved.version !== 2 &&
+    saved.deviceToken === deviceToken &&
+    !forceTokenReplacement &&
+    saved.oneDayEnabled === preferences.oneDayEnabled &&
+    saved.oneWeekEnabled === preferences.oneWeekEnabled
+  );
+}
+
+// A lost initial registration is replayed as it was first sent.
+function replayingInitialRegistration(
+  saved: StoredChangeReminderState | null,
+): saved is StoredChangeReminderPending | StoredV3ChangeReminderPending {
+  return saved?.state === 'pending' && saved.version !== 2;
+}
+
+function attemptBase(
+  saved: StoredChangeReminderState | null,
+  attemptGeneration: number,
+  deviceToken: string,
+  homeTimeZone: string,
+  preferences: ChangeReminderPreferences,
+  registrationRequestId: string,
+) {
+  const replaying = replayingInitialRegistration(saved);
+  return {
+    attemptGeneration,
+    deviceToken: replaying ? saved.deviceToken : deviceToken,
+    homeTimeZone: replaying ? saved.homeTimeZone : homeTimeZone,
+    oneDayEnabled: replaying ? saved.oneDayEnabled : preferences.oneDayEnabled,
+    oneWeekEnabled: replaying
+      ? saved.oneWeekEnabled
+      : preferences.oneWeekEnabled,
+    registrationRequestId,
+    version: 4 as const,
+  };
+}
+
+function confirmedHomeTimeZoneFor(
+  saved: SavedRegistration,
+  homeTimeZone: string,
+) {
+  const changed =
+    saved.homeTimeZone !== homeTimeZone ? saved.homeTimeZone : undefined;
+  return saved.state === 'pending-update'
+    ? (saved.confirmedHomeTimeZone ?? changed)
+    : changed;
+}
+
+function confirmedPreferences(
+  saved: SavedRegistration,
+  preservePreferenceContext: boolean,
+) {
+  const carriesPreferenceContext =
+    preservePreferenceContext ||
+    (saved.state === 'pending-update' &&
+      saved.confirmedOneDayEnabled !== undefined &&
+      saved.confirmedOneWeekEnabled !== undefined);
+  if (!carriesPreferenceContext) return {};
+  return {
+    confirmedOneDayEnabled:
+      saved.state === 'pending-update'
+        ? (saved.confirmedOneDayEnabled ?? saved.oneDayEnabled)
+        : saved.oneDayEnabled,
+    confirmedOneWeekEnabled:
+      saved.state === 'pending-update'
+        ? (saved.confirmedOneWeekEnabled ?? saved.oneWeekEnabled)
+        : saved.oneWeekEnabled,
+  };
+}
+
+function nextAttempt(
+  saved: StoredChangeReminderState | null,
+  base: ReturnType<typeof attemptBase>,
+  homeTimeZone: string,
+  preservePreferenceContext: boolean,
+): RegistrationAttempt {
+  if (saved?.state === 'registered' || saved?.state === 'pending-update') {
+    const confirmedHomeTimeZone = confirmedHomeTimeZoneFor(saved, homeTimeZone);
+    return {
+      ...base,
+      ...confirmedPreferences(saved, preservePreferenceContext),
+      ...(confirmedHomeTimeZone === undefined ? {} : { confirmedHomeTimeZone }),
+      credential: saved.credential,
+      installationId: saved.installationId,
+      state: 'pending-update',
+    };
+  }
+  return { ...base, state: 'pending' };
+}
+
+function registrationRequest(
+  registrationEndpoint: string,
+  pending: RegistrationAttempt,
+  platform: string,
+) {
+  return {
+    url:
+      pending.state === 'pending'
+        ? registrationEndpoint
+        : updateEndpoint(registrationEndpoint, pending.installationId),
+    init: {
+      body: JSON.stringify({
+        attemptGeneration: pending.attemptGeneration,
+        deviceToken: pending.deviceToken,
+        homeTimeZone: pending.homeTimeZone,
+        oneDayEnabled: pending.oneDayEnabled,
+        oneWeekEnabled: pending.oneWeekEnabled,
+        platform,
+        ...(pending.state === 'pending'
+          ? { registrationRequestId: pending.registrationRequestId }
+          : {}),
+      }),
+      headers:
+        pending.state === 'pending'
+          ? { 'content-type': 'application/json' }
+          : {
+              authorization: `Bearer ${pending.credential}`,
+              'content-type': 'application/json',
+            },
+      method: pending.state === 'pending' ? 'POST' : 'PUT',
+    },
+  };
+}
+
 export function createProductionChangeReminderAdapters({
   createRegistrationRequestId,
   endpoint,
@@ -515,93 +675,64 @@ export function createProductionChangeReminderAdapters({
     }
     const saved = await loadStoredState();
     if (
-      expectedRegistrationRequestId !== undefined &&
-      (saved?.registrationRequestId !== expectedRegistrationRequestId ||
-        (expectedInstallationId !== undefined &&
-          saved?.state !== 'pending' &&
-          saved?.installationId !== expectedInstallationId))
+      registrationReplaced(
+        saved,
+        expectedRegistrationRequestId,
+        expectedInstallationId,
+      )
     ) {
       return { kind: 'failed' };
     }
     if (saved?.state === 'pending-delete') return { kind: 'failed' };
     if (
-      saved?.state === 'registered' &&
-      saved.version !== 2 &&
-      saved.deviceToken === deviceToken &&
-      !forceTokenReplacement &&
-      saved.oneDayEnabled === preferences.oneDayEnabled &&
-      saved.oneWeekEnabled === preferences.oneWeekEnabled
+      registrationMatches(
+        saved,
+        deviceToken,
+        forceTokenReplacement,
+        preferences,
+      )
     ) {
       if (saved.homeTimeZone !== homeTimeZone) return { kind: 'failed' };
       return { kind: 'enabled' };
     }
+    return attemptRegistration(
+      saved,
+      registrationEndpoint,
+      homeTimeZone,
+      deviceToken,
+      preferences,
+      preservePreferenceContext,
+    );
+  }
+
+  async function attemptRegistration(
+    saved: StoredChangeReminderState | null,
+    registrationEndpoint: string,
+    homeTimeZone: string,
+    deviceToken: string,
+    preferences: ChangeReminderPreferences,
+    preservePreferenceContext: boolean,
+  ): Promise<ChangeReminderEnableResult> {
     const nextGeneration = (saved?.attemptGeneration ?? 0) + 1;
     try {
       if (nextGeneration > maximumAttemptGeneration) {
         return { kind: 'failed' };
       }
-      const replayingInitialRegistration =
-        saved?.state === 'pending' && saved.version !== 2;
-      const base = {
-        attemptGeneration: nextGeneration,
-        deviceToken: replayingInitialRegistration
-          ? saved.deviceToken
-          : deviceToken,
-        homeTimeZone: replayingInitialRegistration
-          ? saved.homeTimeZone
-          : homeTimeZone,
-        oneDayEnabled: replayingInitialRegistration
-          ? saved.oneDayEnabled
-          : preferences.oneDayEnabled,
-        oneWeekEnabled: replayingInitialRegistration
-          ? saved.oneWeekEnabled
-          : preferences.oneWeekEnabled,
-        registrationRequestId:
-          saved?.registrationRequestId ?? (await createRegistrationRequestId()),
-        version: 4 as const,
-      };
-      const carriesPreferenceContext =
-        preservePreferenceContext ||
-        (saved?.state === 'pending-update' &&
-          saved.confirmedOneDayEnabled !== undefined &&
-          saved.confirmedOneWeekEnabled !== undefined);
-      const confirmedHomeTimeZone =
-        saved?.state === 'pending-update'
-          ? (saved.confirmedHomeTimeZone ??
-            (saved.homeTimeZone !== homeTimeZone
-              ? saved.homeTimeZone
-              : undefined))
-          : saved?.state === 'registered' && saved.homeTimeZone !== homeTimeZone
-            ? saved.homeTimeZone
-            : undefined;
-      const pending =
-        saved?.state === 'registered' || saved?.state === 'pending-update'
-          ? ({
-              ...base,
-              ...(carriesPreferenceContext
-                ? {
-                    confirmedOneDayEnabled:
-                      saved.state === 'pending-update'
-                        ? (saved.confirmedOneDayEnabled ?? saved.oneDayEnabled)
-                        : saved.oneDayEnabled,
-                    confirmedOneWeekEnabled:
-                      saved.state === 'pending-update'
-                        ? (saved.confirmedOneWeekEnabled ??
-                          saved.oneWeekEnabled)
-                        : saved.oneWeekEnabled,
-                  }
-                : {}),
-              ...(confirmedHomeTimeZone === undefined
-                ? {}
-                : { confirmedHomeTimeZone }),
-              credential: saved.credential,
-              installationId: saved.installationId,
-              state: 'pending-update' as const,
-            } satisfies StoredChangeReminderPendingUpdate)
-          : ({
-              ...base,
-              state: 'pending',
-            } satisfies StoredChangeReminderPending);
+      const registrationRequestId =
+        saved?.registrationRequestId ?? (await createRegistrationRequestId());
+      const pending = nextAttempt(
+        saved,
+        attemptBase(
+          saved,
+          nextGeneration,
+          deviceToken,
+          homeTimeZone,
+          preferences,
+          registrationRequestId,
+        ),
+        homeTimeZone,
+        preservePreferenceContext,
+      );
       if (!validRegistrationRequestId(pending.registrationRequestId)) {
         return { kind: 'failed' };
       }
@@ -609,51 +740,21 @@ export function createProductionChangeReminderAdapters({
       // advance from this durable proposed attempt rather than the last
       // confirmed display values.
       const replayNeedsAuthenticatedUpdate =
-        replayingInitialRegistration &&
+        replayingInitialRegistration(saved) &&
         (pending.deviceToken !== deviceToken ||
           pending.homeTimeZone !== homeTimeZone);
       await saveStoredState(pending);
 
-      const response = await fetchWithTimeout(
-        request,
-        pending.state === 'pending'
-          ? registrationEndpoint
-          : updateEndpoint(registrationEndpoint, pending.installationId),
-        {
-          body: JSON.stringify({
-            attemptGeneration: pending.attemptGeneration,
-            deviceToken: pending.deviceToken,
-            homeTimeZone: pending.homeTimeZone,
-            oneDayEnabled: pending.oneDayEnabled,
-            oneWeekEnabled: pending.oneWeekEnabled,
-            platform,
-            ...(pending.state === 'pending'
-              ? { registrationRequestId: pending.registrationRequestId }
-              : {}),
-          }),
-          headers:
-            pending.state === 'pending'
-              ? { 'content-type': 'application/json' }
-              : {
-                  authorization: `Bearer ${pending.credential}`,
-                  'content-type': 'application/json',
-                },
-          method: pending.state === 'pending' ? 'POST' : 'PUT',
-        },
-        timeoutMs,
+      const { init, url } = registrationRequest(
+        registrationEndpoint,
+        pending,
+        platform,
       );
+      const response = await fetchWithTimeout(request, url, init, timeoutMs);
       if (!response.ok) {
-        if (response.status === 410 && pending.state === 'pending') {
-          // The server proved this unauthenticated identity cannot be resumed.
-          // Clear it only on this explicit enable/retry so the next attempt
-          // creates a new request identity instead of replaying an expired one.
-          await secureStore.deleteItemAsync(registrationKey);
-        }
-        if (registrationGone(response)) {
-          await secureStore.deleteItemAsync(registrationKey);
-          return { kind: 'unregistered' };
-        }
-        return { kind: 'failed' };
+        // Awaited, so a failure to clear the saved record is caught below
+        // and reported as a failed attempt.
+        return await failedRegistration(response, pending);
       }
       const registration =
         pending.state === 'pending'
@@ -683,6 +784,23 @@ export function createProductionChangeReminderAdapters({
     } catch {
       return { kind: 'failed' };
     }
+  }
+
+  async function failedRegistration(
+    response: { readonly body: string; readonly status: number },
+    pending: RegistrationAttempt,
+  ): Promise<ChangeReminderEnableResult> {
+    if (response.status === 410 && pending.state === 'pending') {
+      // The server proved this unauthenticated identity cannot be resumed.
+      // Clear it only on this explicit enable/retry so the next attempt
+      // creates a new request identity instead of replaying an expired one.
+      await secureStore.deleteItemAsync(registrationKey);
+    }
+    if (registrationGone(response)) {
+      await secureStore.deleteItemAsync(registrationKey);
+      return { kind: 'unregistered' };
+    }
+    return { kind: 'failed' };
   }
 
   async function performEnable(
