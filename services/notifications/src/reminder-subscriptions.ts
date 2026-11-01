@@ -807,6 +807,57 @@ async function writeWithCredential<Result extends string>(
   throw new Error(`Subscription ${operation} contention exceeded retry limit`);
 }
 
+// A registration that finds no row creates one, but only for a fresh request
+// ID. 'raced' means another registration created the row first, so the caller
+// reads it again.
+async function createAbsentRow(
+  subscriptions: SubscriptionTable,
+  entity: Record<string, unknown>,
+  registrationRequestId: string,
+  now: Date,
+) {
+  if (!isFreshVersionedRegistrationRequest(registrationRequestId, now)) {
+    return 'expired' as const;
+  }
+  try {
+    await subscriptions.create(entity);
+    return 'accepted' as const;
+  } catch (error) {
+    if (statusCode(error) !== 409) throw error;
+    return 'raced' as const;
+  }
+}
+
+// A registration that finds a row replaces it only when it repeats the row's
+// initial fields under a later generation. 'raced' means another writer
+// changed the row first, so the caller reads it again.
+async function replaceRegisteredRow(
+  subscriptions: SubscriptionTable,
+  entity: Record<string, unknown>,
+  existing: SubscriptionEntity,
+  record: ReminderSubscriptionRecord,
+) {
+  if (existing.state === 'retired') return 'stale' as const;
+  const sameInitialFields =
+    existing.deviceToken === record.deviceToken &&
+    existing.homeTimeZone === record.homeTimeZone &&
+    existing.oneDayEnabled === record.oneDayEnabled &&
+    existing.oneWeekEnabled === record.oneWeekEnabled &&
+    existing.platform === record.platform;
+  if (!sameInitialFields) return 'conflict' as const;
+  if (existing.attemptGeneration >= record.attemptGeneration) {
+    return 'stale' as const;
+  }
+  try {
+    await subscriptions.replace(entity, existing.etag);
+    return 'accepted' as const;
+  } catch (error) {
+    const status = statusCode(error);
+    if (status !== 409 && status !== 412) throw error;
+    return 'raced' as const;
+  }
+}
+
 export function createTableReminderSubscriptionStore(
   subscriptions: SubscriptionTable,
   throttles: ThrottleTable,
@@ -882,45 +933,27 @@ export function createTableReminderSubscriptionStore(
       };
 
       for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-        let existing: SubscriptionEntity;
-        try {
-          existing = await subscriptions.get(
-            subscriptionPartitionKey,
-            record.installationId,
+        const existing = await findSubscription(
+          subscriptions,
+          record.installationId,
+        );
+        if (existing === null) {
+          const created = await createAbsentRow(
+            subscriptions,
+            entity,
+            registrationRequestId,
+            now(),
           );
-        } catch (error) {
-          if (statusCode(error) !== 404) throw error;
-          if (
-            !isFreshVersionedRegistrationRequest(registrationRequestId, now())
-          ) {
-            return 'expired';
-          }
-          try {
-            await subscriptions.create(entity);
-            return 'accepted';
-          } catch (createError) {
-            if (statusCode(createError) !== 409) throw createError;
-            continue;
-          }
+          if (created !== 'raced') return created;
+          continue;
         }
-        if (existing.state === 'retired') return 'stale';
-        const sameInitialFields =
-          existing.deviceToken === record.deviceToken &&
-          existing.homeTimeZone === record.homeTimeZone &&
-          existing.oneDayEnabled === record.oneDayEnabled &&
-          existing.oneWeekEnabled === record.oneWeekEnabled &&
-          existing.platform === record.platform;
-        if (!sameInitialFields) return 'conflict';
-        if (existing.attemptGeneration >= record.attemptGeneration) {
-          return 'stale';
-        }
-        try {
-          await subscriptions.replace(entity, existing.etag);
-          return 'accepted';
-        } catch (updateError) {
-          const updateStatus = statusCode(updateError);
-          if (updateStatus !== 409 && updateStatus !== 412) throw updateError;
-        }
+        const replaced = await replaceRegisteredRow(
+          subscriptions,
+          entity,
+          existing,
+          record,
+        );
+        if (replaced !== 'raced') return replaced;
       }
       throw new Error('Subscription creation contention exceeded retry limit');
     },
