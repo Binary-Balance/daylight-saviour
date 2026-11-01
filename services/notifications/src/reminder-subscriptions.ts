@@ -312,8 +312,8 @@ class ReminderSubscriptionRequestError extends Error {
   }
 }
 
-async function readBoundedBody(request: HttpRequest) {
-  const declaredLength = request.headers.get('content-length');
+// A declared length is checked before any of the body is read.
+function checkDeclaredLength(declaredLength: string | null) {
   if (declaredLength !== null) {
     const length = Number(declaredLength);
     if (!Number.isSafeInteger(length) || length < 0) {
@@ -323,6 +323,10 @@ async function readBoundedBody(request: HttpRequest) {
       throw new ReminderSubscriptionRequestError(413, 'Request too large');
     }
   }
+}
+
+async function readBoundedBody(request: HttpRequest) {
+  checkDeclaredLength(request.headers.get('content-length'));
 
   if (request.body === null) return '';
   const reader = request.body.getReader();
