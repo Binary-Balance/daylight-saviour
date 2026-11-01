@@ -62,6 +62,26 @@ function response(status: number, body: string): FcmHttpResponse {
   return { body, status };
 }
 
+const acceptedBody = JSON.stringify({
+  name: 'projects/portable-project/messages/1',
+});
+
+// A valid 503 error with the given fields replaced. An undefined value drops
+// the field, because JSON leaves it out.
+function transientError(overrides: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    error: {
+      code: 503,
+      details: [],
+      message: sensitiveProviderResponse,
+      status: 'UNAVAILABLE',
+      ...overrides,
+    },
+  });
+}
+
+const fcmErrorType = 'type.googleapis.com/google.firebase.fcm.v1.FcmError';
+
 function sender(
   providerResponse: FcmHttpResponse,
   options: {
@@ -787,6 +807,269 @@ describe('FCM Change Reminder sender', () => {
     assert.deepEqual(test.removalRequests, [subscription]);
   });
 
+  for (const [name, body] of [
+    ['a code that differs from the HTTP status', transientError({ code: 500 })],
+    ['no code', transientError({ code: undefined })],
+    ['an empty message', transientError({ message: '' })],
+    ['a message that is not text', transientError({ message: 503 })],
+    ['no message', transientError({ message: undefined })],
+    ['a status that is not text', transientError({ status: 503 })],
+    ['no status', transientError({ status: undefined })],
+    ['an unexpected field', transientError({ extra: true })],
+    ['details that are text', transientError({ details: 'UNREGISTERED' })],
+    ['details that are an object', transientError({ details: {} })],
+    [
+      'more than 16 details',
+      transientError({ details: Array.from({ length: 17 }, () => ({})) }),
+    ],
+    [
+      'an unexpected top-level field',
+      JSON.stringify({ ...JSON.parse(transientError()), extra: true }),
+    ],
+    ['no error', '{}'],
+    ['an error that is text', JSON.stringify({ error: 'UNAVAILABLE' })],
+    ['an error that is null', JSON.stringify({ error: null })],
+    ['null', 'null'],
+    ['a list', '[]'],
+    ['text', '"text"'],
+    ['a number', '42'],
+    ['an empty body', ''],
+    ['a body that is not JSON', 'not json'],
+  ] as const) {
+    it(`reports a provider error with ${name} as malformed`, async () => {
+      const test = sender(response(503, body));
+
+      const result = await test.instance.send(subscription, facts, immediate);
+
+      assert.deepEqual(result, { kind: 'malformed-response' });
+      assert.deepEqual(test.removalRequests, []);
+      assert.deepEqual(test.logs, ['fcm-change-reminder-malformed-response']);
+    });
+  }
+
+  it('reports a response body that is not text as malformed', async () => {
+    const test = sender(response(503, undefined as never));
+
+    const result = await test.instance.send(subscription, facts, immediate);
+
+    assert.deepEqual(result, { kind: 'malformed-response' });
+    assert.deepEqual(test.logs, ['fcm-change-reminder-malformed-response']);
+  });
+
+  for (const [name, body] of [
+    ['no details', transientError({ details: undefined })],
+    [
+      '16 details',
+      transientError({ details: Array.from({ length: 16 }, () => ({})) }),
+    ],
+  ] as const) {
+    it(`classifies a provider error with ${name}`, async () => {
+      const test = sender(response(503, body));
+
+      const result = await test.instance.send(subscription, facts, immediate);
+
+      assert.deepEqual(result, { kind: 'transient-rejection' });
+    });
+  }
+
+  it('reads a response body of 64 KiB but not one character more', async () => {
+    // JSON allows trailing whitespace, so padding keeps the body valid.
+    const atLimit = sender(response(200, acceptedBody.padEnd(64 * 1024)));
+    assert.deepEqual(
+      await atLimit.instance.send(subscription, facts, immediate),
+      { kind: 'accepted' },
+    );
+
+    const overLimit = sender(response(200, acceptedBody.padEnd(64 * 1024 + 1)));
+    assert.deepEqual(
+      await overLimit.instance.send(subscription, facts, immediate),
+      { kind: 'malformed-response' },
+    );
+  });
+
+  for (const [name, details] of [
+    ['null', [null]],
+    [
+      'an unexpected field',
+      [{ '@type': fcmErrorType, errorCode: 'UNREGISTERED', extra: true }],
+    ],
+    [
+      'another type',
+      [
+        {
+          '@type': 'type.googleapis.com/google.rpc.Help',
+          errorCode: 'UNREGISTERED',
+        },
+      ],
+    ],
+    ['no type', [{ errorCode: 'UNREGISTERED' }]],
+    [
+      'another error code',
+      [{ '@type': fcmErrorType, errorCode: 'QUOTA_EXCEEDED' }],
+    ],
+    ['no error code', [{ '@type': fcmErrorType }]],
+  ] as const) {
+    it(`does not take ${name} in the details for an unregistered token`, async () => {
+      const test = sender(response(404, fcmError(404, 'NOT_FOUND', details)));
+
+      const result = await test.instance.send(subscription, facts, immediate);
+
+      assert.deepEqual(result, { kind: 'permanent-rejection' });
+      assert.deepEqual(test.removalRequests, []);
+      assert.deepEqual(test.logs, ['fcm-change-reminder-permanent-rejection']);
+    });
+  }
+
+  it('finds an unregistered token among other details', async () => {
+    const test = sender(
+      response(
+        404,
+        fcmError(404, 'NOT_FOUND', [
+          { '@type': 'type.googleapis.com/google.rpc.Help' },
+          ...unregisteredDetails,
+        ]),
+      ),
+    );
+
+    const result = await test.instance.send(subscription, facts, immediate);
+
+    assert.deepEqual(result, {
+      kind: 'permanent-invalid-token',
+      cleanupStatus: 'removed',
+    });
+    assert.deepEqual(test.removalRequests, [subscription]);
+  });
+
+  for (const [status, providerStatus] of [
+    [400, 'INVALID_ARGUMENT'],
+    [403, 'PERMISSION_DENIED'],
+    [503, 'UNAVAILABLE'],
+  ] as const) {
+    it(`rejects an unregistered token on ${status}/${providerStatus} as malformed`, async () => {
+      const test = sender(
+        response(status, fcmError(status, providerStatus, unregisteredDetails)),
+      );
+
+      const result = await test.instance.send(subscription, facts, immediate);
+
+      assert.deepEqual(result, { kind: 'malformed-response' });
+      assert.deepEqual(test.removalRequests, []);
+      assert.deepEqual(test.logs, ['fcm-change-reminder-malformed-response']);
+    });
+  }
+
+  const validExpiry = new Date(now.getTime() + 30 * 60 * 1000);
+
+  for (const [name, accessToken] of [
+    ['an empty value', { expiresAt: validExpiry, value: '' }],
+    [
+      'a value longer than 16 KiB',
+      { expiresAt: validExpiry, value: 'a'.repeat(16 * 1024 + 1) },
+    ],
+    // The type says text. A list has a length, as text does, so a check that
+    // only looked at the length would let it through.
+    ['a value that is a list', { expiresAt: validExpiry, value: ['abc'] }],
+    ['no value', { expiresAt: validExpiry }],
+    [
+      'an expiry that is not a date',
+      { expiresAt: '2026-07-26T00:30:00.000Z', value: fullCredential },
+    ],
+    [
+      'an invalid expiry',
+      { expiresAt: new Date(Number.NaN), value: fullCredential },
+    ],
+    ['an expiry of now', { expiresAt: now, value: fullCredential }],
+  ] as const) {
+    it(`treats an access token with ${name} as a transient failure`, async () => {
+      const test = sender(response(200, acceptedBody), {
+        accessToken: async () => accessToken as never,
+      });
+
+      const result = await test.instance.send(subscription, facts, immediate);
+
+      assert.deepEqual(result, { kind: 'transient-rejection' });
+      assert.deepEqual(test.requests, []);
+      assert.deepEqual(test.logs, ['fcm-change-reminder-transient-rejection']);
+    });
+  }
+
+  it('accepts an access token of 16 KiB that expires a millisecond from now', async () => {
+    const value = 'a'.repeat(16 * 1024);
+    const test = sender(response(200, acceptedBody), {
+      accessToken: async () => ({
+        expiresAt: new Date(now.getTime() + 1),
+        value,
+      }),
+    });
+
+    const result = await test.instance.send(subscription, facts, immediate);
+
+    assert.deepEqual(result, { kind: 'accepted' });
+    assert.equal(test.requests[0]?.accessToken, value);
+  });
+
+  it('stops the transport deadline once the response has been read', async () => {
+    // A deadline left running would later abort a request that already
+    // finished.
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      let signal: AbortSignal | undefined;
+      const outcome = { settled: false };
+      void createFetchFcmHttpTransport(async (_input, init) => {
+        signal = init.signal;
+        return { status: 200, text: async () => acceptedBody };
+      })
+        .post({
+          accessToken: fullCredential,
+          endpoint: fcmSendEndpoint('portable-project'),
+          payload: {} as FcmHttpRequest['payload'],
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          outcome.settled = true;
+        });
+
+      await new Promise(setImmediate);
+      assert.equal(outcome.settled, true);
+      mock.timers.tick(10_000);
+
+      assert.equal(signal?.aborted, false);
+    } finally {
+      mock.timers.reset();
+    }
+  });
+
+  it('times out at once for a request deadline of zero', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      let signal: AbortSignal | undefined;
+      const outcome = { settled: false };
+      void createFetchFcmHttpTransport((_input, init) => {
+        signal = init.signal;
+        return new Promise<never>(() => undefined);
+      })
+        .post({
+          accessToken: fullCredential,
+          endpoint: fcmSendEndpoint('portable-project'),
+          payload: {} as FcmHttpRequest['payload'],
+          timeoutMs: 0,
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          outcome.settled = true;
+        });
+
+      await new Promise(setImmediate);
+      mock.timers.tick(0);
+      await new Promise(setImmediate);
+
+      assert.equal(outcome.settled, true);
+      assert.equal(signal?.aborted, true);
+    } finally {
+      mock.timers.reset();
+    }
+  });
+
   describe('a scheduled send', () => {
     const accepted = response(
       200,
@@ -820,6 +1103,19 @@ describe('FCM Change Reminder sender', () => {
         await test.instance.send(subscription, facts, until(expiresAt), {
           ...authorized,
           completeOperationDeadline: now,
+        }),
+        { kind: 'expired' },
+      );
+      assert.deepEqual(test.requests, []);
+    });
+
+    it('sends nothing when the complete-operation deadline is the epoch', async () => {
+      const test = sender(accepted);
+
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, until(expiresAt), {
+          ...authorized,
+          completeOperationDeadline: new Date(0),
         }),
         { kind: 'expired' },
       );
