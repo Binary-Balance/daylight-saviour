@@ -507,6 +507,30 @@ function uncertainRecord(
   };
 }
 
+function pendingRecord(record: ReminderDispatchLedgerRecord, updatedAt: Date) {
+  return { ...withoutClaim(record), status: 'pending' as const, updatedAt };
+}
+
+function expiredRecord(
+  record: ReminderDispatchLedgerRecord,
+  expiryReason: ReminderDispatchExpiryReason,
+  updatedAt: Date,
+) {
+  return {
+    ...withoutClaim(record),
+    expiryReason,
+    status: 'expired' as const,
+    updatedAt,
+  };
+}
+
+/** Frees a claim: pending again, or uncertain once a send may have started. */
+function releasedRecord(record: ReminderDispatchLedgerRecord, updatedAt: Date) {
+  return record.sendStartedAt === undefined
+    ? pendingRecord(record, updatedAt)
+    : uncertainRecord(record, updatedAt);
+}
+
 function nowDate(value: Date) {
   const result = new Date(value.getTime());
   if (!Number.isFinite(result.getTime()))
@@ -533,6 +557,21 @@ function sameIdentity(
   );
 }
 
+function holdsClaim(
+  record: ReminderDispatchLedgerRecord,
+  claim: ReminderDispatchClaim,
+) {
+  return (
+    record.status === 'claimed' &&
+    record.claimId === claim.claimId &&
+    record.attemptGeneration === claim.attemptGeneration
+  );
+}
+
+function stale(record: ReminderDispatchLedgerRecord | null) {
+  return { kind: 'stale' as const, record: record ?? undefined };
+}
+
 function expiryReasonAt(
   record: ReminderDispatchLedgerRecord,
   nowMilliseconds: number,
@@ -552,6 +591,14 @@ function terminalStatus(status: ReminderDispatchStatus) {
   );
 }
 
+function cleanupSettled(status: ReminderDispatchCleanupStatus | undefined) {
+  return (
+    status === 'removed' ||
+    status === 'not-found' ||
+    status === 'token-replaced'
+  );
+}
+
 function terminalExpiryCanReset(record: ReminderDispatchLedgerRecord) {
   return record.status === 'expired' && record.expiryReason === 'superseded';
 }
@@ -566,6 +613,195 @@ function packExpiryCanReset(
     record.expiryReason === 'pack' &&
     packValidUntil.getTime() >= now.getTime()
   );
+}
+
+function preparedRecord(preparation: ReminderDispatchPreparation) {
+  const identity = normalizeIdentity(preparation);
+  const now = nowDate(preparation.now);
+  const startsAt = nowDate(preparation.deliveryWindowStartsAt);
+  const endsAt = nowDate(preparation.deliveryWindowEndsAt);
+  const packValidUntil = nowDate(preparation.packValidUntil);
+  if (
+    !Number.isSafeInteger(preparation.attemptGeneration) ||
+    preparation.attemptGeneration < 1 ||
+    endsAt.getTime() < startsAt.getTime()
+  ) {
+    throw new Error('Invalid reminder dispatch preparation');
+  }
+  return {
+    ...identity,
+    attemptGeneration: preparation.attemptGeneration,
+    createdAt: now,
+    deliveryWindowEndsAt: endsAt,
+    deliveryWindowStartsAt: startsAt,
+    packValidUntil,
+    status: 'pending' as const,
+    updatedAt: now,
+  };
+}
+
+/**
+ * The record that replaces `existing` for a preparation, or null when
+ * `existing` stands. A newer registration restarts the delivery unless it
+ * was accepted, is uncertain or expired for good, and a claim that may have
+ * sent becomes uncertain instead. The same registration only refreshes a
+ * delivery that can still be retried, and an older one never overwrites a
+ * newer.
+ */
+function preparedReplacement(
+  existing: ReminderDispatchLedgerRecord,
+  base: ReturnType<typeof preparedRecord>,
+) {
+  const resettableExpiry =
+    terminalExpiryCanReset(existing) ||
+    packExpiryCanReset(existing, base.packValidUntil, base.updatedAt);
+  if (existing.attemptGeneration > base.attemptGeneration) return null;
+  if (existing.attemptGeneration === base.attemptGeneration) {
+    const canRefresh =
+      existing.status === 'transient-failure' ||
+      existing.status === 'pending' ||
+      resettableExpiry;
+    return canRefresh ? { ...base, createdAt: existing.createdAt } : null;
+  }
+  if (
+    existing.status === 'accepted' ||
+    existing.status === 'uncertain' ||
+    (existing.status === 'expired' && !resettableExpiry)
+  ) {
+    return null;
+  }
+  return existing.status === 'claimed' && existing.sendStartedAt !== undefined
+    ? uncertainRecord(existing, base.updatedAt)
+    : base;
+}
+
+/**
+ * What invalidation leaves: uncertain if a send may have started, otherwise
+ * expired as superseded.
+ */
+function supersededRecord(record: ReminderDispatchLedgerRecord, now: Date) {
+  return record.status === 'claimed' && record.sendStartedAt !== undefined
+    ? uncertainRecord(record, now)
+    : expiredRecord(record, 'superseded', now);
+}
+
+function leaseLapsed(record: ReminderDispatchLedgerRecord, now: Date) {
+  const claimExpiresAt = record.claimExpiresAt?.getTime();
+  return claimExpiresAt === undefined || claimExpiresAt <= now.getTime();
+}
+
+/**
+ * What must be written before a claim can be decided: a lapsed claim freed,
+ * or a delivery whose time is up expired. Undefined when neither applies.
+ */
+function settlementBeforeClaim(
+  existing: ReminderDispatchLedgerRecord,
+  now: Date,
+) {
+  if (existing.status === 'claimed') {
+    return leaseLapsed(existing, now)
+      ? releasedRecord(existing, now)
+      : undefined;
+  }
+  const expiryReason = expiryReasonAt(existing, now.getTime());
+  return expiryReason === undefined
+    ? undefined
+    : expiredRecord(existing, expiryReason, now);
+}
+
+/**
+ * What a claim that cannot send is restored to: expired once its time is up,
+ * or pending when its Delivery Window has not opened. Undefined when it can.
+ */
+function unsendableRecord(existing: ReminderDispatchLedgerRecord, now: Date) {
+  const expiryReason = expiryReasonAt(existing, now.getTime());
+  if (expiryReason !== undefined) {
+    return expiredRecord(existing, expiryReason, now);
+  }
+  return now.getTime() < existing.deliveryWindowStartsAt.getTime()
+    ? pendingRecord(existing, now)
+    : undefined;
+}
+
+// The statuses an outcome leaves in the record. After a failed write, finding
+// one of them shows that the write landed.
+const completedStatuses: Record<
+  ReminderDispatchCompletionOutcome['kind'],
+  readonly ReminderDispatchStatus[]
+> = {
+  accepted: ['accepted'],
+  'permanent-failure': ['permanent-failure'],
+  'transient-failure': ['transient-failure', 'expired'],
+  uncertain: ['uncertain'],
+};
+
+function completedStatus(
+  outcome: ReminderDispatchCompletionOutcome,
+  expiryReason: ReminderDispatchExpiryReason | undefined,
+): ReminderDispatchStatus {
+  if (outcome.kind !== 'transient-failure') return outcome.kind;
+  return expiryReason === undefined ? 'transient-failure' : 'expired';
+}
+
+/** A rejected token is queued for cleanup, with when it was invalidated. */
+function tokenCleanup(
+  outcome: ReminderDispatchCompletionOutcome,
+  invalidatedAt: Date | undefined,
+) {
+  if (outcome.kind !== 'permanent-failure' || !outcome.invalidToken) return {};
+  return {
+    cleanupStatus: 'pending' as const,
+    ...(invalidatedAt === undefined ? {} : { invalidatedAt }),
+  };
+}
+
+function completedRecord(
+  existing: ReminderDispatchLedgerRecord,
+  claim: ReminderDispatchClaim,
+  outcome: ReminderDispatchCompletionOutcome,
+  invalidatedAt: Date | undefined,
+  now: Date,
+): Omit<ReminderDispatchLedgerRecord, 'etag'> {
+  const expiryReason =
+    outcome.kind === 'transient-failure'
+      ? expiryReasonAt(existing, now.getTime())
+      : undefined;
+  const status = completedStatus(outcome, expiryReason);
+  return {
+    ...withoutClaim(existing),
+    ...(status === 'uncertain' ? { lastClaimId: claim.claimId } : {}),
+    ...tokenCleanup(outcome, invalidatedAt),
+    ...(expiryReason === undefined ? {} : { expiryReason }),
+    status,
+    updatedAt: now,
+  };
+}
+
+/**
+ * The record that completes `existing` with an outcome, or null when the
+ * claim has no say in it. A worker that was cut off may still learn what the
+ * provider said, so a definite answer settles the record that went uncertain
+ * under its own claim. Nothing else overwrites an uncertain record.
+ */
+function completionRecord(
+  existing: ReminderDispatchLedgerRecord,
+  claim: ReminderDispatchClaim,
+  outcome: ReminderDispatchCompletionOutcome,
+  invalidatedAt: Date | undefined,
+  now: Date,
+): Omit<ReminderDispatchLedgerRecord, 'etag'> | null {
+  if (holdsClaim(existing, claim)) {
+    return completedRecord(existing, claim, outcome, invalidatedAt, now);
+  }
+  const late =
+    existing.status === 'uncertain' && existing.lastClaimId === claim.claimId;
+  if (late && outcome.kind === 'accepted') {
+    return { ...withoutClaim(existing), status: 'accepted', updatedAt: now };
+  }
+  if (late && outcome.kind === 'permanent-failure') {
+    return completedRecord(existing, claim, outcome, invalidatedAt, now);
+  }
+  return null;
 }
 
 function isUnsettled(record: ReminderDispatchLedgerRecord, now: Date) {
@@ -640,108 +876,120 @@ export function createTableReminderDispatchLedgerStore(
     await table.replace(entityFromRecord(record, key), etag);
   }
 
-  async function prepare(preparation: ReminderDispatchPreparation) {
-    const identity = normalizeIdentity(preparation);
-    const now = nowDate(preparation.now);
-    const startsAt = nowDate(preparation.deliveryWindowStartsAt);
-    const endsAt = nowDate(preparation.deliveryWindowEndsAt);
-    const packValidUntil = nowDate(preparation.packValidUntil);
-    if (
-      !Number.isSafeInteger(preparation.attemptGeneration) ||
-      preparation.attemptGeneration < 1 ||
-      endsAt.getTime() < startsAt.getTime()
-    ) {
-      throw new Error('Invalid reminder dispatch preparation');
+  /**
+   * Replaces `existing` and reads the record back. Undefined when another
+   * worker's write won, so the caller reads again.
+   */
+  async function replaceAndRead(
+    next: Omit<ReminderDispatchLedgerRecord, 'etag'>,
+    existing: ReminderDispatchLedgerRecord,
+  ) {
+    try {
+      await replace(next, existing.etag);
+      const updated = await get(existing);
+      if (updated !== null) {
+        return { kind: 'updated' as const, record: updated };
+      }
+    } catch (error) {
+      if (!conflict(error)) throw error;
     }
-    const base = {
-      ...identity,
-      attemptGeneration: preparation.attemptGeneration,
-      createdAt: now,
-      deliveryWindowEndsAt: endsAt,
-      deliveryWindowStartsAt: startsAt,
-      packValidUntil,
-      status: 'pending' as const,
-      updatedAt: now,
-    };
+    return undefined;
+  }
 
-    for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-      const existing = await get(identity);
-      if (existing === null) {
-        try {
-          await table.create(
-            entityFromRecord(base, reminderDispatchStorageKey(identity)),
-          );
-          const created = await get(identity);
-          if (created !== null) return created;
-        } catch (error) {
-          if (!conflict(error)) {
-            try {
-              const reconciled = await get(identity);
-              if (reconciled !== null) return reconciled;
-            } catch {
-              // Preserve the original create failure when reconciliation is
-              // unavailable; a later operation can retry the preparation.
-            }
-            throw error;
-          }
-        }
-        continue;
-      }
-      if (existing.attemptGeneration > base.attemptGeneration) return existing;
-      if (existing.attemptGeneration === base.attemptGeneration) {
-        const canRefresh =
-          existing.status === 'transient-failure' ||
-          existing.status === 'pending' ||
-          terminalExpiryCanReset(existing) ||
-          packExpiryCanReset(existing, packValidUntil, now);
-        if (!canRefresh) return existing;
-        const refreshed = {
-          ...base,
-          createdAt: existing.createdAt,
-        };
-        try {
-          await replace(refreshed, existing.etag);
-          const updated = await get(identity);
-          if (updated !== null) return updated;
-        } catch (error) {
-          if (!conflict(error)) throw error;
-        }
-        continue;
-      }
-      if (
-        existing.status === 'accepted' ||
-        existing.status === 'uncertain' ||
-        (existing.status === 'expired' &&
-          !terminalExpiryCanReset(existing) &&
-          !packExpiryCanReset(existing, packValidUntil, now))
-      ) {
-        return existing;
-      }
-      if (
-        existing.status === 'claimed' &&
-        existing.sendStartedAt !== undefined
-      ) {
-        const uncertain = uncertainRecord(existing, now);
-        try {
-          await replace(uncertain, existing.etag);
-          const updated = await get(identity);
-          if (updated !== null) return updated;
-        } catch (error) {
-          if (!conflict(error)) throw error;
-        }
-        continue;
-      }
+  /** Undefined when another worker created the record first. */
+  async function createPrepared(base: ReturnType<typeof preparedRecord>) {
+    try {
+      await table.create(
+        entityFromRecord(base, reminderDispatchStorageKey(base)),
+      );
+      const created = await get(base);
+      if (created !== null) return created;
+    } catch (error) {
+      if (conflict(error)) return undefined;
       try {
-        await replace(base, existing.etag);
-        const updated = await get(identity);
-        if (updated !== null) return updated;
-      } catch (error) {
-        if (!conflict(error)) throw error;
+        const reconciled = await get(base);
+        if (reconciled !== null) return reconciled;
+      } catch {
+        // Preserve the original create failure when reconciliation is
+        // unavailable; a later operation can retry the preparation.
       }
+      throw error;
+    }
+    return undefined;
+  }
+
+  async function prepare(preparation: ReminderDispatchPreparation) {
+    const base = preparedRecord(preparation);
+    for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
+      const existing = await get(base);
+      if (existing === null) {
+        const created = await createPrepared(base);
+        if (created !== undefined) return created;
+        continue;
+      }
+      const next = preparedReplacement(existing, base);
+      if (next === null) return existing;
+      const updated = await replaceAndRead(next, existing);
+      if (updated !== undefined) return updated.record;
     }
     throw new Error(
       'Reminder dispatch preparation contention exceeded retry limit',
     );
+  }
+
+  /** False when another worker's write won, so the caller reads again. */
+  async function replaceUnlessConflict(
+    next: Omit<ReminderDispatchLedgerRecord, 'etag'>,
+    existing: ReminderDispatchLedgerRecord,
+  ) {
+    try {
+      await replace(next, existing.etag);
+      return true;
+    } catch (error) {
+      if (conflict(error)) return false;
+      throw error;
+    }
+  }
+
+  /** Undefined when the write did not make this worker the claimant. */
+  async function writeClaim(
+    normalized: ReminderDispatchIdentity,
+    existing: ReminderDispatchLedgerRecord,
+    now: Date,
+    leaseMs: number,
+  ) {
+    const claimId = opaqueRandomValue();
+    const claimExpiresAt = new Date(now.getTime() + leaseMs);
+    const claimed = {
+      ...withoutClaim(existing),
+      claimExpiresAt,
+      claimId,
+      status: 'claimed' as const,
+      updatedAt: now,
+    };
+    const issued = (expiresAt: Date) => ({
+      ...normalized,
+      attemptGeneration: existing.attemptGeneration,
+      claimExpiresAt: expiresAt,
+      claimId,
+    });
+    const isOurs = (
+      record: ReminderDispatchLedgerRecord | null,
+    ): record is ReminderDispatchLedgerRecord =>
+      record?.status === 'claimed' &&
+      record.claimId === claimId &&
+      record.attemptGeneration === existing.attemptGeneration;
+    try {
+      await replace(claimed, existing.etag);
+      if (isOurs(await get(normalized))) return issued(claimExpiresAt);
+    } catch (error) {
+      const reconciled = await get(normalized);
+      if (isOurs(reconciled) && reconciled.claimExpiresAt !== undefined) {
+        return issued(reconciled.claimExpiresAt);
+      }
+      if (!conflict(error)) throw error;
+    }
+    return undefined;
   }
 
   async function claim(
@@ -761,204 +1009,102 @@ export function createTableReminderDispatchLedgerStore(
 
     for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
       const existing = await get(normalized);
-      if (existing === null) return null;
+      if (existing === null || terminalStatus(existing.status)) return null;
+
+      const settlement = settlementBeforeClaim(existing, now);
+      if (settlement !== undefined) {
+        await replaceUnlessConflict(settlement, existing);
+        continue;
+      }
       if (
-        existing.status === 'accepted' ||
-        existing.status === 'permanent-failure' ||
-        existing.status === 'expired' ||
-        existing.status === 'uncertain'
+        existing.status === 'claimed' ||
+        now.getTime() < existing.deliveryWindowStartsAt.getTime()
       ) {
         return null;
       }
 
-      if (existing.status === 'claimed') {
-        const claimExpiresAt = existing.claimExpiresAt?.getTime();
-        const claimIsExpired =
-          claimExpiresAt === undefined || claimExpiresAt <= now.getTime();
-        if (!claimIsExpired) return null;
-        if (existing.sendStartedAt !== undefined) {
-          const uncertain = uncertainRecord(existing, now);
-          try {
-            await replace(uncertain, existing.etag);
-          } catch (error) {
-            if (!conflict(error)) throw error;
-          }
-          continue;
-        }
-        try {
-          await replace(
-            {
-              ...withoutClaim(existing),
-              status: 'pending' as const,
-              updatedAt: now,
-            },
-            existing.etag,
-          );
-        } catch (error) {
-          if (!conflict(error)) throw error;
-        }
-        continue;
-      }
-
-      const expiryReason = expiryReasonAt(existing, now.getTime());
-      if (expiryReason !== undefined) {
-        try {
-          await replace(
-            {
-              ...withoutClaim(existing),
-              expiryReason,
-              status: 'expired' as const,
-              updatedAt: now,
-            },
-            existing.etag,
-          );
-        } catch (error) {
-          if (!conflict(error)) throw error;
-        }
-        continue;
-      }
-      if (now.getTime() < existing.deliveryWindowStartsAt.getTime())
-        return null;
-
-      const claimId = opaqueRandomValue();
-      const claimExpiresAt = new Date(now.getTime() + leaseMs);
-      const claimed = {
-        ...withoutClaim(existing),
-        claimExpiresAt,
-        claimId,
-        status: 'claimed' as const,
-        updatedAt: now,
-      };
-      try {
-        await replace(claimed, existing.etag);
-        const updated = await get(normalized);
-        if (
-          updated?.status === 'claimed' &&
-          updated.claimId === claimId &&
-          updated.attemptGeneration === existing.attemptGeneration
-        ) {
-          return {
-            ...normalized,
-            attemptGeneration: updated.attemptGeneration,
-            claimExpiresAt,
-            claimId,
-          };
-        }
-      } catch (error) {
-        const reconciled = await get(normalized);
-        if (
-          reconciled?.status === 'claimed' &&
-          reconciled.claimId === claimId &&
-          reconciled.attemptGeneration === existing.attemptGeneration &&
-          reconciled.claimExpiresAt !== undefined
-        ) {
-          return {
-            ...normalized,
-            attemptGeneration: reconciled.attemptGeneration,
-            claimExpiresAt: reconciled.claimExpiresAt,
-            claimId,
-          };
-        }
-        if (!conflict(error)) throw error;
-      }
+      const claimed = await writeClaim(normalized, existing, now, leaseMs);
+      if (claimed !== undefined) return claimed;
     }
     throw new Error('Reminder dispatch claim contention exceeded retry limit');
+  }
+
+  /** The send intent of this claim, if a write that failed in fact landed. */
+  async function savedIntent(claim: ReminderDispatchClaim) {
+    try {
+      const reconciled = await get(claim);
+      if (
+        reconciled !== null &&
+        holdsClaim(reconciled, claim) &&
+        reconciled.sendStartedAt !== undefined
+      ) {
+        return reconciled;
+      }
+    } catch {
+      // Preserve the write error when the reconciliation read fails.
+    }
+    return null;
+  }
+
+  /** Undefined when another worker's write won, so the caller reads again. */
+  async function recordIntent(
+    existing: ReminderDispatchLedgerRecord,
+    claim: ReminderDispatchClaim,
+    now: Date,
+  ) {
+    try {
+      await replace(
+        { ...existing, sendStartedAt: now, updatedAt: now },
+        existing.etag,
+      );
+      const updated = await get(claim);
+      if (
+        updated?.status === 'claimed' &&
+        updated.claimId === claim.claimId &&
+        updated.sendStartedAt !== undefined
+      ) {
+        return { kind: 'updated' as const, record: updated };
+      }
+    } catch (error) {
+      const saved = await savedIntent(claim);
+      if (saved !== null) return { kind: 'updated' as const, record: saved };
+      if (!conflict(error)) throw error;
+    }
+    return undefined;
+  }
+
+  /** One attempt for a claim this worker holds; undefined means read again. */
+  async function attemptSend(
+    existing: ReminderDispatchLedgerRecord,
+    claim: ReminderDispatchClaim,
+    now: Date,
+  ) {
+    if (leaseLapsed(existing, now)) {
+      // The lease owner has lost authority. Returning the row after this
+      // write is unsafe because another worker may claim it before the read
+      // completes; the caller must abandon this operation.
+      const freed = releasedRecord(existing, now);
+      return (await replaceUnlessConflict(freed, existing))
+        ? { kind: 'stale' as const }
+        : undefined;
+    }
+    if (existing.sendStartedAt !== undefined) {
+      return { kind: 'updated' as const, record: existing };
+    }
+    const unsendable = unsendableRecord(existing, now);
+    if (unsendable !== undefined) return replaceAndRead(unsendable, existing);
+    return recordIntent(existing, claim, now);
   }
 
   async function beginSend(claim: ReminderDispatchClaim, nowInput: Date) {
     const now = nowDate(nowInput);
     for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
       const existing = await get(claim);
-      if (
-        existing === null ||
-        existing.status !== 'claimed' ||
-        existing.claimId !== claim.claimId ||
-        existing.attemptGeneration !== claim.attemptGeneration
-      ) {
-        return { kind: 'stale' as const, record: existing ?? undefined };
+      if (existing === null || !holdsClaim(existing, claim)) {
+        return stale(existing);
       }
-      const claimExpiresAt = existing.claimExpiresAt?.getTime();
-      if (claimExpiresAt === undefined || claimExpiresAt <= now.getTime()) {
-        const next =
-          existing.sendStartedAt === undefined
-            ? {
-                ...withoutClaim(existing),
-                status: 'pending' as const,
-                updatedAt: now,
-              }
-            : uncertainRecord(existing, now);
-        try {
-          await replace(next, existing.etag);
-          // The lease owner has lost authority. Returning the row after this
-          // write is unsafe because another worker may claim it before the
-          // read completes; the caller must abandon this operation.
-          return { kind: 'stale' as const };
-        } catch (error) {
-          if (!conflict(error)) throw error;
-        }
-        continue;
-      }
-      if (existing.sendStartedAt !== undefined) {
-        return { kind: 'updated' as const, record: existing };
-      }
-      const expiryReason = expiryReasonAt(existing, now.getTime());
-      if (
-        expiryReason !== undefined ||
-        now.getTime() < existing.deliveryWindowStartsAt.getTime()
-      ) {
-        try {
-          await replace(
-            {
-              ...withoutClaim(existing),
-              ...(expiryReason === undefined ? {} : { expiryReason }),
-              ...(expiryReason === undefined
-                ? { status: 'pending' as const }
-                : { status: 'expired' as const }),
-              updatedAt: now,
-            },
-            existing.etag,
-          );
-          const updated = await get(claim);
-          if (updated !== null)
-            return { kind: 'updated' as const, record: updated };
-        } catch (error) {
-          if (!conflict(error)) throw error;
-        }
-        continue;
-      }
-      try {
-        await replace(
-          {
-            ...existing,
-            sendStartedAt: now,
-            updatedAt: now,
-          },
-          existing.etag,
-        );
-        const updated = await get(claim);
-        if (
-          updated?.status === 'claimed' &&
-          updated.claimId === claim.claimId &&
-          updated.sendStartedAt !== undefined
-        ) {
-          return { kind: 'updated' as const, record: updated };
-        }
-      } catch (error) {
-        try {
-          const reconciled = await get(claim);
-          if (
-            reconciled?.status === 'claimed' &&
-            reconciled.claimId === claim.claimId &&
-            reconciled.attemptGeneration === claim.attemptGeneration &&
-            reconciled.sendStartedAt !== undefined
-          ) {
-            return { kind: 'updated' as const, record: reconciled };
-          }
-        } catch {
-          // Preserve the write error below when the reconciliation read fails.
-        }
-        if (!conflict(error)) throw error;
-      }
+      const result = await attemptSend(existing, claim, now);
+      if (result !== undefined) return result;
     }
     throw new Error(
       'Reminder dispatch send intent contention exceeded retry limit',
@@ -969,32 +1115,14 @@ export function createTableReminderDispatchLedgerStore(
     const now = nowDate(nowInput);
     for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
       const existing = await get(claim);
-      if (
-        existing === null ||
-        existing.status !== 'claimed' ||
-        existing.claimId !== claim.claimId ||
-        existing.attemptGeneration !== claim.attemptGeneration
-      ) {
-        return { kind: 'stale' as const, record: existing ?? undefined };
+      if (existing === null || !holdsClaim(existing, claim)) {
+        return stale(existing);
       }
-      const next =
-        existing.sendStartedAt === undefined
-          ? {
-              ...withoutClaim(existing),
-              status: 'pending' as const,
-              updatedAt: now,
-            }
-          : {
-              ...uncertainRecord(existing, now),
-            };
-      try {
-        await replace(next, existing.etag);
-        const updated = await get(claim);
-        if (updated !== null)
-          return { kind: 'updated' as const, record: updated };
-      } catch (error) {
-        if (!conflict(error)) throw error;
-      }
+      const released = await replaceAndRead(
+        releasedRecord(existing, now),
+        existing,
+      );
+      if (released !== undefined) return released;
     }
     throw new Error(
       'Reminder dispatch claim release contention exceeded retry limit',
@@ -1008,33 +1136,46 @@ export function createTableReminderDispatchLedgerStore(
     const now = nowDate(nowInput);
     for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
       const existing = await get(claim);
-      if (
-        existing === null ||
-        existing.status !== 'claimed' ||
-        existing.claimId !== claim.claimId ||
-        existing.attemptGeneration !== claim.attemptGeneration
-      ) {
-        return { kind: 'stale' as const, record: existing ?? undefined };
+      if (existing === null || !holdsClaim(existing, claim)) {
+        return stale(existing);
       }
-      try {
-        await replace(
-          {
-            ...withoutClaim(existing),
-            status: 'pending' as const,
-            updatedAt: now,
-          },
-          existing.etag,
-        );
-        const updated = await get(claim);
-        if (updated !== null)
-          return { kind: 'updated' as const, record: updated };
-      } catch (error) {
-        if (!conflict(error)) throw error;
-      }
+      const cancelled = await replaceAndRead(
+        pendingRecord(existing, now),
+        existing,
+      );
+      if (cancelled !== undefined) return cancelled;
     }
     throw new Error(
       'Reminder dispatch pre-provider cancellation contention exceeded retry limit',
     );
+  }
+
+  /**
+   * Replaces `existing` and reads the record back. Undefined when another
+   * worker's write won, so the caller reads again. After any other failure
+   * the write may still have landed, which `landed` tells from the record.
+   */
+  async function replaceAndReconcile(
+    next: Omit<ReminderDispatchLedgerRecord, 'etag'>,
+    existing: ReminderDispatchLedgerRecord,
+    landed: (record: ReminderDispatchLedgerRecord) => boolean,
+  ) {
+    try {
+      await replace(next, existing.etag);
+      const updated = await get(existing);
+      if (updated !== null) {
+        return { kind: 'updated' as const, record: updated };
+      }
+    } catch (error) {
+      if (!conflict(error)) {
+        const reconciled = await get(existing);
+        if (reconciled !== null && landed(reconciled)) {
+          return { kind: 'updated' as const, record: reconciled };
+        }
+        throw error;
+      }
+    }
+    return undefined;
   }
 
   async function complete(
@@ -1047,87 +1188,21 @@ export function createTableReminderDispatchLedgerStore(
       outcome.kind === 'permanent-failure'
         ? optionalDate(outcome.invalidatedAt, 'provider invalidation')
         : undefined;
+    const landed = (record: ReminderDispatchLedgerRecord) =>
+      completedStatuses[outcome.kind].includes(record.status);
     for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
       const existing = await get(claim);
       if (existing === null) return { kind: 'stale' };
-      const activeClaim =
-        existing.status === 'claimed' &&
-        existing.claimId === claim.claimId &&
-        existing.attemptGeneration === claim.attemptGeneration;
-      const lateAccepted =
-        outcome.kind === 'accepted' &&
-        existing.status === 'uncertain' &&
-        existing.lastClaimId === claim.claimId;
-      const latePermanentFailure =
-        outcome.kind === 'permanent-failure' &&
-        existing.status === 'uncertain' &&
-        existing.lastClaimId === claim.claimId;
-      if (!activeClaim && !lateAccepted && !latePermanentFailure) {
-        return { kind: 'stale', record: existing };
-      }
-
-      let next: Omit<ReminderDispatchLedgerRecord, 'etag'>;
-      if (lateAccepted) {
-        next = {
-          ...withoutClaim(existing),
-          status: 'accepted',
-          updatedAt: now,
-        };
-      } else {
-        const expiryReason =
-          outcome.kind === 'transient-failure'
-            ? expiryReasonAt(existing, now.getTime())
-            : undefined;
-        const status: ReminderDispatchStatus =
-          outcome.kind === 'accepted'
-            ? 'accepted'
-            : outcome.kind === 'uncertain'
-              ? 'uncertain'
-              : outcome.kind === 'permanent-failure'
-                ? 'permanent-failure'
-                : expiryReason === undefined
-                  ? 'transient-failure'
-                  : 'expired';
-        next = {
-          ...withoutClaim(existing),
-          ...(status === 'uncertain' ? { lastClaimId: claim.claimId } : {}),
-          ...(outcome.kind === 'permanent-failure' && outcome.invalidToken
-            ? { cleanupStatus: 'pending' as const }
-            : {}),
-          ...(outcome.kind === 'permanent-failure' &&
-          outcome.invalidToken &&
-          invalidatedAt !== undefined
-            ? { invalidatedAt }
-            : {}),
-          ...(expiryReason === undefined ? {} : { expiryReason }),
-          status,
-          updatedAt: now,
-        };
-      }
-      try {
-        await replace(next, existing.etag);
-        const updated = await get(claim);
-        if (updated !== null) return { kind: 'updated', record: updated };
-      } catch (error) {
-        if (!conflict(error)) {
-          const reconciled = await get(claim);
-          if (
-            reconciled !== null &&
-            ((outcome.kind === 'accepted' &&
-              reconciled.status === 'accepted') ||
-              (outcome.kind === 'uncertain' &&
-                reconciled.status === 'uncertain') ||
-              (outcome.kind === 'transient-failure' &&
-                (reconciled.status === 'transient-failure' ||
-                  reconciled.status === 'expired')) ||
-              (outcome.kind === 'permanent-failure' &&
-                reconciled.status === 'permanent-failure'))
-          ) {
-            return { kind: 'updated', record: reconciled };
-          }
-          throw error;
-        }
-      }
+      const next = completionRecord(
+        existing,
+        claim,
+        outcome,
+        invalidatedAt,
+        now,
+      );
+      if (next === null) return stale(existing);
+      const completed = await replaceAndReconcile(next, existing, landed);
+      if (completed !== undefined) return completed;
     }
     throw new Error(
       'Reminder dispatch completion contention exceeded retry limit',
@@ -1148,31 +1223,19 @@ export function createTableReminderDispatchLedgerStore(
       const existing = await get(normalized);
       if (existing === null) return { kind: 'stale' as const };
       if (existing.attemptGeneration !== attemptGeneration) {
-        return { kind: 'stale' as const, record: existing };
+        return stale(existing);
       }
       if (
         terminalStatus(existing.status) &&
-        !(existing.status === 'expired' && terminalExpiryCanReset(existing))
+        !terminalExpiryCanReset(existing)
       ) {
         return { kind: 'updated' as const, record: existing };
       }
-      const next =
-        existing.status === 'claimed' && existing.sendStartedAt !== undefined
-          ? uncertainRecord(existing, now)
-          : {
-              ...withoutClaim(existing),
-              expiryReason: 'superseded' as const,
-              status: 'expired' as const,
-              updatedAt: now,
-            };
-      try {
-        await replace(next, existing.etag);
-        const updated = await get(normalized);
-        if (updated !== null)
-          return { kind: 'updated' as const, record: updated };
-      } catch (error) {
-        if (!conflict(error)) throw error;
-      }
+      const invalidated = await replaceAndRead(
+        supersededRecord(existing, now),
+        existing,
+      );
+      if (invalidated !== undefined) return invalidated;
     }
     throw new Error(
       'Reminder dispatch invalidation contention exceeded retry limit',
@@ -1194,39 +1257,20 @@ export function createTableReminderDispatchLedgerStore(
         existing.attemptGeneration !== attemptGeneration ||
         existing.status !== 'permanent-failure'
       ) {
-        return { kind: 'stale' as const, record: existing ?? undefined };
+        return stale(existing);
       }
       if (
-        existing.cleanupStatus === 'removed' ||
-        existing.cleanupStatus === 'not-found' ||
-        existing.cleanupStatus === 'token-replaced'
+        cleanupSettled(existing.cleanupStatus) ||
+        existing.cleanupStatus === cleanupStatus
       ) {
         return { kind: 'updated' as const, record: existing };
       }
-      if (existing.cleanupStatus === cleanupStatus) {
-        return { kind: 'updated' as const, record: existing };
-      }
-      try {
-        await replace(
-          {
-            ...existing,
-            cleanupStatus,
-            updatedAt: now,
-          },
-          existing.etag,
-        );
-        const updated = await get(normalized);
-        if (updated !== null)
-          return { kind: 'updated' as const, record: updated };
-      } catch (error) {
-        if (!conflict(error)) {
-          const reconciled = await get(normalized);
-          if (reconciled?.cleanupStatus === cleanupStatus) {
-            return { kind: 'updated' as const, record: reconciled };
-          }
-          throw error;
-        }
-      }
+      const updated = await replaceAndReconcile(
+        { ...existing, cleanupStatus, updatedAt: now },
+        existing,
+        (record) => record.cleanupStatus === cleanupStatus,
+      );
+      if (updated !== undefined) return updated;
     }
     throw new Error(
       'Reminder dispatch cleanup contention exceeded retry limit',
