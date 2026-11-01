@@ -293,6 +293,9 @@ describe('APNs runtime', () => {
       it(`${name} for a request deadline of ${requestTimeoutMs}`, async (t) => {
         const setTimer = t.mock.method(globalThis, 'setTimeout');
         const stream = Object.assign(new EventEmitter(), {
+          // A mutant can leave the request to its timer, which fires after
+          // this test and closes the stream.
+          close() {},
           end() {
             queueMicrotask(() => {
               stream.emit('response', { ':status': 200 });

@@ -924,6 +924,24 @@ describe('controlled Change Reminder smoke handler', () => {
     assert.equal(sends, 0);
   });
 
+  it('reports a failed iOS send as unavailable', async () => {
+    const result = await createControlledReminderSmokeHandler(
+      runtime({
+        apnsRuntimeEnabled: true,
+        apnsSend: async () => {
+          throw new Error('Stored token unusable');
+        },
+        getSubscription: async () => ({
+          deviceToken: 'b'.repeat(64),
+          installationId,
+          platform: 'ios',
+        }),
+      }),
+    )(request(facts), context());
+
+    assert.equal(result.status, 503);
+  });
+
   it('refuses an iOS registration when no APNs sender was composed', async () => {
     const result = await createControlledReminderSmokeHandler(
       runtime({
