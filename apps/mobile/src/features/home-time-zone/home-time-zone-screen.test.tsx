@@ -381,7 +381,7 @@ describe('HomeTimeZoneScreen', () => {
     function changeDevice(
       adapters: HomeTimeZoneAdapters,
       uses24hourClock: boolean | null,
-      timeZone = 'Europe/London',
+      timeZone = 'Australia/Perth',
     ) {
       jest
         .mocked(adapters.localization.read)

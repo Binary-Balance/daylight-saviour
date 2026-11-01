@@ -314,10 +314,15 @@ export function createHomeTimeZoneSession({
     uses24hourClock = reported ?? uses24hourClock;
   }
 
-  // The device setting can change while the app is in the background.
+  // The device setting can change while the app is in the background. A failed
+  // read keeps the last value: it must not stop the pack refresh that follows.
   function refreshHourCycle() {
     const previous = uses24hourClock;
-    adoptHourCycle(adapters.localization.read().uses24hourClock);
+    try {
+      adoptHourCycle(adapters.localization.read().uses24hourClock);
+    } catch {
+      return;
+    }
     if (uses24hourClock !== previous) publish();
   }
 

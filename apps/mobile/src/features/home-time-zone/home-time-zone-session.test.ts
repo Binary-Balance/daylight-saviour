@@ -459,6 +459,47 @@ describe('Home Time Zone session', () => {
     stop();
   });
 
+  it('keeps the suggested zone while following the preference on the confirm screen', async () => {
+    const harness = createHarness({ deviceZone: 'Australia/Sydney' });
+    const session = createSession(harness.adapters);
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'confirm');
+
+    harness.setLocalization({
+      timeZone: 'Australia/Perth',
+      uses24hourClock: true,
+    });
+    session.dispatch({ type: 'foreground' });
+
+    expect(session.getSnapshot()).toMatchObject({
+      kind: 'confirm',
+      uses24hourClock: true,
+      zoneId: 'Australia/Sydney',
+    });
+    stop();
+  });
+
+  it('still refreshes data when the device preference cannot be read', async () => {
+    const harness = createHarness({ savedZone: 'Australia/Sydney' });
+    const session = createSession(harness.adapters);
+    const stop = session.start();
+    const ready = await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'ready',
+    );
+    jest.mocked(harness.adapters.localization.read).mockImplementation(() => {
+      throw new Error('native read failed');
+    });
+
+    expect(() => session.dispatch({ type: 'foreground' })).not.toThrow();
+
+    expect(session.getSnapshot()).toBe(ready);
+    expect(harness.adapters.timeZoneDataPacks.refresh).toHaveBeenCalledWith(
+      'foreground',
+    );
+    stop();
+  });
+
   it('follows a changed 12/24-hour preference when the app returns', async () => {
     const harness = createHarness({ savedZone: 'Australia/Sydney' });
     const session = createSession(harness.adapters);
@@ -472,7 +513,7 @@ describe('Home Time Zone session', () => {
 
     // A device that has moved to another zone leaves the saved zone alone.
     harness.setLocalization({
-      timeZone: 'Europe/London',
+      timeZone: 'Australia/Perth',
       uses24hourClock: true,
     });
     session.dispatch({ type: 'foreground' });
@@ -486,7 +527,7 @@ describe('Home Time Zone session', () => {
     expect(listener).toHaveBeenCalledTimes(1);
 
     harness.setLocalization({
-      timeZone: 'Europe/London',
+      timeZone: 'Australia/Perth',
       uses24hourClock: false,
     });
     session.dispatch({ type: 'foreground' });
