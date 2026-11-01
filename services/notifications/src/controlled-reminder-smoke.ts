@@ -12,6 +12,7 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 import {
   createApnsChangeReminderSender,
   type ApnsChangeReminderSender,
+  type ApnsChangeReminderSubscription,
   type ApnsHttpTransport,
   type ApnsSubscriptionRemover,
 } from './apns-change-reminder-sender.ts';
@@ -23,6 +24,7 @@ import {
   createFcmChangeReminderSender,
   createFetchFcmHttpTransport,
   type FcmChangeReminderSender,
+  type FcmChangeReminderSubscription,
   type FcmSubscriptionRemover,
   type ReviewedChangeReminderFacts,
 } from './fcm-change-reminder-sender.ts';
@@ -314,6 +316,57 @@ function apnsEnvironment(value: string): 'production' | 'sandbox' {
   throw new Error('Invalid APNs environment');
 }
 
+async function sendToAndroid(
+  runtime: ControlledReminderSmokeRuntime,
+  target: FcmChangeReminderSubscription,
+  facts: ReviewedChangeReminderFacts,
+): Promise<HttpResponseInit> {
+  if (
+    !runtime.runtimeEnabled ||
+    !runtime.testSendEnabled ||
+    runtime.sender === undefined
+  ) {
+    return outcome(503, 'unavailable');
+  }
+  // A smoke send proves delivery now. FCM must not hold it for an
+  // offline device and deliver it after the test.
+  const result = await runtime.sender.send(target, facts, {
+    kind: 'immediate',
+  });
+  return result.kind === 'accepted'
+    ? outcome(202, 'accepted')
+    : outcome(503, 'unavailable');
+}
+
+async function sendToIos(
+  runtime: ControlledReminderSmokeRuntime,
+  target: ApnsChangeReminderSubscription,
+  facts: ReviewedChangeReminderFacts,
+): Promise<HttpResponseInit> {
+  if (
+    !runtime.apnsRuntimeEnabled ||
+    !runtime.testSendEnabled ||
+    runtime.apnsSender === undefined
+  ) {
+    return outcome(503, 'unavailable');
+  }
+  const result = await runtime.apnsSender.send(target, facts, {
+    kind: 'immediate',
+  });
+  if (result.kind === 'accepted') return outcome(202, 'accepted');
+  // This fixed outcome is deliberately narrower than the sender result:
+  // only APNs 410/Unregistered plus conditional removal proves the stale
+  // registration was gone without disclosing provider or subscription data.
+  if (
+    result.kind === 'permanent-invalid-token' &&
+    result.invalidTokenReason === 'unregistered' &&
+    result.cleanupStatus === 'removed'
+  ) {
+    return outcome(410, 'apns-unregistered-token-removed');
+  }
+  return outcome(503, 'unavailable');
+}
+
 /**
  * Function-key-protected ingress for owner-controlled Change Reminder testing.
  * It stays separate from scheduled delivery and requires the explicit server gate.
@@ -356,45 +409,11 @@ export function createControlledReminderSmokeHandler(
         deviceToken: subscription.deviceToken,
         installationId: subscription.installationId,
       };
+      // Awaited here so a rejection reaches the catch below.
       if (subscription.platform === 'android') {
-        if (
-          !runtime.runtimeEnabled ||
-          !runtime.testSendEnabled ||
-          runtime.sender === undefined
-        ) {
-          return outcome(503, 'unavailable');
-        }
-        // A smoke send proves delivery now. FCM must not hold it for an
-        // offline device and deliver it after the test.
-        const result = await runtime.sender.send(target, facts, {
-          kind: 'immediate',
-        });
-        return result.kind === 'accepted'
-          ? outcome(202, 'accepted')
-          : outcome(503, 'unavailable');
+        return await sendToAndroid(runtime, target, facts);
       }
-      if (
-        !runtime.apnsRuntimeEnabled ||
-        !runtime.testSendEnabled ||
-        runtime.apnsSender === undefined
-      ) {
-        return outcome(503, 'unavailable');
-      }
-      const result = await runtime.apnsSender.send(target, facts, {
-        kind: 'immediate',
-      });
-      if (result.kind === 'accepted') return outcome(202, 'accepted');
-      // This fixed outcome is deliberately narrower than the sender result:
-      // only APNs 410/Unregistered plus conditional removal proves the stale
-      // registration was gone without disclosing provider or subscription data.
-      if (
-        result.kind === 'permanent-invalid-token' &&
-        result.invalidTokenReason === 'unregistered' &&
-        result.cleanupStatus === 'removed'
-      ) {
-        return outcome(410, 'apns-unregistered-token-removed');
-      }
-      return outcome(503, 'unavailable');
+      return await sendToIos(runtime, target, facts);
     } catch {
       return outcome(503, 'unavailable');
     }
