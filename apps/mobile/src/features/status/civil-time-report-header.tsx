@@ -12,7 +12,7 @@ export interface CivilTimeReportHeaderFacts {
 
 interface CivilTimeReportHeaderProps {
   readonly facts: CivilTimeReportHeaderFacts;
-  readonly onChooseZone?: () => void;
+  readonly onChooseZone?: (() => void) | undefined;
   readonly palette: DaylightSaviourPalette;
 }
 

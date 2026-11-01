@@ -16,7 +16,7 @@ export interface DataFreshnessFacts {
 
 interface DataFreshnessSectionProps {
   readonly facts: DataFreshnessFacts;
-  readonly onRetry?: () => void | Promise<void>;
+  readonly onRetry?: (() => void | Promise<void>) | undefined;
   readonly palette: DaylightSaviourPalette;
 }
 

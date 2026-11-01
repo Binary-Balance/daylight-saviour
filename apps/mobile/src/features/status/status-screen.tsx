@@ -23,7 +23,7 @@ import type { ReviewedNotificationTap } from '../change-reminders/change-reminde
 
 interface StatusScreenProps {
   readonly dataPackSnapshot: TimeZoneDataPackSnapshot;
-  readonly now?: Date;
+  readonly now?: Date | undefined;
   readonly notificationTap?: ReviewedNotificationTap | null;
   readonly onAcknowledgeAftermath?: (eventAt: string) => void;
   readonly onChooseZone?: () => void;

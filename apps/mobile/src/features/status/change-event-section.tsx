@@ -135,7 +135,7 @@ function CountdownTransition({
   reducedMotion,
   value,
 }: {
-  readonly accessibilityLabel?: string;
+  readonly accessibilityLabel?: string | undefined;
   readonly color: string;
   readonly reducedMotion: boolean | null;
   readonly value: string;

@@ -39,7 +39,7 @@ interface HomeTimeZoneScreenProps {
 
 interface ChooserProps {
   readonly notice: HomeTimeZoneNoticeCode | null;
-  readonly onCancel?: () => void;
+  readonly onCancel?: (() => void) | undefined;
   readonly onSelect: (zoneId: string) => void;
   readonly palette: DaylightSaviourPalette;
   readonly saveError: HomeTimeZoneErrorCode | null;
