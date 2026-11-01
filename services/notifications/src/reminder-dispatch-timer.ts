@@ -19,9 +19,15 @@ export function createReminderDispatchTimerHandler(
 
   return async (_timer: unknown, context: InvocationContext): Promise<void> => {
     // Dispatch stays off until an operator enables it, so deploying this
-    // function cannot send anything. A missing or invalid value suspends it.
-    if (environment.REMINDER_DISPATCH_ENABLED !== 'true') {
-      context.log('reminder-dispatch-suspended');
+    // function cannot send anything. Only `false` is a decision to stop:
+    // anything else also stops, with its own event, as nobody chose it.
+    const gate = environment.REMINDER_DISPATCH_ENABLED;
+    if (gate !== 'true') {
+      context.log(
+        gate === 'false'
+          ? 'reminder-dispatch-suspended'
+          : 'reminder-dispatch-gate-invalid',
+      );
       return;
     }
     try {

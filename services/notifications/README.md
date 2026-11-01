@@ -98,10 +98,15 @@ If the deadline has passed, it sends nothing and reports the send as expired.
 ## Scheduled dispatch
 
 The `reminder-dispatch` timer runs every five minutes. It sends only when
-`REMINDER_DISPATCH_ENABLED` is exactly `true`. Any other value, or none, logs
-`reminder-dispatch-suspended` and stops: nothing is read, sent or recorded, so
-deploying the function cannot send anything. The audited kill switch is
-[PUB-75](https://github.com/Binary-Balance/daylight-saviour/issues/75).
+`REMINDER_DISPATCH_ENABLED` is exactly `true`. Any other value stops the run
+before anything is read, sent or recorded, so deploying the function cannot send
+anything:
+
+| Value                  | Event                            | Meaning                                                                                       |
+| ---------------------- | -------------------------------- | --------------------------------------------------------------------------------------------- |
+| `true`                 | None                             | Dispatch runs.                                                                                |
+| `false`                | `reminder-dispatch-suspended`    | An operator stopped dispatch. Alert on this event once dispatch is live.                      |
+| Anything else, or none | `reminder-dispatch-gate-invalid` | **The setting is missing or malformed, so dispatch stopped with no decision.** Alert on this. |
 
 An enabled run:
 
@@ -197,6 +202,37 @@ failed runtime load is the same, with `reminder-dispatch-unavailable`. A timer
 that does not run at all logs nothing, so an outage that outlasts a window by
 more than 13 hours needs an alert on missing runs.
 
+### Kill switch
+
+`REMINDER_DISPATCH_ENABLED` is the kill switch from
+[ADR 0016](../../docs/adr/0016-provide-a-reminder-dispatch-kill-switch.md). It
+stops new APNs and FCM sends and nothing else. Subscriptions, credentials, the
+ledger and the Time-Zone Data Pack stay as they are. Registration and retention
+cleanup keep running, and the app is not told, so its status does not change.
+
+The private operations path sets it through `reminderDispatch.enabled` in the
+[Functions module](../../infra/modules/README.md). Use the deployment that owns
+the app's settings. It writes the whole set, so it would overwrite a value
+changed any other way, and that could resume dispatch with nobody deciding to.
+
+Changing an app setting
+[restarts a Flex Consumption app](https://learn.microsoft.com/en-us/azure/azure-functions/flex-consumption-site-updates).
+The module uses the default strategy, which ends a run in progress at once. A
+send intent that run left becomes `uncertain` and is not replayed. Rolling
+updates let a run finish, so enabling them would weaken the switch.
+
+Only an explicit `true` resumes dispatch. A restart or a deployment with the same
+value does not. Sends then continue only inside windows that are still open: a
+closed window has no plan, so it is never replayed. The first enabled run expires
+what the suspension left unsent and [reports each closed window](#closed-delivery-windows)
+within its lookback.
+
+The [Azure Activity Log](https://learn.microsoft.com/en-us/azure/azure-monitor/platform/activity-log)
+records who wrote the app's settings and when. It keeps that for 90 days unless a
+diagnostic setting exports it. The private change record holds the reason. The
+first `suspended` event dates activation and the last dates resumption. None of
+this contains a token or secret.
+
 ### Measured limits
 
 Storage requests measured with local stores and injected providers, for 250
@@ -287,7 +323,7 @@ test gates.
 | `FCM_WORKLOAD_IDENTITY_PROVIDER`      | Reserved Google workload identity provider resource beginning `//iam.googleapis.com/projects/…`.   |
 | `FCM_SERVICE_ACCOUNT_EMAIL`           | Reserved exact Google service account to impersonate for FCM.                                      |
 | `FCM_PROJECT_ID`                      | Reserved exact Firebase/Google project for FCM HTTP v1 send URLs.                                  |
-| `REMINDER_DISPATCH_ENABLED`           | Enables scheduled dispatch when exactly `true`. Anything else suspends it.                         |
+| `REMINDER_DISPATCH_ENABLED`           | The [kill switch](#kill-switch). Enables scheduled dispatch when exactly `true`.                   |
 | `TIME_ZONE_DATA_MANIFEST_URL`         | Signed Time-Zone Data Pack manifest. Read only when dispatch is enabled.                           |
 | `TIME_ZONE_DATA_TRUSTED_KEYS_JSON`    | JSON object of pack key IDs and Ed25519 public keys. Read only when dispatch is enabled.           |
 | `FCM_RUNTIME_ENABLED`                 | Enables the retained owner-controlled Android Change Reminder test composition.                    |
