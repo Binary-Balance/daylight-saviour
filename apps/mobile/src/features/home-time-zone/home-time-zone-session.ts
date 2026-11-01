@@ -93,6 +93,18 @@ type FlowState =
       readonly zoneId: string;
     };
 
+// Takes the work, not a started promise, so mutation testing, which empties
+// functions in turn, cannot leave a rejection unhandled.
+async function ignoreFailure(work: () => Promise<void>) {
+  try {
+    await work();
+  } catch {
+    // The data pack manager reports its own outcome in its snapshot, and an
+    // acknowledgement that is not saved only repeats one factual aftermath
+    // opening, so neither failure needs handling.
+  }
+}
+
 export function createHomeTimeZoneSession({
   adapters,
   now = () => new Date(),
@@ -286,9 +298,9 @@ export function createHomeTimeZoneSession({
       setFlow({ ...flow, returnAcknowledgedEventAt: eventAt });
     }
     if (zoneId !== null) {
-      void adapters.aftermathAcknowledgements
-        .save(zoneId, eventAt)
-        .catch(() => undefined);
+      void ignoreFailure(() =>
+        adapters.aftermathAcknowledgements.save(zoneId, eventAt),
+      );
     }
   }
 
@@ -379,16 +391,14 @@ export function createHomeTimeZoneSession({
         acknowledgeAftermath(event.eventAt);
         return;
       case 'manual-refresh':
-        void adapters.timeZoneDataPacks
-          .refresh('manual')
-          .catch(() => undefined);
+        void ignoreFailure(() => adapters.timeZoneDataPacks.refresh('manual'));
         return;
       case 'foreground':
         startOpening();
         refreshHourCycle();
-        void adapters.timeZoneDataPacks
-          .refresh('foreground')
-          .catch(() => undefined);
+        void ignoreFailure(() =>
+          adapters.timeZoneDataPacks.refresh('foreground'),
+        );
     }
   }
 
@@ -415,7 +425,7 @@ export function createHomeTimeZoneSession({
     dataPackSnapshot = adapters.timeZoneDataPacks.getSnapshot();
     stopDataPackSubscription =
       adapters.timeZoneDataPacks.subscribe(onDataPackChange);
-    void adapters.timeZoneDataPacks.initialize().catch(() => undefined);
+    void ignoreFailure(() => adapters.timeZoneDataPacks.initialize());
     void restore(generation);
     return stop;
   }
