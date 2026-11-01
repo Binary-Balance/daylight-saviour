@@ -18,7 +18,7 @@ Read [AGENTS.md](AGENTS.md) before contributing. It defines mandatory issue-rout
 
 Toolchain installation, pinned versions, dependency policy, and validation commands are documented in [development guide](docs/development.md).
 
-Install dependencies from repository root with `npm ci`. Before opening a pull request, run `npm run format:check`, `npm run audit`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run dependencies:check`, and `npm run web:export`.
+Install dependencies from repository root with `npm ci`. Before opening a pull request, run `npm run format:check`, `npm run audit`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run dependencies:check`, and `npm run web:export`. For local public configuration, copy `apps/mobile/.env.example` to `apps/mobile/.env`, as the [development guide](docs/development.md#public-environment) explains.
 
 Native `android/` and `ios/` projects are generated build outputs, not source of truth. Android builds run locally without an emulator. iOS builds require hosted macOS infrastructure.
 

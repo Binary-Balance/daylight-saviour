@@ -24,8 +24,19 @@ function newerPack() {
   return pack;
 }
 
-function signedArtifacts(pack = newerPack()) {
-  const bytes = new TextEncoder().encode(`${JSON.stringify(pack, null, 2)}\n`);
+// JSON ignores trailing whitespace, so padding lets a valid manifest or signed
+// pack sit exactly on a byte limit.
+function padded(bytes: Uint8Array, length: number) {
+  const result = new Uint8Array(Math.max(bytes.byteLength, length)).fill(0x20);
+  result.set(bytes);
+  return result;
+}
+
+function signedArtifacts(pack = newerPack(), length = 0) {
+  const bytes = padded(
+    new TextEncoder().encode(`${JSON.stringify(pack, null, 2)}\n`),
+    length,
+  );
   const manifest = {
     manifestVersion: 1,
     pack: {
@@ -66,20 +77,40 @@ function base64(bytes: Uint8Array) {
 
 function response(
   status: number,
-  body: Uint8Array | string = '',
+  body: Uint8Array | Uint8Array[] | string = '',
   headers: Record<string, string> = {},
 ) {
-  const bytes =
-    typeof body === 'string' ? new TextEncoder().encode(body) : body;
+  const chunks = Array.isArray(body)
+    ? body
+    : [typeof body === 'string' ? new TextEncoder().encode(body) : body];
   const normalized = new Map(
     Object.entries(headers).map(([name, value]) => [name.toLowerCase(), value]),
   );
+  // A high water mark of 0 stops the stream reading ahead, so `pulled` counts
+  // exactly the chunks the manager asked for. The rest stay unread.
+  const reads = { cancelled: false, pulled: 0 };
   return {
-    arrayBuffer: async () =>
-      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    body: new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          const chunk = chunks[reads.pulled];
+          if (chunk === undefined) {
+            controller.close();
+          } else {
+            reads.pulled += 1;
+            controller.enqueue(chunk);
+          }
+        },
+        cancel() {
+          reads.cancelled = true;
+        },
+      },
+      { highWaterMark: 0 },
+    ),
     headers: {
       get: (name: string) => normalized.get(name.toLowerCase()) ?? null,
     },
+    reads,
     status,
   };
 }
@@ -412,6 +443,262 @@ describe('Time-Zone Data Pack manager', () => {
   });
 });
 
+describe('Time-Zone Data Pack download bounds', () => {
+  const limits = { manifest: 64 * 1024, pack: 2 * 1024 * 1024 };
+  const targets = ['manifest', 'pack'] as const;
+  type Target = (typeof targets)[number];
+  const chunkSize = 16 * 1024;
+  const unread = 3;
+
+  function chunksOf(bytes: Uint8Array) {
+    return Array.from(
+      { length: Math.ceil(bytes.byteLength / chunkSize) },
+      (_, index) => bytes.subarray(index * chunkSize, (index + 1) * chunkSize),
+    );
+  }
+
+  // Valid content that is exactly at the target's limit, with the artifacts
+  // it belongs to.
+  function atLimit(target: Target) {
+    const artifacts = signedArtifacts(
+      newerPack(),
+      target === 'pack' ? limits.pack : 0,
+    );
+    const body =
+      target === 'pack'
+        ? artifacts.bytes
+        : padded(
+            new TextEncoder().encode(JSON.stringify(artifacts.manifest)),
+            limits.manifest,
+          );
+    return { artifacts, body };
+  }
+
+  // The same content plus one more byte, then chunks that must stay unread.
+  // Only its length is wrong, so a manager that truncated at the limit or read
+  // past it would accept it.
+  function overLimit(body: Uint8Array) {
+    const spaces = (length: number) => new Uint8Array(length).fill(0x20);
+    return [
+      ...chunksOf(body),
+      spaces(1),
+      ...Array.from({ length: unread }, () => spaces(chunkSize)),
+    ];
+  }
+
+  // Serves `served` as the target's response and valid ones for the other
+  // request, then runs the cold-launch check.
+  async function check(
+    target: Target,
+    served: unknown,
+    artifacts = signedArtifacts(),
+  ) {
+    const request = jest
+      .fn()
+      .mockResolvedValueOnce(
+        target === 'manifest'
+          ? served
+          : response(200, JSON.stringify(artifacts.manifest)),
+      )
+      .mockResolvedValueOnce(
+        target === 'pack' ? served : response(200, artifacts.bytes),
+      );
+    const storage = memoryStorage();
+    const manager = managerWith({ request, storage });
+    await manager.initialize();
+    return { manager, request, storage };
+  }
+
+  // A rejected body is an HTTP-style failure, not a lost connection.
+  function expectRetryFailed(manager: ReturnType<typeof managerWith>) {
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'retry-failed',
+      lastError: 'refresh-failed',
+      pack: { packVersion: bundledAustralianDataPack.packVersion },
+      source: 'bundled',
+    });
+  }
+
+  it.each<[Target, string, Record<string, string>]>([
+    ['manifest', 'no Content-Length', {}],
+    ['manifest', 'an understated Content-Length', { 'content-length': '1' }],
+    ['pack', 'no Content-Length', {}],
+    ['pack', 'an understated Content-Length', { 'content-length': '1' }],
+  ])(
+    'cancels a %s body past its limit with %s',
+    async (target, _label, headers) => {
+      const { artifacts, body } = atLimit(target);
+      const chunks = overLimit(body);
+      const served = response(200, chunks, headers);
+
+      const { manager, request, storage } = await check(
+        target,
+        served,
+        artifacts,
+      );
+
+      expect(served.reads).toEqual({
+        cancelled: true,
+        pulled: chunks.length - unread,
+      });
+      expect(served.body.locked).toBe(false);
+      expect(request).toHaveBeenCalledTimes(target === 'manifest' ? 1 : 2);
+      expectRetryFailed(manager);
+      expect(storage.value).not.toContain('2026d');
+
+      // The failed check leaves a manual retry usable.
+      const retry = signedArtifacts();
+      request
+        .mockReset()
+        .mockResolvedValueOnce(response(200, JSON.stringify(retry.manifest)))
+        .mockResolvedValueOnce(response(200, retry.bytes));
+      await manager.refresh('manual');
+      expect(manager.getSnapshot()).toMatchObject({
+        freshness: 'current',
+        lastError: null,
+        pack: { packVersion: '2026d-australian-v1' },
+        source: 'remote',
+      });
+    },
+  );
+
+  it.each<[Target, string, string]>([
+    ['manifest', 'a malformed', '12abc'],
+    ['manifest', 'a malformed', 'abc12'],
+    ['manifest', 'an excessive', String(limits.manifest + 1)],
+    ['pack', 'a malformed', '12abc'],
+    ['pack', 'a malformed', 'abc12'],
+    ['pack', 'an excessive', String(limits.pack + 1)],
+  ])(
+    'rejects a %s response with %s Content-Length without reading its body',
+    async (target, _label, contentLength) => {
+      const artifacts = signedArtifacts();
+      const served = response(
+        200,
+        target === 'pack'
+          ? artifacts.bytes
+          : JSON.stringify(artifacts.manifest),
+        { 'content-length': contentLength },
+      );
+
+      const { manager, request } = await check(target, served, artifacts);
+
+      expect(served.reads.pulled).toBe(0);
+      // Nothing reads the body, so aborting the request is what stops a
+      // download that the native layer would keep buffering.
+      expect(request.mock.calls[0][1].signal.aborted).toBe(true);
+      expectRetryFailed(manager);
+    },
+  );
+
+  it('rejects a pack longer than its manifest declares without reading it', async () => {
+    const artifacts = signedArtifacts();
+    const served = response(200, artifacts.bytes, {
+      'content-length': String(artifacts.bytes.byteLength + 1),
+    });
+
+    const { manager } = await check('pack', served, artifacts);
+
+    expect(served.reads.pulled).toBe(0);
+    expectRetryFailed(manager);
+  });
+
+  it.each(targets)('accepts a %s body of exactly its limit', async (target) => {
+    const { artifacts, body } = atLimit(target);
+    const served = response(200, chunksOf(body), {
+      'content-length': String(body.byteLength),
+    });
+
+    const { manager } = await check(target, served, artifacts);
+
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'current',
+      pack: { packVersion: '2026d-australian-v1' },
+      source: 'remote',
+    });
+    expect(served.reads.cancelled).toBe(false);
+    expect(served.body.locked).toBe(false);
+  });
+
+  it.each(targets)(
+    'fails closed instead of buffering a %s response with no stream body',
+    async (target) => {
+      const artifacts = signedArtifacts();
+      const arrayBuffer = jest.fn();
+      const served = {
+        ...response(
+          200,
+          target === 'pack'
+            ? artifacts.bytes
+            : JSON.stringify(artifacts.manifest),
+        ),
+        arrayBuffer,
+        body: null,
+      };
+
+      const { manager } = await check(target, served, artifacts);
+
+      expect(arrayBuffer).not.toHaveBeenCalled();
+      expectRetryFailed(manager);
+    },
+  );
+
+  it('treats a body that fails mid-read as a transport loss and releases the reader', async () => {
+    let sent = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) {
+          controller.error(new Error('connection lost'));
+        } else {
+          sent = true;
+          controller.enqueue(new Uint8Array(16));
+        }
+      },
+    });
+
+    const { manager } = await check('manifest', { ...response(200), body });
+
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'offline-valid',
+      lastError: 'refresh-failed',
+      source: 'bundled',
+    });
+    expect(body.locked).toBe(false);
+  });
+
+  it('rejects a body that Expo delivers as one oversize chunk', async () => {
+    const served = response(200, [new Uint8Array(64 * 1024 + 1)]);
+
+    const { manager } = await check('manifest', served);
+
+    expect(served.reads).toEqual({ cancelled: true, pulled: 1 });
+    expect(served.body.locked).toBe(false);
+    expectRetryFailed(manager);
+  });
+
+  it('stops a pack body at the length its manifest declares', async () => {
+    const artifacts = signedArtifacts();
+    const space = new Uint8Array(1).fill(0x20);
+    const served = response(200, [artifacts.bytes, space, space]);
+
+    const { manager } = await check('pack', served, artifacts);
+
+    expect(served.reads).toEqual({ cancelled: true, pulled: 2 });
+    expect(served.body.locked).toBe(false);
+    expectRetryFailed(manager);
+  });
+
+  it('rejects a chunk that is not bytes and cancels the body', async () => {
+    const served = response(200, ['not bytes' as never, new Uint8Array(1)]);
+
+    const { manager } = await check('manifest', served);
+
+    expect(served.reads).toEqual({ cancelled: true, pulled: 1 });
+    expect(served.body.locked).toBe(false);
+    expectRetryFailed(manager);
+  });
+});
+
 describe('remote build configuration', () => {
   it('accepts HTTPS URL and build-configured trusted key ring', () => {
     expect(
@@ -503,22 +790,28 @@ describe('Time-Zone Data Pack refresh deadline', () => {
     ['manifest', 0],
     ['pack', 1],
   ])(
-    'fails a %s whose body stalls after its headers as a transport loss',
+    'fails a %s whose body stalls part way through as a transport loss',
     async (_name, stalledCall) => {
       const artifacts = signedArtifacts();
       const responses = [
         response(200, JSON.stringify(artifacts.manifest)),
         response(200, artifacts.bytes),
       ];
+      // Like a network implementation that ignores abort and never settles.
+      let sent = false;
+      const stalledBody = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent) return new Promise<never>(() => undefined);
+          sent = true;
+          controller.enqueue(new Uint8Array(16));
+        },
+      });
       const signals: AbortSignal[] = [];
       const request = jest.fn(
         async (_url: string, init: { readonly signal: AbortSignal }) => {
           const call = signals.push(init.signal) - 1;
           return call === stalledCall
-            ? {
-                ...responses[call]!,
-                arrayBuffer: () => new Promise<never>(() => undefined),
-              }
+            ? { ...responses[call]!, body: stalledBody }
             : responses[call]!;
         },
       );
