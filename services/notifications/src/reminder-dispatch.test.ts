@@ -4,12 +4,15 @@ import { describe, it } from 'node:test';
 import {
   createAzureReminderDispatchLedgerStore,
   createTableReminderDispatchLedgerStore,
+  type ReminderDispatchCleanupStatus,
   type ReminderDispatchIdentity,
+  type ReminderDispatchLedgerRecord,
   type ReminderDispatchLedgerTable,
 } from './reminder-dispatch-ledger.ts';
 import {
   createReminderDispatchOperation,
   type ReminderDispatchContext,
+  type ReminderDispatchOperationDependencies,
   type ReminderDispatchProviderRequest,
   type ReminderDispatchProviderResult,
 } from './reminder-dispatch.ts';
@@ -1150,6 +1153,112 @@ describe('unsettled reminder dispatch records', () => {
   });
 });
 
+const oneDay = context({
+  delivery: { ...context().delivery, timing: 'one-day' },
+});
+
+// Changes to the registration, or to what identifies its delivery. A row that
+// starts from another context says so, because the change must leave the
+// delivered timing enabled.
+const registrationChanges: readonly [
+  string,
+  ReminderDispatchContext,
+  ReminderDispatchContext?,
+][] = [
+  [
+    'registration',
+    context({
+      subscription: { ...subscription, deviceToken: 'fcm-token:rotated' },
+    }),
+  ],
+  [
+    'registration generation',
+    context({ subscription: { ...subscription, attemptGeneration: 2 } }),
+  ],
+  ['platform', context({ subscription: { ...subscription, platform: 'ios' } })],
+  [
+    'registration time',
+    context({
+      subscription: {
+        ...subscription,
+        registeredAt: new Date('2026-09-01T00:00:00.000Z'),
+      },
+    }),
+  ],
+  [
+    'one-day preference',
+    context({ subscription: { ...subscription, oneDayEnabled: false } }),
+  ],
+  [
+    'one-week preference',
+    { ...oneDay, subscription: { ...subscription, oneWeekEnabled: false } },
+    oneDay,
+  ],
+  [
+    'installation',
+    context({
+      subscription: { ...subscription, installationId: 'j'.repeat(43) },
+    }),
+  ],
+  [
+    'Home Time Zone',
+    context({
+      delivery: { ...context().delivery, homeTimeZone: 'Australia/Brisbane' },
+      subscription: { ...subscription, homeTimeZone: 'Australia/Brisbane' },
+    }),
+  ],
+  ['timing', oneDay],
+  [
+    'Change Event',
+    context({
+      delivery: {
+        ...context().delivery,
+        changeEventAt: '2026-10-05T16:00:00.000Z',
+      },
+    }),
+  ],
+];
+
+// Changes to the plan that the provider's request depends on.
+const planChanges: readonly [
+  string,
+  ReminderDispatchContext,
+  ReminderDispatchContext?,
+][] = [
+  [
+    'pack validity',
+    context({ activePackValidUntil: '2027-01-01T00:00:00.000Z' }),
+  ],
+  [
+    'operation deadline',
+    context({ completeOperationDeadline: '2026-09-28T23:00:00.000Z' }),
+  ],
+  [
+    'direction',
+    context({
+      delivery: { ...context().delivery, changeDirection: 'backward' },
+    }),
+  ],
+  [
+    'window start',
+    context({
+      delivery: {
+        ...context().delivery,
+        deliveryWindow: { ...window, startsAt: '2026-09-28T08:00:00.000Z' },
+      },
+    }),
+  ],
+  [
+    'window end',
+    context({
+      delivery: {
+        ...context().delivery,
+        deliveryWindow: { ...window, endsAt: '2026-09-28T20:00:00.000Z' },
+      },
+    }),
+  ],
+];
+
 describe('reminder dispatch operation', () => {
   it('passes explicit provider expiry and bounded completion deadline', async () => {
     const fixture = operationFixture();
@@ -1581,48 +1690,12 @@ describe('reminder dispatch operation', () => {
     assert.equal(await authorizedAfter(context()), true);
   });
 
-  for (const [change, next] of [
-    [
-      'registration',
-      context({
-        subscription: { ...subscription, deviceToken: 'fcm-token:rotated' },
-      }),
-    ],
-    [
-      'pack validity',
-      context({ activePackValidUntil: '2027-01-01T00:00:00.000Z' }),
-    ],
-    [
-      'operation deadline',
-      context({ completeOperationDeadline: '2026-09-28T23:00:00.000Z' }),
-    ],
-    [
-      'direction',
-      context({
-        delivery: { ...context().delivery, changeDirection: 'backward' },
-      }),
-    ],
-    [
-      'window start',
-      context({
-        delivery: {
-          ...context().delivery,
-          deliveryWindow: { ...window, startsAt: '2026-09-28T08:00:00.000Z' },
-        },
-      }),
-    ],
-    [
-      'window end',
-      context({
-        delivery: {
-          ...context().delivery,
-          deliveryWindow: { ...window, endsAt: '2026-09-28T20:00:00.000Z' },
-        },
-      }),
-    ],
-  ] as const) {
+  for (const [change, next, initial] of [
+    ...registrationChanges,
+    ...planChanges,
+  ]) {
     it(`refuses a send when the ${change} changed before it`, async () => {
-      assert.equal(await authorizedAfter(next), false);
+      assert.equal(await authorizedAfter(next, initial), false);
     });
   }
 
@@ -1634,6 +1707,12 @@ describe('reminder dispatch operation', () => {
     const lastSecond = later(window.endsAt, -1_000);
     const deadline = later(window.startsAt, 30_000);
     const early = context({ completeOperationDeadline: deadline });
+    // The event and the pack end fall inside the first lease, so each row
+    // breaks only the bound it names.
+    const eventSoon = context({
+      delivery: { ...context().delivery, changeEventAt: deadline },
+    });
+    const packSoon = context({ activePackValidUntil: deadline });
 
     for (const [name, current, from, at, expected] of [
       ['at the window end', context(), lastSecond, window.endsAt, true],
@@ -1670,6 +1749,35 @@ describe('reminder dispatch operation', () => {
         early,
         window.startsAt,
         deadline,
+        false,
+      ],
+      [
+        'before the window opens',
+        context(),
+        window.startsAt,
+        later(window.startsAt, -1),
+        false,
+      ],
+      [
+        'before the Change Event',
+        eventSoon,
+        window.startsAt,
+        later(deadline, -1),
+        true,
+      ],
+      [
+        'at the Change Event, inside the window',
+        eventSoon,
+        window.startsAt,
+        deadline,
+        false,
+      ],
+      ['at the pack end', packSoon, window.startsAt, deadline, true],
+      [
+        'past the pack end, inside the window',
+        packSoon,
+        window.startsAt,
+        later(deadline, 1),
         false,
       ],
     ] as const) {
@@ -1800,5 +1908,900 @@ describe('reminder dispatch operation', () => {
     });
     assert.equal((await operation.dispatch(context())).kind, 'expired');
     assert.equal(fixture.sent.length, 0);
+  });
+});
+
+// An operation over a fixture's ledger and plan, with any boundary replaced.
+// Unless a test replaces the provider, it accepts and lists what it was sent.
+function operationWith(
+  fixture: ReturnType<typeof operationFixture>,
+  boundaries: Partial<ReminderDispatchOperationDependencies> = {},
+) {
+  return createReminderDispatchOperation({
+    ledger: fixture.ledger,
+    provider: {
+      send: async (request) => {
+        fixture.sent.push(request);
+        return { kind: 'accepted' };
+      },
+    },
+    readCurrentContext: async () => fixture.getCurrent(),
+    subscriptionStore: {
+      getSubscriptionSnapshot: async () => fixture.getCurrent().subscription,
+      removeIfDeviceTokenAndGenerationMatches: async () => 'removed',
+    },
+    clock: () => new Date(window.startsAt),
+    ...boundaries,
+  });
+}
+
+function instantAfter(at: string, milliseconds: number) {
+  return new Date(Date.parse(at) + milliseconds).toISOString();
+}
+
+// Dispatches once and reports what the provider and ledger saw. The plan is
+// read before the send intent (read 1) and again after it (read 2). A test can
+// fail one read, change what the plan reads as from one read on, or move the
+// clock to `jumpTo` as one is made. `prepared` is a delivery the ledger already
+// holds.
+async function dispatched({
+  changedTo,
+  changeRead,
+  failRead,
+  initial = context(),
+  jumpTo,
+  jumpRead = 1,
+  prepared,
+}: {
+  readonly changedTo?: ReminderDispatchContext;
+  readonly changeRead?: number;
+  readonly failRead?: number;
+  readonly initial?: ReminderDispatchContext | undefined;
+  readonly jumpTo?: string;
+  readonly jumpRead?: number;
+  readonly prepared?: ReturnType<typeof preparation>;
+}) {
+  const fixture = operationFixture(initial);
+  if (prepared !== undefined) await fixture.ledger.prepare(prepared);
+  let now = new Date(window.startsAt);
+  let reads = 0;
+  let intents = 0;
+  const operation = operationWith(fixture, {
+    clock: () => now,
+    ledger: {
+      ...fixture.ledger,
+      beginSend: async (claim, at) => {
+        intents += 1;
+        return fixture.ledger.beginSend(claim, at);
+      },
+    },
+    readCurrentContext: async () => {
+      reads += 1;
+      if (reads === failRead) throw new Error('storage unavailable');
+      if (reads === jumpRead && jumpTo !== undefined) now = new Date(jumpTo);
+      if (reads === changeRead && changedTo !== undefined) {
+        fixture.setCurrent(changedTo);
+      }
+      return fixture.getCurrent();
+    },
+  });
+  const result = await operation.dispatch(initial);
+  const record = await fixture.ledger.get({
+    ...identity,
+    changeEventAt: initial.delivery.changeEventAt,
+  });
+  return { intents, record, result, sends: fixture.sent.length };
+}
+
+describe('reminder dispatch of an invalid context', () => {
+  const delivery = context().delivery;
+  const rejections: readonly [string, ReminderDispatchContext, string][] = [
+    [
+      'a Home Time Zone that is not canonical',
+      context({ delivery: { ...delivery, homeTimeZone: 'Sydney' } }),
+      'Invalid reminder dispatch Home Time Zone',
+    ],
+    [
+      'an unknown timing',
+      context({ delivery: { ...delivery, timing: 'one-hour' as never } }),
+      'Invalid reminder dispatch timing',
+    ],
+    [
+      'a Change Event that is not an instant',
+      context({ delivery: { ...delivery, changeEventAt: 'next Sunday' } }),
+      'Invalid reminder dispatch Change Event instant',
+    ],
+    [
+      'a Change Event that is not in canonical form',
+      context({
+        delivery: { ...delivery, changeEventAt: '2026-10-04T16:00:00Z' },
+      }),
+      'Invalid reminder dispatch Change Event instant',
+    ],
+    [
+      'a Change Event that is not text',
+      context({
+        delivery: { ...delivery, changeEventAt: 1_791_129_600_000 as never },
+      }),
+      'Invalid reminder dispatch Change Event instant',
+    ],
+    [
+      'an installation ID with other characters',
+      context({ subscription: { ...subscription, installationId: 'a b' } }),
+      'Invalid reminder dispatch installation ID',
+    ],
+    [
+      'an empty installation ID',
+      context({ subscription: { ...subscription, installationId: '' } }),
+      'Invalid reminder dispatch installation ID',
+    ],
+    [
+      'an installation ID that is too long',
+      context({
+        subscription: { ...subscription, installationId: 'i'.repeat(129) },
+      }),
+      'Invalid reminder dispatch installation ID',
+    ],
+    [
+      'a registration generation of zero',
+      context({ subscription: { ...subscription, attemptGeneration: 0 } }),
+      'Invalid reminder dispatch generation',
+    ],
+    [
+      'a negative registration generation',
+      context({ subscription: { ...subscription, attemptGeneration: -1 } }),
+      'Invalid reminder dispatch generation',
+    ],
+    [
+      'a registration generation that is not whole',
+      context({ subscription: { ...subscription, attemptGeneration: 1.5 } }),
+      'Invalid reminder dispatch generation',
+    ],
+    [
+      'a registration generation beyond the safe integers',
+      context({
+        subscription: { ...subscription, attemptGeneration: 2 ** 53 },
+      }),
+      'Invalid reminder dispatch generation',
+    ],
+    [
+      'a registration for another zone than its plan',
+      context({
+        subscription: { ...subscription, homeTimeZone: 'Australia/Perth' },
+      }),
+      'Reminder dispatch subscription does not match its plan',
+    ],
+    [
+      'a window that ends before it starts',
+      context({
+        delivery: {
+          ...delivery,
+          deliveryWindow: { endsAt: window.startsAt, startsAt: window.endsAt },
+        },
+      }),
+      'Invalid reminder dispatch delivery window',
+    ],
+    [
+      'a window start that is not an instant',
+      context({
+        delivery: {
+          ...delivery,
+          deliveryWindow: { ...window, startsAt: 'noon' },
+        },
+      }),
+      'Invalid reminder dispatch delivery window start',
+    ],
+    [
+      'a window end that is not an instant',
+      context({
+        delivery: {
+          ...delivery,
+          deliveryWindow: { ...window, endsAt: 'midnight' },
+        },
+      }),
+      'Invalid reminder dispatch delivery window end',
+    ],
+    [
+      'a pack Validity Horizon that is not an instant',
+      context({ activePackValidUntil: 'never' }),
+      'Invalid reminder dispatch pack Validity Horizon',
+    ],
+    [
+      'an operation deadline that is not an instant',
+      context({ completeOperationDeadline: 'soon' }),
+      'Invalid reminder dispatch complete-operation deadline',
+    ],
+    [
+      'a registration with no timing enabled',
+      context({
+        subscription: {
+          ...subscription,
+          oneDayEnabled: false,
+          oneWeekEnabled: false,
+        },
+      }),
+      'Reminder dispatch has no enabled timing',
+    ],
+    [
+      'a one-week delivery for a registration that disabled it',
+      context({ subscription: { ...subscription, oneWeekEnabled: false } }),
+      'Reminder dispatch timing is disabled',
+    ],
+    [
+      'a one-day delivery for a registration that disabled it',
+      context({
+        delivery: { ...delivery, timing: 'one-day' },
+        subscription: { ...subscription, oneDayEnabled: false },
+      }),
+      'Reminder dispatch timing is disabled',
+    ],
+  ];
+
+  // An operation that counts how often dispatch reaches the ledger. The
+  // ledger checks some of these itself, so only a count shows that the
+  // dispatcher stopped first.
+  function countingPrepares(
+    fixture: ReturnType<typeof operationFixture>,
+    boundaries: Partial<ReminderDispatchOperationDependencies> = {},
+  ) {
+    const prepares = { count: 0 };
+    const operation = operationWith(fixture, {
+      ledger: {
+        ...fixture.ledger,
+        prepare: async (preparation) => {
+          prepares.count += 1;
+          return fixture.ledger.prepare(preparation);
+        },
+      },
+      ...boundaries,
+    });
+    return { operation, prepares };
+  }
+
+  for (const [problem, invalid, message] of rejections) {
+    it(`rejects ${problem} before touching the ledger or provider`, async () => {
+      const fixture = operationFixture();
+      const { operation, prepares } = countingPrepares(fixture);
+
+      await assert.rejects(() => operation.dispatch(invalid), { message });
+
+      assert.equal(prepares.count, 0);
+      assert.deepEqual(fixture.sent, []);
+    });
+  }
+
+  for (const [timing, oneDayEnabled, oneWeekEnabled] of [
+    ['one-day', true, false],
+    ['one-week', false, true],
+  ] as const) {
+    it(`sends a ${timing} reminder when it is the only timing enabled`, async () => {
+      const initial = context({
+        delivery: { ...delivery, timing },
+        subscription: { ...subscription, oneDayEnabled, oneWeekEnabled },
+      });
+      const fixture = operationFixture(initial);
+
+      assert.equal(
+        (await fixture.operation.dispatch(initial)).kind,
+        'accepted',
+      );
+
+      assert.equal(fixture.sent.length, 1);
+    });
+  }
+
+  it('sends in a window that opens and closes at the same instant', async () => {
+    const initial = context({
+      delivery: {
+        ...delivery,
+        deliveryWindow: { endsAt: window.startsAt, startsAt: window.startsAt },
+      },
+    });
+    const fixture = operationFixture(initial);
+
+    assert.equal((await fixture.operation.dispatch(initial)).kind, 'accepted');
+
+    assert.equal(fixture.sent.length, 1);
+  });
+
+  it('rejects a clock that is not a date before touching the ledger', async () => {
+    const fixture = operationFixture();
+    const { operation, prepares } = countingPrepares(fixture, {
+      clock: () => new Date(Number.NaN),
+    });
+
+    await assert.rejects(() => operation.dispatch(context()), {
+      message: 'Invalid reminder dispatch clock',
+    });
+
+    assert.equal(prepares.count, 0);
+    assert.deepEqual(fixture.sent, []);
+  });
+
+  it('accepts the latest date a clock can report', async () => {
+    const fixture = operationFixture();
+    const operation = operationWith(fixture, {
+      clock: () => new Date(8_640_000_000_000_000),
+    });
+
+    assert.equal((await operation.dispatch(context())).kind, 'expired');
+
+    assert.deepEqual(fixture.sent, []);
+  });
+});
+
+describe('reminder dispatch of a provider answer', () => {
+  // Only a confirmed transient failure may be sent again. Anything the
+  // dispatcher cannot read as an answer may have been sent, so it stays closed.
+  const answers: readonly [
+    string,
+    () => Promise<ReminderDispatchProviderResult>,
+    'accepted' | 'permanent-failure' | 'transient-failure' | 'uncertain',
+    boolean,
+  ][] = [
+    ['acceptance', async () => ({ kind: 'accepted' }), 'accepted', false],
+    ['uncertainty', async () => ({ kind: 'uncertain' }), 'uncertain', false],
+    [
+      'a permanent rejection',
+      async () => ({ kind: 'permanent-failure', invalidToken: false }),
+      'permanent-failure',
+      false,
+    ],
+    [
+      'a transient failure',
+      async () => ({ kind: 'transient-failure' }),
+      'transient-failure',
+      true,
+    ],
+    [
+      'an error',
+      async () => {
+        throw new Error('acknowledgement lost');
+      },
+      'uncertain',
+      false,
+    ],
+    ['nothing', async () => undefined as never, 'uncertain', false],
+    ['null', async () => null as never, 'uncertain', false],
+    ['text', async () => 'accepted' as never, 'uncertain', false],
+    [
+      'an object of an unknown kind',
+      async () => ({ kind: 'delivered' }) as never,
+      'uncertain',
+      false,
+    ],
+    [
+      'an array that has a kind',
+      async () => Object.assign([], { kind: 'accepted' }) as never,
+      'uncertain',
+      false,
+    ],
+    [
+      'a function that has a kind',
+      async () => Object.assign(() => undefined, { kind: 'accepted' }) as never,
+      'uncertain',
+      false,
+    ],
+  ];
+
+  for (const [answer, send, kind, retried] of answers) {
+    it(`${retried ? 'sends again after' : 'never sends again after'} ${answer}`, async () => {
+      let sends = 0;
+      const fixture = operationFixture(context(), async () => {
+        sends += 1;
+        return sends === 1 ? send() : { kind: 'accepted' };
+      });
+
+      const first = await fixture.operation.dispatch(context());
+      const second = await fixture.operation.dispatch(context());
+
+      assert.deepEqual(first, { kind });
+      assert.deepEqual(
+        second,
+        retried ? { kind: 'accepted' } : { alreadyRecorded: true, kind },
+      );
+      assert.equal(sends, retried ? 2 : 1);
+    });
+  }
+
+  // The ledger is read again only to clean up a token the provider called
+  // invalid, so an unreadable ledger fails that cleanup and nothing else.
+  for (const [rejection, invalidToken, cleanupStatus] of [
+    ['an invalid token', true, 'failed'],
+    ['no invalid token', false, undefined],
+  ] as const) {
+    it(`reports ${cleanupStatus === undefined ? 'no cleanup' : 'a failed cleanup'} for a rejection with ${rejection} when the ledger cannot be read`, async () => {
+      const fixture = operationFixture();
+      const operation = operationWith(fixture, {
+        ledger: {
+          ...fixture.ledger,
+          get: async () => {
+            throw azureError(503);
+          },
+        },
+        provider: {
+          send: async () => ({ kind: 'permanent-failure', invalidToken }),
+        },
+      });
+
+      assert.deepEqual(
+        await operation.dispatch(context()),
+        cleanupStatus === undefined
+          ? { kind: 'permanent-failure' }
+          : { cleanupStatus, kind: 'permanent-failure' },
+      );
+    });
+  }
+
+  it('counts an expiry written by an earlier run as already recorded', async () => {
+    const fixture = operationFixture();
+    const late = new Date(instantAfter(window.endsAt, 1));
+    const operation = operationWith(fixture, { clock: () => late });
+
+    assert.deepEqual(await operation.dispatch(context()), { kind: 'expired' });
+    assert.deepEqual(await operation.dispatch(context()), {
+      alreadyRecorded: true,
+      kind: 'expired',
+    });
+
+    assert.deepEqual(fixture.sent, []);
+  });
+
+  it('saves its send intent before calling the provider, and the answer after', async () => {
+    const fixture = operationFixture();
+    const seenBySend: (ReminderDispatchLedgerRecord | null)[] = [];
+    const operation = operationWith(fixture, {
+      provider: {
+        send: async () => {
+          seenBySend.push(await fixture.ledger.get(identity));
+          return { kind: 'accepted' };
+        },
+      },
+    });
+
+    await operation.dispatch(context());
+
+    assert.equal(seenBySend[0]?.status, 'claimed');
+    assert.equal(seenBySend[0]?.sendStartedAt?.toISOString(), window.startsAt);
+    assert.equal((await fixture.ledger.get(identity))?.status, 'accepted');
+  });
+
+  it('does not send again when the answer could not be recorded', async () => {
+    const fixture = operationFixture();
+    let now = new Date(window.startsAt);
+    const operation = operationWith(fixture, {
+      clock: () => now,
+      ledger: {
+        ...fixture.ledger,
+        complete: async () => {
+          throw azureError(503);
+        },
+      },
+    });
+
+    assert.deepEqual(await operation.dispatch(context()), {
+      kind: 'uncertain',
+    });
+
+    // The lease lapses with the send intent still saved.
+    now = new Date(instantAfter(window.startsAt, 61_000));
+    assert.deepEqual(await operation.dispatch(context()), {
+      kind: 'uncertain',
+    });
+    assert.equal(fixture.sent.length, 1);
+  });
+});
+
+describe('reminder dispatch around the send intent', () => {
+  for (const [when, failRead, intents] of [
+    ['before', 1, 0],
+    ['after', 2, 1],
+  ] as const) {
+    it(`retries later when the plan cannot be read ${when} the send intent`, async () => {
+      const run = await dispatched({ failRead });
+
+      assert.deepEqual(run.result, { kind: 'transient-failure' });
+      assert.equal(run.sends, 0);
+      assert.equal(run.intents, intents);
+      assert.equal(run.record?.status, 'pending');
+    });
+  }
+
+  for (const [read, intents] of [
+    [1, 0],
+    [2, 1],
+  ] as const) {
+    for (const [change, changedTo, initial] of registrationChanges) {
+      it(`closes the delivery when the ${change} changed ${read === 1 ? 'before' : 'after'} the send intent`, async () => {
+        const run = await dispatched({ changedTo, changeRead: read, initial });
+
+        assert.deepEqual(run.result, { kind: 'stale' });
+        assert.equal(run.sends, 0);
+        assert.equal(run.intents, intents);
+      });
+    }
+
+    it(`retries later when the plan moves the window start past the clock ${read === 1 ? 'before' : 'after'} the send intent`, async () => {
+      const later = context({
+        delivery: {
+          ...context().delivery,
+          deliveryWindow: {
+            ...window,
+            startsAt: instantAfter(window.startsAt, 30_000),
+          },
+        },
+      });
+
+      const run = await dispatched({ changedTo: later, changeRead: read });
+
+      assert.deepEqual(run.result, { kind: 'transient-failure' });
+      assert.equal(run.sends, 0);
+      assert.equal(run.intents, intents);
+      assert.equal(run.record?.status, 'pending');
+    });
+  }
+
+  it('saves no send intent for a registration older than the ledger knows', async () => {
+    const run = await dispatched({ prepared: preparation(2) });
+
+    assert.deepEqual(run.result, { kind: 'stale' });
+    assert.equal(run.sends, 0);
+    assert.equal(run.intents, 0);
+  });
+
+  it('abandons a claim whose lease lapsed before the send intent', async () => {
+    const run = await dispatched({
+      jumpTo: instantAfter(window.startsAt, 61_000),
+    });
+
+    assert.deepEqual(run.result, { kind: 'stale' });
+    assert.equal(run.sends, 0);
+    assert.equal(run.record?.status, 'pending');
+  });
+
+  // Each row moves the clock, as the plan is read, to an instant that breaks
+  // only the bound it names. The first row leaves time to send and the rest
+  // must not send. A delivery stopped by its operation deadline is retried
+  // later, and one whose window, pack or Change Event is over expires.
+  const delivery = context().delivery;
+  const soon = instantAfter(window.startsAt, 30_000);
+  const gates: readonly [
+    string,
+    ReminderDispatchContext,
+    string,
+    'accepted' | 'expired' | 'transient-failure',
+    'accepted' | 'expired' | 'pending',
+    ('event' | 'pack' | 'window')?,
+  ][] = [
+    [
+      'one millisecond before the operation deadline',
+      context({ completeOperationDeadline: soon }),
+      instantAfter(soon, -1),
+      'accepted',
+      'accepted',
+    ],
+    [
+      'the operation deadline',
+      context({ completeOperationDeadline: soon }),
+      soon,
+      'transient-failure',
+      'pending',
+    ],
+    [
+      'one millisecond after the window ends',
+      context(),
+      instantAfter(window.endsAt, 1),
+      'expired',
+      'expired',
+      'window',
+    ],
+    [
+      'the Change Event',
+      context({ delivery: { ...delivery, changeEventAt: soon } }),
+      soon,
+      'expired',
+      'expired',
+      'event',
+    ],
+    [
+      'one millisecond after the pack ends',
+      context({ activePackValidUntil: soon }),
+      instantAfter(soon, 1),
+      'expired',
+      'expired',
+      'pack',
+    ],
+    [
+      'the window end, which is also the operation deadline',
+      context({ completeOperationDeadline: window.endsAt }),
+      window.endsAt,
+      'transient-failure',
+      'pending',
+    ],
+    [
+      'the pack end, which is also the operation deadline',
+      context({ activePackValidUntil: soon, completeOperationDeadline: soon }),
+      soon,
+      'transient-failure',
+      'pending',
+    ],
+  ];
+
+  for (const [when, jumpRead, intentSaved] of [
+    ['before', 1, false],
+    ['after', 2, true],
+  ] as const) {
+    for (const [at, initial, jumpTo, kind, status, expiryReason] of gates) {
+      it(`${kind === 'accepted' ? 'sends' : 'stops'} when the clock reads ${at}, ${when} the send intent`, async () => {
+        const run = await dispatched({ initial, jumpRead, jumpTo });
+
+        assert.deepEqual(run.result, { kind });
+        assert.equal(run.record?.status, status);
+        assert.equal(run.record?.expiryReason, expiryReason);
+        assert.equal(run.sends, kind === 'accepted' ? 1 : 0);
+        // A delivery that cannot be sent never saves an intent it must undo.
+        assert.equal(run.intents, kind === 'accepted' || intentSaved ? 1 : 0);
+      });
+    }
+  }
+});
+
+describe('reminder dispatch of a send intent the ledger changed', () => {
+  const changes: readonly [
+    string,
+    (record: ReminderDispatchLedgerRecord) => ReminderDispatchLedgerRecord,
+    'claimed' | 'expired',
+  ][] = [
+    [
+      'the record is no longer claimed',
+      (record) => ({ ...record, status: 'expired' }),
+      'expired',
+    ],
+    [
+      'the claim belongs to another worker',
+      (record) => ({ ...record, claimId: 'another-claim' }),
+      'claimed',
+    ],
+    [
+      'the claim is for another generation',
+      (record) => ({
+        ...record,
+        attemptGeneration: record.attemptGeneration + 1,
+      }),
+      'claimed',
+    ],
+    [
+      'the record shows no send intent',
+      ({ sendStartedAt: _intent, ...record }) => record,
+      'claimed',
+    ],
+  ];
+
+  for (const [change, changed, kind] of changes) {
+    it(`sends nothing when ${change}`, async () => {
+      const fixture = operationFixture();
+      const operation = operationWith(fixture, {
+        ledger: {
+          ...fixture.ledger,
+          beginSend: async (claim, at) => {
+            const started = await fixture.ledger.beginSend(claim, at);
+            return started.kind === 'updated'
+              ? { kind: 'updated', record: changed(started.record) }
+              : started;
+          },
+        },
+      });
+
+      assert.deepEqual(await operation.dispatch(context()), { kind });
+
+      assert.deepEqual(fixture.sent, []);
+    });
+  }
+});
+
+describe('final authorization of a send', () => {
+  // Answers what the provider's final authorization says once the ledger
+  // record or the plan it reads has changed.
+  async function answered(change: {
+    readonly plan?: () => Promise<ReminderDispatchContext | null>;
+    readonly record?: (
+      record: ReminderDispatchLedgerRecord,
+    ) => ReminderDispatchLedgerRecord | null;
+  }) {
+    const fixture = operationFixture();
+    const answers: boolean[] = [];
+    let authorizing = false;
+    const operation = operationWith(fixture, {
+      ledger: {
+        ...fixture.ledger,
+        get: async (target) => {
+          const record = await fixture.ledger.get(target);
+          return authorizing && record !== null && change.record
+            ? change.record(record)
+            : record;
+        },
+      },
+      provider: {
+        send: async (_request, authorize) => {
+          authorizing = true;
+          const authorized = await authorize();
+          authorizing = false;
+          answers.push(authorized);
+          return { kind: authorized ? 'accepted' : 'not-authorized' };
+        },
+      },
+      readCurrentContext: async () =>
+        authorizing && change.plan ? change.plan() : fixture.getCurrent(),
+    });
+    await operation.dispatch(context());
+    return answers;
+  }
+
+  it('authorizes a send when the record and plan are as they were', async () => {
+    assert.deepEqual(await answered({}), [true]);
+  });
+
+  const refusals: readonly [string, Parameters<typeof answered>[0]][] = [
+    [
+      'the ledger cannot be read',
+      {
+        record: () => {
+          throw azureError(503);
+        },
+      },
+    ],
+    ['the record has gone', { record: () => null }],
+    [
+      'another worker marked the send uncertain',
+      { record: (record) => ({ ...record, status: 'uncertain' }) },
+    ],
+    [
+      'the claim belongs to another worker',
+      { record: (record) => ({ ...record, claimId: 'another-claim' }) },
+    ],
+    [
+      'the claim is for another generation',
+      {
+        record: (record) => ({
+          ...record,
+          attemptGeneration: record.attemptGeneration + 1,
+        }),
+      },
+    ],
+    [
+      'the record shows no send intent',
+      { record: ({ sendStartedAt: _intent, ...record }) => record },
+    ],
+    [
+      'the claim has no expiry',
+      { record: ({ claimExpiresAt: _expiry, ...record }) => record },
+    ],
+    [
+      'the plan cannot be read',
+      {
+        plan: async () => {
+          throw new Error('storage unavailable');
+        },
+      },
+    ],
+    ['the registration has gone', { plan: async () => null }],
+  ];
+
+  for (const [reason, change] of refusals) {
+    it(`refuses a send when ${reason}`, async () => {
+      assert.deepEqual(await answered(change), [false]);
+    });
+  }
+});
+
+describe('invalid-token cleanup of a delivery', () => {
+  // A ledger holding a permanent rejection of this registration, with its
+  // cleanup still to do.
+  async function rejected() {
+    const fixture = operationFixture();
+    const start = new Date(window.startsAt);
+    await fixture.ledger.prepare(preparation(1, start));
+    const claim = await fixture.ledger.claim(identity, start);
+    assert.ok(claim);
+    await fixture.ledger.beginSend(claim, start);
+    await fixture.ledger.complete(
+      claim,
+      { kind: 'permanent-failure', invalidToken: true },
+      start,
+    );
+    return fixture;
+  }
+
+  // The dispatcher meets a rejection recorded earlier, and reads the record
+  // again before it removes anything. A rejection that is not this one leaves
+  // the token alone and reports the cleanup status the record carried.
+  const rereads: readonly [
+    string,
+    (
+      record: ReminderDispatchLedgerRecord,
+    ) => ReminderDispatchLedgerRecord | null,
+    ReminderDispatchCleanupStatus,
+    number,
+  ][] = [
+    ['the record has gone', () => null, 'pending', 0],
+    [
+      'the record is no longer a permanent rejection',
+      (record) => ({ ...record, status: 'uncertain' }),
+      'pending',
+      0,
+    ],
+    [
+      'the record is for another generation',
+      (record) => ({ ...record, attemptGeneration: 2 }),
+      'pending',
+      0,
+    ],
+    ['the record is still this rejection', (record) => record, 'removed', 1],
+  ];
+
+  for (const [change, reread, cleanupStatus, removals] of rereads) {
+    it(`removes ${removals === 0 ? 'no token' : 'the token'} when ${change}`, async () => {
+      const fixture = await rejected();
+      let removed = 0;
+      const operation = operationWith(fixture, {
+        ledger: {
+          ...fixture.ledger,
+          get: async (target) => {
+            const record = await fixture.ledger.get(target);
+            return record === null ? null : reread(record);
+          },
+        },
+        subscriptionStore: {
+          getSubscriptionSnapshot: async () => subscription,
+          removeIfDeviceTokenAndGenerationMatches: async () => {
+            removed += 1;
+            return 'removed';
+          },
+        },
+      });
+
+      assert.deepEqual(await operation.dispatch(context()), {
+        alreadyRecorded: true,
+        cleanupStatus,
+        kind: 'permanent-failure',
+      });
+
+      assert.equal(removed, removals);
+    });
+  }
+
+  it('finds nothing to clean up for a delivery with no record', async () => {
+    const fixture = operationFixture();
+
+    assert.equal(
+      await fixture.operation.retryInvalidTokenCleanup(identity),
+      undefined,
+    );
+    assert.equal(fixture.getCleanupCalls(), 0);
+  });
+
+  it('finds nothing to clean up after an accepted send', async () => {
+    const fixture = operationFixture();
+    await fixture.operation.dispatch(context());
+
+    assert.equal(
+      await fixture.operation.retryInvalidTokenCleanup(identity),
+      undefined,
+    );
+    assert.equal(fixture.getCleanupCalls(), 0);
+  });
+
+  it('reports a failed cleanup when the ledger cannot be read', async () => {
+    const fixture = operationFixture();
+    const operation = operationWith(fixture, {
+      ledger: {
+        ...fixture.ledger,
+        get: async () => {
+          throw azureError(503);
+        },
+      },
+    });
+
+    assert.equal(await operation.retryInvalidTokenCleanup(identity), 'failed');
   });
 });

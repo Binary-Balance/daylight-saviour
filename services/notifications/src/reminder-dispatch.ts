@@ -468,127 +468,109 @@ export function createReminderDispatchOperation(
     await dependencies.ledger.invalidate(claim, claim.attemptGeneration, now);
   }
 
-  async function dispatch(
-    initial: ReminderDispatchContext,
+  /**
+   * The result for a delivery whose claim was just given back because it
+   * cannot be sent now. If its window, pack or Change Event is over, claiming
+   * it again makes the ledger refuse the claim and record the expiry. If not,
+   * it is left open for a later run.
+   */
+  async function lateResult(
+    identity: ReminderDispatchIdentity,
+    parsed: ReturnType<typeof parsedContext>,
+    now: Date,
   ): Promise<ReminderDispatchResult> {
-    const parsed = parsedContext(initial);
-    const now = copyDate(clock(), 'clock');
-    const beforeWindow = now.getTime() < parsed.startsAt.getTime();
-    if (beforeWindow) return { kind: 'not-due' };
-
-    const preparation = await dependencies.ledger.prepare({
-      ...parsed.identity,
-      attemptGeneration: initial.subscription.attemptGeneration,
-      deliveryWindowEndsAt: parsed.endsAt,
-      deliveryWindowStartsAt: parsed.startsAt,
-      now,
-      packValidUntil: parsed.packValidUntil,
-    });
     if (
-      preparation.status === 'accepted' ||
-      preparation.status === 'uncertain' ||
-      preparation.status === 'expired' ||
-      preparation.status === 'permanent-failure'
+      now.getTime() >= parsed.eventAt.getTime() ||
+      now.getTime() > parsed.endsAt.getTime() ||
+      now.getTime() > parsed.packValidUntil.getTime()
     ) {
-      const cleanupStatus =
-        preparation.status === 'permanent-failure'
-          ? await cleanupInvalidToken(
-              parsed.identity,
-              preparation.attemptGeneration,
-              initial.subscription,
-            )
-          : preparation.cleanupStatus;
-      return {
-        ...resultForRecord(preparation),
-        ...(cleanupStatus === undefined ? {} : { cleanupStatus }),
-        alreadyRecorded: true,
-      };
+      await dependencies.ledger.claim(identity, now, claimLeaseMs);
+      return resultForRecord(await dependencies.ledger.get(identity));
+    }
+    return { kind: 'transient-failure' };
+  }
+
+  /**
+   * Records how the send ended. A send refused at final authorization was
+   * never made: if the plan changed, the delivery is closed as stale,
+   * otherwise it is completed as a transient failure. A token the provider
+   * called invalid is removed afterwards.
+   */
+  async function recordOutcome(
+    initial: ReminderDispatchContext,
+    identity: ReminderDispatchIdentity,
+    claim: ReminderDispatchClaim,
+    finalCurrent: ReminderDispatchContext,
+    outcome: ReminderDispatchProviderResult,
+  ): Promise<ReminderDispatchResult> {
+    if (outcome.kind === 'not-authorized') {
+      let refused: ReminderDispatchContext | null = finalCurrent;
+      try {
+        refused = await dependencies.readCurrentContext(
+          initial.subscription.installationId,
+          identity,
+        );
+      } catch {
+        // Unreadable is not changed: the record stays open for a later run.
+      }
+      if (refused === null || !sameProviderContext(refused, finalCurrent)) {
+        await dependencies.ledger.cancelBeforeProvider(
+          claim,
+          copyDate(clock(), 'clock'),
+        );
+        await supersede(claim, refused, initial, copyDate(clock(), 'clock'));
+        return { kind: 'stale' };
+      }
+      // Nothing changed, so time or the lease refused it, and nothing was
+      // sent. Completing it as a failure expires it now if its window has
+      // closed, so one delivery cannot log both `stale` and `expired`.
+      outcome = { kind: 'transient-failure' };
     }
 
-    if (
-      !withinDeliveryWindow(
-        now,
-        parsed.startsAt,
-        parsed.endsAt,
-        parsed.packValidUntil,
-        parsed.eventAt,
-      )
-    ) {
-      await dependencies.ledger.claim(parsed.identity, now, claimLeaseMs);
-      return resultForRecord(await dependencies.ledger.get(parsed.identity));
-    }
-
-    const claim = await dependencies.ledger.claim(
-      parsed.identity,
-      now,
-      claimLeaseMs,
-    );
-    if (claim === null)
-      return resultForRecord(await dependencies.ledger.get(parsed.identity));
-
-    let current: ReminderDispatchContext | null;
+    let completed;
     try {
-      current = await dependencies.readCurrentContext(
-        initial.subscription.installationId,
-        parsed.identity,
+      completed = await dependencies.ledger.complete(
+        claim,
+        outcome,
+        copyDate(clock(), 'clock'),
       );
     } catch {
-      await dependencies.ledger.release(claim, copyDate(clock(), 'clock'));
-      return { kind: 'transient-failure' };
+      return { kind: 'uncertain' };
     }
-    if (
-      current === null ||
-      !sameContext(current, initial) ||
-      current.subscription.attemptGeneration !== claim.attemptGeneration
-    ) {
-      await dependencies.ledger.release(claim, copyDate(clock(), 'clock'));
-      await supersede(claim, current, initial, copyDate(clock(), 'clock'));
-      return { kind: 'stale' };
+    const record =
+      completed.record ?? (await dependencies.ledger.get(identity));
+    if (outcome.kind === 'permanent-failure' && outcome.invalidToken) {
+      const cleanupStatus = await cleanupInvalidToken(
+        identity,
+        claim.attemptGeneration,
+        finalCurrent.subscription,
+      );
+      return {
+        ...resultForRecord(record),
+        ...(cleanupStatus === undefined ? {} : { cleanupStatus }),
+      };
     }
+    return resultForRecord(record);
+  }
 
-    const currentParsed = parsedContext(current);
-    const sendNow = copyDate(clock(), 'clock');
-    if (
-      !withinDeliveryWindow(
-        sendNow,
-        currentParsed.startsAt,
-        currentParsed.endsAt,
-        currentParsed.packValidUntil,
-        currentParsed.eventAt,
-      ) ||
-      sendNow.getTime() >= currentParsed.completeOperationDeadline.getTime()
-    ) {
-      await dependencies.ledger.release(claim, sendNow);
-      if (
-        sendNow.getTime() >= currentParsed.eventAt.getTime() ||
-        sendNow.getTime() > currentParsed.endsAt.getTime() ||
-        sendNow.getTime() > currentParsed.packValidUntil.getTime()
-      ) {
-        await dependencies.ledger.claim(parsed.identity, sendNow, claimLeaseMs);
-        return resultForRecord(await dependencies.ledger.get(parsed.identity));
-      }
-      return { kind: 'transient-failure' };
-    }
-
-    const started = await dependencies.ledger.beginSend(claim, sendNow);
-    if (started.kind === 'stale') return { kind: 'stale' };
-    if (
-      started.record.status !== 'claimed' ||
-      started.record.claimId !== claim.claimId ||
-      started.record.attemptGeneration !== claim.attemptGeneration ||
-      started.record.sendStartedAt === undefined
-    ) {
-      return resultForRecord(started.record);
-    }
-
-    // beginSend is a durable async boundary. Re-read the subscription and
-    // plan after it so a changed generation, preference, pack, or deadline
-    // cannot send stale facts.
+  /**
+   * The send intent is saved. That write is a durable async boundary, so the
+   * subscription and plan are read again before the provider is called: a
+   * changed generation, preference, pack, or deadline must not send stale
+   * facts. The provider calls back to authorize the send just before it
+   * contacts the transport.
+   */
+  async function callProvider(
+    initial: ReminderDispatchContext,
+    identity: ReminderDispatchIdentity,
+    claim: ReminderDispatchClaim,
+    current: ReminderDispatchContext,
+  ): Promise<ReminderDispatchResult> {
     let finalCurrent: ReminderDispatchContext | null;
     try {
       finalCurrent = await dependencies.readCurrentContext(
         initial.subscription.installationId,
-        parsed.identity,
+        identity,
       );
     } catch {
       await dependencies.ledger.cancelBeforeProvider(
@@ -619,19 +601,7 @@ export function createReminderDispatchOperation(
       finalNow.getTime() >= finalParsed.completeOperationDeadline.getTime()
     ) {
       await dependencies.ledger.cancelBeforeProvider(claim, finalNow);
-      if (
-        finalNow.getTime() >= finalParsed.eventAt.getTime() ||
-        finalNow.getTime() > finalParsed.endsAt.getTime() ||
-        finalNow.getTime() > finalParsed.packValidUntil.getTime()
-      ) {
-        await dependencies.ledger.claim(
-          parsed.identity,
-          finalNow,
-          claimLeaseMs,
-        );
-        return resultForRecord(await dependencies.ledger.get(parsed.identity));
-      }
-      return { kind: 'transient-failure' };
+      return lateResult(identity, finalParsed, finalNow);
     }
 
     const finalExpiry = effectiveExpiry(
@@ -647,7 +617,7 @@ export function createReminderDispatchOperation(
     const authorizeBeforeExternalSend = async () => {
       let durable: ReminderDispatchLedgerRecord | null;
       try {
-        durable = await dependencies.ledger.get(parsed.identity);
+        durable = await dependencies.ledger.get(identity);
       } catch {
         return false;
       }
@@ -663,7 +633,7 @@ export function createReminderDispatchOperation(
       try {
         authorizedCurrent = await dependencies.readCurrentContext(
           initial.subscription.installationId,
-          parsed.identity,
+          identity,
         );
       } catch {
         return false;
@@ -723,55 +693,134 @@ export function createReminderDispatchOperation(
     } catch {
       outcome = { kind: 'uncertain' };
     }
+    return recordOutcome(initial, identity, claim, finalCurrent, outcome);
+  }
 
-    if (outcome.kind === 'not-authorized') {
-      let refused: ReminderDispatchContext | null = finalCurrent;
-      try {
-        refused = await dependencies.readCurrentContext(
-          initial.subscription.installationId,
-          parsed.identity,
-        );
-      } catch {
-        // Unreadable is not changed: the record stays open for a later run.
-      }
-      if (refused === null || !sameProviderContext(refused, finalCurrent)) {
-        await dependencies.ledger.cancelBeforeProvider(
-          claim,
-          copyDate(clock(), 'clock'),
-        );
-        await supersede(claim, refused, initial, copyDate(clock(), 'clock'));
-        return { kind: 'stale' };
-      }
-      // Nothing changed, so time or the lease refused it, and nothing was
-      // sent. Completing it as a failure expires it now if its window has
-      // closed, so one delivery cannot log both `stale` and `expired`.
-      outcome = { kind: 'transient-failure' };
-    }
-
-    let completed;
+  /**
+   * This worker holds the claim. Reads the plan again, and saves the send
+   * intent only while it is unchanged and there is time to send. The provider
+   * is not called until the intent is saved, so a crash after that point
+   * leaves the delivery `uncertain` rather than sending it a second time.
+   */
+  async function saveSendIntent(
+    initial: ReminderDispatchContext,
+    identity: ReminderDispatchIdentity,
+    claim: ReminderDispatchClaim,
+  ): Promise<ReminderDispatchResult> {
+    let current: ReminderDispatchContext | null;
     try {
-      completed = await dependencies.ledger.complete(
-        claim,
-        outcome,
-        copyDate(clock(), 'clock'),
+      current = await dependencies.readCurrentContext(
+        initial.subscription.installationId,
+        identity,
       );
     } catch {
-      return { kind: 'uncertain' };
+      await dependencies.ledger.release(claim, copyDate(clock(), 'clock'));
+      return { kind: 'transient-failure' };
     }
-    const record =
-      completed.record ?? (await dependencies.ledger.get(parsed.identity));
-    if (outcome.kind === 'permanent-failure' && outcome.invalidToken) {
-      const cleanupStatus = await cleanupInvalidToken(
-        parsed.identity,
-        claim.attemptGeneration,
-        finalCurrent.subscription,
-      );
+    if (
+      current === null ||
+      !sameContext(current, initial) ||
+      current.subscription.attemptGeneration !== claim.attemptGeneration
+    ) {
+      await dependencies.ledger.release(claim, copyDate(clock(), 'clock'));
+      await supersede(claim, current, initial, copyDate(clock(), 'clock'));
+      return { kind: 'stale' };
+    }
+
+    const currentParsed = parsedContext(current);
+    const sendNow = copyDate(clock(), 'clock');
+    if (
+      !withinDeliveryWindow(
+        sendNow,
+        currentParsed.startsAt,
+        currentParsed.endsAt,
+        currentParsed.packValidUntil,
+        currentParsed.eventAt,
+      ) ||
+      sendNow.getTime() >= currentParsed.completeOperationDeadline.getTime()
+    ) {
+      await dependencies.ledger.release(claim, sendNow);
+      return lateResult(identity, currentParsed, sendNow);
+    }
+
+    const started = await dependencies.ledger.beginSend(claim, sendNow);
+    if (started.kind === 'stale') return { kind: 'stale' };
+    if (
+      started.record.status !== 'claimed' ||
+      started.record.claimId !== claim.claimId ||
+      started.record.attemptGeneration !== claim.attemptGeneration ||
+      started.record.sendStartedAt === undefined
+    ) {
+      return resultForRecord(started.record);
+    }
+    return callProvider(initial, identity, claim, current);
+  }
+
+  /**
+   * Handles one due reminder. The steps run in this order, each ending in a
+   * call to the next: claim the delivery here, then `saveSendIntent`,
+   * `callProvider` and `recordOutcome`. A step that finds the plan changed or
+   * time up gives the claim back and stops.
+   */
+  async function dispatch(
+    initial: ReminderDispatchContext,
+  ): Promise<ReminderDispatchResult> {
+    const parsed = parsedContext(initial);
+    const now = copyDate(clock(), 'clock');
+    const beforeWindow = now.getTime() < parsed.startsAt.getTime();
+    if (beforeWindow) return { kind: 'not-due' };
+
+    const preparation = await dependencies.ledger.prepare({
+      ...parsed.identity,
+      attemptGeneration: initial.subscription.attemptGeneration,
+      deliveryWindowEndsAt: parsed.endsAt,
+      deliveryWindowStartsAt: parsed.startsAt,
+      now,
+      packValidUntil: parsed.packValidUntil,
+    });
+    if (
+      preparation.status === 'accepted' ||
+      preparation.status === 'uncertain' ||
+      preparation.status === 'expired' ||
+      preparation.status === 'permanent-failure'
+    ) {
+      const cleanupStatus =
+        preparation.status === 'permanent-failure'
+          ? await cleanupInvalidToken(
+              parsed.identity,
+              preparation.attemptGeneration,
+              initial.subscription,
+            )
+          : preparation.cleanupStatus;
       return {
-        ...resultForRecord(record),
+        ...resultForRecord(preparation),
         ...(cleanupStatus === undefined ? {} : { cleanupStatus }),
+        alreadyRecorded: true,
       };
     }
-    return resultForRecord(record);
+
+    if (
+      !withinDeliveryWindow(
+        now,
+        parsed.startsAt,
+        parsed.endsAt,
+        parsed.packValidUntil,
+        parsed.eventAt,
+      )
+    ) {
+      await dependencies.ledger.claim(parsed.identity, now, claimLeaseMs);
+      return resultForRecord(await dependencies.ledger.get(parsed.identity));
+    }
+
+    const claim = await dependencies.ledger.claim(
+      parsed.identity,
+      now,
+      claimLeaseMs,
+    );
+    if (claim === null)
+      return resultForRecord(await dependencies.ledger.get(parsed.identity));
+
+    return saveSendIntent(initial, parsed.identity, claim);
   }
 
   /**
