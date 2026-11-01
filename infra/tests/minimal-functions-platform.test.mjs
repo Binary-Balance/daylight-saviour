@@ -45,12 +45,23 @@ function oneResource(type, template = compiledTemplate) {
   return resources[0];
 }
 
+function compute() {
+  return resourcesOfType('Microsoft.Resources/deployments').find(
+    ({ name }) => name === 'notification-platform-compute',
+  );
+}
+
+function computeTemplate() {
+  return compute().properties.template;
+}
+
 describe('minimal Functions platform Bicep module', () => {
   it('keeps one small environment-independent interface', () => {
     assert.deepEqual(Object.keys(compiledTemplate.parameters).sort(), [
       'buildVersion',
       'fcm',
       'location',
+      'reminderDispatch',
       'resourceNames',
       'runtime',
       'scale',
@@ -82,9 +93,98 @@ describe('minimal Functions platform Bicep module', () => {
     );
   });
 
+  it('adds no reminder dispatch setting but the gate unless a caller opts in', () => {
+    const settings =
+      compiledTemplate.definitions.ReminderDispatchSettings.properties;
+    const { baseAppSettings, reminderDispatchAppSettings } =
+      computeTemplate().variables;
+
+    assert.deepEqual(Object.keys(settings).sort(), [
+      'apnsEnvironment',
+      'apnsKeyId',
+      'apnsPrivateKeyReference',
+      'apnsTeamId',
+      'apnsTopic',
+      'enabled',
+      'timeZoneDataManifestUrl',
+      'timeZoneDataTrustedKeysJson',
+    ]);
+    assert.equal(compiledTemplate.parameters.reminderDispatch.nullable, true);
+    assert.equal(
+      compute().properties.parameters.reminderDispatch.value,
+      "[parameters('reminderDispatch')]",
+    );
+    assert.equal(
+      baseAppSettings.REMINDER_DISPATCH_ENABLED,
+      "[if(coalesce(tryGet(parameters('reminderDispatch'), 'enabled'), false()), 'true', 'false')]",
+    );
+    assert.deepEqual(
+      Object.keys(baseAppSettings).filter((name) =>
+        /^(APNS_|TIME_ZONE_DATA_)/.test(name),
+      ),
+      [],
+    );
+    assert.ok(
+      reminderDispatchAppSettings.startsWith(
+        "[if(equals(parameters('reminderDispatch'), null()), createObject(), createObject(",
+      ),
+    );
+    assert.equal(
+      oneResource('Microsoft.Web/sites/config').properties,
+      "[union(variables('baseAppSettings'), variables('reminderDispatchAppSettings'))]",
+    );
+  });
+
+  it('maps every reminder dispatch setting to its own field', () => {
+    const { reminderDispatchAppSettings } = computeTemplate().variables;
+
+    for (const [name, field] of [
+      ['APNS_ENVIRONMENT', 'apnsEnvironment'],
+      ['APNS_KEY_ID', 'apnsKeyId'],
+      ['APNS_PRIVATE_KEY', 'apnsPrivateKeyReference'],
+      ['APNS_TEAM_ID', 'apnsTeamId'],
+      ['APNS_TOPIC', 'apnsTopic'],
+      ['TIME_ZONE_DATA_MANIFEST_URL', 'timeZoneDataManifestUrl'],
+      ['TIME_ZONE_DATA_TRUSTED_KEYS_JSON', 'timeZoneDataTrustedKeysJson'],
+    ]) {
+      assert.ok(
+        reminderDispatchAppSettings.includes(
+          `'${name}', tryGet(parameters('reminderDispatch'), '${field}')`,
+        ),
+        name,
+      );
+    }
+  });
+
+  it('resolves a Key Vault reference only for a caller that opts in', () => {
+    assert.equal(
+      oneResource('Microsoft.Web/sites').properties.keyVaultReferenceIdentity,
+      "[if(equals(parameters('reminderDispatch'), null()), null(), parameters('runtimeIdentityId'))]",
+    );
+  });
+
+  it('lets a caller enable reminder dispatch', () => {
+    const caller = resourcesOfType(
+      'Microsoft.Resources/deployments',
+      callerCompiledTemplate,
+    ).find(({ name }) => name === 'sample-notify-platform');
+    const dispatch = caller.properties.parameters.reminderDispatch.value;
+
+    assert.equal(dispatch.enabled, true);
+    assert.ok(
+      dispatch.apnsPrivateKeyReference.startsWith('@Microsoft.KeyVault('),
+    );
+    assert.deepEqual(
+      Object.keys(dispatch).sort(),
+      Object.keys(
+        compiledTemplate.definitions.ReminderDispatchSettings.properties,
+      ).sort(),
+    );
+  });
+
   it('injects only caller-supplied FCM federation settings', () => {
     const fcm = compiledTemplate.definitions.FcmSettings.properties;
-    const appSettings = oneResource('Microsoft.Web/sites/config').properties;
+    const appSettings = computeTemplate().variables.baseAppSettings;
 
     assert.deepEqual(Object.keys(fcm).sort(), [
       'enabled',
@@ -144,7 +244,7 @@ describe('minimal Functions platform Bicep module', () => {
 
   it('uses managed identity for Functions host and package storage', () => {
     const functionApp = oneResource('Microsoft.Web/sites');
-    const appSettings = oneResource('Microsoft.Web/sites/config');
+    const appSettings = computeTemplate().variables.baseAppSettings;
     const deploymentStorage =
       functionApp.properties.functionAppConfig.deployment.storage;
 
@@ -152,22 +252,19 @@ describe('minimal Functions platform Bicep module', () => {
     assert.equal(deploymentStorage.type, 'blobContainer');
     assert.equal(deploymentStorage.authentication.type, 'UserAssignedIdentity');
     assert.equal(
-      appSettings.properties.AzureWebJobsStorage__credential,
+      appSettings.AzureWebJobsStorage__credential,
       'managedidentity',
     );
-    assert.ok(appSettings.properties.AzureWebJobsStorage__clientId);
-    assert.equal(appSettings.properties.FUNCTIONS_EXTENSION_VERSION, '~4');
-    assert.ok(appSettings.properties.KEY_VAULT_URI);
-    assert.equal(
-      appSettings.properties.BUILD_VERSION,
-      "[parameters('buildVersion')]",
-    );
+    assert.ok(appSettings.AzureWebJobsStorage__clientId);
+    assert.equal(appSettings.FUNCTIONS_EXTENSION_VERSION, '~4');
+    assert.ok(appSettings.KEY_VAULT_URI);
+    assert.equal(appSettings.BUILD_VERSION, "[parameters('buildVersion')]");
   });
 
   it('configures runtime through Flex metadata without legacy worker setting', () => {
     const functionPlan = oneResource('Microsoft.Web/serverfarms');
     const functionApp = oneResource('Microsoft.Web/sites');
-    const appSettings = oneResource('Microsoft.Web/sites/config').properties;
+    const appSettings = computeTemplate().variables.baseAppSettings;
 
     assert.deepEqual(functionPlan.sku, {
       name: 'FC1',
