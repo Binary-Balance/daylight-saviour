@@ -3892,3 +3892,399 @@ describe('Change Reminder device token', () => {
     expect(test.stored()).toBeNull();
   });
 });
+
+const newToken = 'fcm-token:replacement_valid.characters-456';
+
+describe('Change Reminder request deadlines', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  // Only timeouts are faked, so promises and the response body still settle.
+  const fakeTimeouts = () =>
+    jest.useFakeTimers({
+      doNotFake: [
+        'Date',
+        'hrtime',
+        'nextTick',
+        'performance',
+        'queueMicrotask',
+        'requestAnimationFrame',
+        'cancelAnimationFrame',
+        'requestIdleCallback',
+        'cancelIdleCallback',
+        'setImmediate',
+        'clearImmediate',
+        'setInterval',
+        'clearInterval',
+      ],
+    });
+
+  it('leaves no deadline running once the registration answers', async () => {
+    fakeTimeouts();
+    const test = harness();
+
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'enabled',
+    });
+
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('leaves no deadline running once the registration request fails', async () => {
+    fakeTimeouts();
+    const test = harness({
+      fetchImplementation: async () => {
+        throw new TypeError('Network request failed');
+      },
+    });
+
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'failed',
+    });
+
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('leaves no deadline running once the token request fails', async () => {
+    fakeTimeouts();
+    const test = harness();
+    jest
+      .mocked(test.dependencies.notifications.getDevicePushTokenAsync)
+      .mockRejectedValue(new Error('Token service unavailable'));
+
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'failed',
+    });
+
+    expect(jest.getTimerCount()).toBe(0);
+  });
+});
+
+describe('Change Reminder registration requests', () => {
+  const unavailable = async () => new Response(null, { status: 503 });
+  const accepted = async () => new Response(null, { status: 204 });
+
+  describe('when the saved registration already matches', () => {
+    it('sends nothing and keeps the saved record', async () => {
+      const saved = JSON.stringify(
+        savedRecord({
+          lastContactAt: '2026-07-31T00:00:00.000Z',
+          oneDayEnabled: false,
+        }),
+      );
+      const test = harnessSaving(saved);
+
+      await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+        kind: 'enabled',
+      });
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+      expect(test.stored()).toBe(saved);
+    });
+
+    it('fails for another zone rather than report it enabled', async () => {
+      const saved = JSON.stringify(savedRecord());
+      const test = harnessSaving(saved);
+
+      await expect(test.adapters.enable('Australia/Brisbane')).resolves.toEqual(
+        { kind: 'failed' },
+      );
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+      expect(test.stored()).toBe(saved);
+    });
+
+    it('still sends timing choices that match the saved ones', async () => {
+      const test = harnessSaving(savedRecord(), {
+        fetchImplementation: accepted,
+      });
+
+      await expect(
+        test.adapters.updatePreferences({
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+        }),
+      ).resolves.toEqual({ kind: 'enabled' });
+
+      expect(requestBodies(test)).toEqual([
+        {
+          attemptGeneration: 4,
+          deviceToken: harnessToken,
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          platform: 'android',
+        },
+      ]);
+    });
+  });
+
+  describe('at the largest generation', () => {
+    it('uses the last one that fits', async () => {
+      const test = harnessSaving(
+        savedRecord({ attemptGeneration: 2_147_483_646 }),
+        { fetchImplementation: accepted },
+      );
+
+      await expect(
+        test.adapters.updatePreferences({
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+        }),
+      ).resolves.toEqual({ kind: 'enabled' });
+
+      expect(requestBodies(test)).toEqual([
+        expect.objectContaining({ attemptGeneration: 2_147_483_647 }),
+      ]);
+      expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+        attemptGeneration: 2_147_483_647,
+        state: 'registered',
+      });
+    });
+
+    it('sends nothing once none is left', async () => {
+      const saved = JSON.stringify(
+        savedRecord({ attemptGeneration: 2_147_483_647 }),
+      );
+      const test = harnessSaving(saved, { fetchImplementation: accepted });
+
+      await expect(
+        test.adapters.updatePreferences({
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+        }),
+      ).resolves.toEqual({ kind: 'failed' });
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+      expect(test.stored()).toBe(saved);
+    });
+  });
+
+  describe('when the saved record changes after a restore reads it', () => {
+    // Restore has read the registration with the old token and is waiting for
+    // the current one. Meanwhile something else replaces the saved record.
+    function restoreOverChangedRecord(changed: unknown) {
+      const storage = {
+        value: JSON.stringify(savedRecord({ deviceToken: oldToken })),
+      };
+      const test = harness({ currentToken: newToken, storage });
+      jest
+        .mocked(test.dependencies.notifications.getDevicePushTokenAsync)
+        .mockImplementationOnce(async () => {
+          storage.value = JSON.stringify(changed);
+          return { data: newToken };
+        });
+      return { storage, test };
+    }
+
+    it.each<[string, unknown]>([
+      [
+        'another installation holds the same request',
+        savedRecord({ deviceToken: oldToken, installationId: 'j'.repeat(43) }),
+      ],
+      [
+        'a new initial attempt has begun',
+        pendingRecord({ registrationRequestId: 'b'.repeat(64) }),
+      ],
+      [
+        'a different registration took its place',
+        savedRecord({
+          deviceToken: oldToken,
+          installationId: 'j'.repeat(43),
+          registrationRequestId: 'b'.repeat(64),
+        }),
+      ],
+    ])('leaves it alone when %s', async (_name, changed) => {
+      const { storage, test } = restoreOverChangedRecord(changed);
+
+      await expect(test.adapters.restore()).resolves.toEqual({
+        homeTimeZone: 'Australia/Sydney',
+        kind: 'pending',
+      });
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+      expect(storage.value).toBe(JSON.stringify(changed));
+    });
+
+    it('carries on over an initial attempt that has the same request', async () => {
+      const { test } = restoreOverChangedRecord(
+        pendingRecord({ deviceToken: oldToken }),
+      );
+
+      await expect(test.adapters.restore()).resolves.toMatchObject({
+        kind: 'registered',
+        registration: { deviceToken: newToken },
+      });
+
+      expect(
+        test.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
+      ).toEqual(['POST', 'PUT']);
+    });
+  });
+
+  describe('when an attempt fails', () => {
+    it.each<[string, Record<string, unknown>]>([
+      [
+        'the one-day timing',
+        { confirmedOneDayEnabled: false, confirmedOneWeekEnabled: true },
+      ],
+      [
+        'the one-week timing',
+        { confirmedOneDayEnabled: true, confirmedOneWeekEnabled: false },
+      ],
+    ])('keeps the confirmed value of %s', async (_name, confirmed) => {
+      const test = harnessSaving(pendingUpdateRecord(confirmed), {
+        fetchImplementation: unavailable,
+      });
+
+      await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+        kind: 'failed',
+      });
+
+      expect(JSON.parse(test.stored() ?? '')).toEqual({
+        ...savedRecord(),
+        ...confirmed,
+        attemptGeneration: 4,
+        state: 'pending-update',
+      });
+    });
+
+    it('keeps the confirmed zone of a pending update', async () => {
+      const test = harnessSaving(
+        pendingUpdateRecord({ confirmedHomeTimeZone: 'Australia/Brisbane' }),
+        { fetchImplementation: unavailable },
+      );
+
+      await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+        kind: 'failed',
+      });
+
+      expect(JSON.parse(test.stored() ?? '')).toEqual({
+        ...savedRecord(),
+        attemptGeneration: 4,
+        confirmedHomeTimeZone: 'Australia/Brisbane',
+        state: 'pending-update',
+      });
+    });
+
+    it('adds no timing context to a token update', async () => {
+      const test = harnessSaving(savedRecord({ deviceToken: oldToken }), {
+        currentToken: newToken,
+        fetchImplementation: unavailable,
+      });
+
+      await expect(test.adapters.restore()).resolves.toEqual({
+        homeTimeZone: 'Australia/Sydney',
+        kind: 'pending',
+      });
+
+      expect(JSON.parse(test.stored() ?? '')).toEqual({
+        ...savedRecord(),
+        attemptGeneration: 4,
+        deviceToken: newToken,
+        state: 'pending-update',
+      });
+    });
+
+    it.each<[string, Record<string, unknown>]>([
+      [
+        'the one-day timing off',
+        { oneDayEnabled: false, oneWeekEnabled: true },
+      ],
+      [
+        'the one-week timing off',
+        { oneDayEnabled: true, oneWeekEnabled: false },
+      ],
+    ])('retries a pending update with %s as saved', async (_name, timings) => {
+      const test = harnessSaving(pendingUpdateRecord(timings), {
+        fetchImplementation: accepted,
+      });
+
+      await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+        kind: 'enabled',
+      });
+
+      expect(requestBodies(test)).toEqual([
+        {
+          attemptGeneration: 4,
+          deviceToken: harnessToken,
+          homeTimeZone: 'Australia/Sydney',
+          ...timings,
+          platform: 'android',
+        },
+      ]);
+    });
+  });
+
+  describe('when the saved record cannot be cleared', () => {
+    const failToClear = async () => {
+      throw new Error('SecureStore delete failed');
+    };
+
+    it('reports failure after an expired initial identity', async () => {
+      const test = harnessSaving(pendingRecord(), {
+        deleteItemImplementation: failToClear,
+        fetchImplementation: async () => new Response(null, { status: 410 }),
+      });
+
+      await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+        kind: 'failed',
+      });
+
+      expect(
+        test.dependencies.secureStore.deleteItemAsync,
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports failure after the service says the registration is gone', async () => {
+      const test = harnessSaving(savedRecord(), {
+        deleteItemImplementation: failToClear,
+        fetchImplementation: async () =>
+          Response.json({ error: 'Registration unavailable' }, { status: 404 }),
+      });
+
+      await expect(
+        test.adapters.updatePreferences({
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+        }),
+      ).resolves.toEqual({ kind: 'failed' });
+
+      expect(
+        test.dependencies.secureStore.deleteItemAsync,
+      ).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('when nothing can be sent', () => {
+    it('sends nothing while a deletion is unfinished', async () => {
+      const saved = JSON.stringify(pendingDeleteRecord());
+      const test = harnessSaving(saved);
+
+      await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+        kind: 'failed',
+      });
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+      expect(test.stored()).toBe(saved);
+    });
+
+    it('sends nothing when the endpoint cannot be used for a timing change', async () => {
+      const saved = JSON.stringify(savedRecord());
+      const test = harnessSaving(saved, {
+        endpoint: 'http://reminders.example.test',
+      });
+
+      await expect(
+        test.adapters.updatePreferences({
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+        }),
+      ).resolves.toEqual({ kind: 'failed' });
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+      expect(test.stored()).toBe(saved);
+    });
+  });
+});
