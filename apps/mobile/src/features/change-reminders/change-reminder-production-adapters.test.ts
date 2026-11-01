@@ -4288,3 +4288,389 @@ describe('Change Reminder registration requests', () => {
     });
   });
 });
+
+function gate() {
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { open, opened };
+}
+
+// Bounded, so a mutant that never reaches the state fails the test.
+async function until(condition: () => boolean, description: string) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`${description} did not happen`);
+}
+
+async function quiet() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+describe('Change Reminder token refresh', () => {
+  const firstToken = 'fcm-token:first_valid.characters-001';
+  const secondToken = 'fcm-token:second_valid.characters-002';
+  const thirdToken = 'fcm-token:third_valid.characters-003';
+  // The default deadline would race a request the test holds open.
+  const heldTimeoutMs = 2_000;
+
+  // Holds the first request open until released, then answers with `status`.
+  function holdFirstRequest(status = 204) {
+    const release = gate();
+    let held = false;
+    const fetchImplementation = jest.fn(async (_input: URL | RequestInfo) => {
+      if (!held) {
+        held = true;
+        await release.opened;
+      }
+      return new Response(null, { status });
+    }) as jest.MockedFunction<typeof fetch>;
+    return { fetchImplementation, release };
+  }
+
+  function recordTokenListeners(test: ReturnType<typeof harness>) {
+    const listeners: ((token: { readonly data: unknown }) => void)[] = [];
+    jest
+      .mocked(test.dependencies.notifications.addPushTokenListener)
+      .mockImplementation((listener) => {
+        listeners.push(listener);
+        return { remove: jest.fn() };
+      });
+    return listeners;
+  }
+
+  const sentTokens = (test: ReturnType<typeof harness>) =>
+    requestBodies(test).map((body) => body.deviceToken);
+
+  it('does not refresh the token it is already refreshing', async () => {
+    const { fetchImplementation, release } = holdFirstRequest(503);
+    const test = harnessSaving(savedRecord(), {
+      fetchImplementation,
+      timeoutMs: heldTimeoutMs,
+    });
+    const listeners = recordTokenListeners(test);
+    const outcomes: unknown[] = [];
+    test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
+
+    listeners[0]?.({ data: firstToken });
+    await until(
+      () => test.dependencies.fetch.mock.calls.length === 1,
+      'The first request',
+    );
+    listeners[0]?.({ data: firstToken });
+    release.open();
+    await until(() => outcomes.length === 1, 'The refresh result');
+    await quiet();
+
+    expect(sentTokens(test)).toEqual([firstToken]);
+    expect(outcomes).toEqual([{ kind: 'failed', retryable: true }]);
+  });
+
+  it('refreshes only the newest of the tokens that arrive meanwhile', async () => {
+    const { fetchImplementation, release } = holdFirstRequest();
+    const test = harnessSaving(savedRecord(), {
+      fetchImplementation,
+      timeoutMs: heldTimeoutMs,
+    });
+    const listeners = recordTokenListeners(test);
+    const outcomes: unknown[] = [];
+    test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
+
+    listeners[0]?.({ data: firstToken });
+    await until(
+      () => test.dependencies.fetch.mock.calls.length === 1,
+      'The first request',
+    );
+    listeners[0]?.({ data: secondToken });
+    listeners[0]?.({ data: thirdToken });
+    release.open();
+    await until(() => outcomes.length === 2, 'Both refresh results');
+    await quiet();
+
+    expect(sentTokens(test)).toEqual([firstToken, thirdToken]);
+    expect(outcomes).toEqual([{ kind: 'succeeded' }, { kind: 'succeeded' }]);
+  });
+
+  it('ignores an invalid token without losing one that is waiting', async () => {
+    const { fetchImplementation, release } = holdFirstRequest();
+    const test = harnessSaving(savedRecord(), {
+      fetchImplementation,
+      timeoutMs: heldTimeoutMs,
+    });
+    const listeners = recordTokenListeners(test);
+    const outcomes: unknown[] = [];
+    test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
+
+    listeners[0]?.({ data: firstToken });
+    await until(
+      () => test.dependencies.fetch.mock.calls.length === 1,
+      'The first request',
+    );
+    listeners[0]?.({ data: secondToken });
+    listeners[0]?.({ data: 'short' });
+    release.open();
+    await until(() => outcomes.length === 2, 'Both refresh results');
+    await quiet();
+
+    expect(sentTokens(test)).toEqual([firstToken, secondToken]);
+  });
+
+  it('refreshes tokens in turn without a result callback', async () => {
+    const { fetchImplementation, release } = holdFirstRequest();
+    const test = harnessSaving(savedRecord(), {
+      fetchImplementation,
+      timeoutMs: heldTimeoutMs,
+    });
+    const listeners = recordTokenListeners(test);
+    test.adapters.startTokenRefresh('Australia/Sydney');
+
+    listeners[0]?.({ data: firstToken });
+    await until(
+      () => test.dependencies.fetch.mock.calls.length === 1,
+      'The first request',
+    );
+    listeners[0]?.({ data: secondToken });
+    release.open();
+    await until(
+      () => test.dependencies.fetch.mock.calls.length === 2,
+      'The second request',
+    );
+    await quiet();
+
+    expect(sentTokens(test)).toEqual([firstToken, secondToken]);
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      attemptGeneration: 5,
+      deviceToken: secondToken,
+      state: 'registered',
+    });
+  });
+
+  describe('once the listener is stopped', () => {
+    it('does not report a refresh that was already running', async () => {
+      const { fetchImplementation, release } = holdFirstRequest();
+      const test = harnessSaving(savedRecord(), {
+        fetchImplementation,
+        timeoutMs: heldTimeoutMs,
+      });
+      const listeners = recordTokenListeners(test);
+      const outcomes: unknown[] = [];
+      const stop = test.adapters.startTokenRefresh(
+        'Australia/Sydney',
+        (result) => outcomes.push(result),
+      );
+
+      listeners[0]?.({ data: firstToken });
+      await until(
+        () => test.dependencies.fetch.mock.calls.length === 1,
+        'The first request',
+      );
+      stop();
+      release.open();
+      await until(
+        () => JSON.parse(test.stored() ?? '').deviceToken === firstToken,
+        'The refresh to finish',
+      );
+      await quiet();
+
+      expect(outcomes).toEqual([]);
+    });
+
+    it('skips a refresh that had not started', async () => {
+      const { fetchImplementation, release } = holdFirstRequest();
+      const test = harnessSaving(savedRecord(), {
+        fetchImplementation,
+        timeoutMs: heldTimeoutMs,
+      });
+      const listeners = recordTokenListeners(test);
+      const stop = test.adapters.startTokenRefresh('Australia/Sydney');
+
+      // The zone update holds the queue, so the refresh waits behind it.
+      const update = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
+      // A mutant can reject this before the test awaits it, which Seshat
+      // would report as an execution error rather than a failed test.
+      update.catch(() => undefined);
+      await until(
+        () => test.dependencies.fetch.mock.calls.length === 1,
+        'The zone update',
+      );
+      listeners[0]?.({ data: firstToken });
+      stop();
+      release.open();
+      await expect(update).resolves.toMatchObject({ kind: 'enabled' });
+      await quiet();
+
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets a listener started later refresh the token the first had only queued', async () => {
+      const { fetchImplementation, release } = holdFirstRequest();
+      const test = harnessSaving(savedRecord(), {
+        fetchImplementation,
+        timeoutMs: heldTimeoutMs,
+      });
+      const listeners = recordTokenListeners(test);
+      const stopEarlier = test.adapters.startTokenRefresh('Australia/Sydney');
+
+      listeners[0]?.({ data: firstToken });
+      await until(
+        () => test.dependencies.fetch.mock.calls.length === 1,
+        'The first request',
+      );
+      listeners[0]?.({ data: secondToken });
+      stopEarlier();
+      test.adapters.startTokenRefresh('Australia/Sydney');
+      listeners[1]?.({ data: secondToken });
+      release.open();
+      await until(
+        () => test.dependencies.fetch.mock.calls.length === 2,
+        'The second request',
+      );
+      await quiet();
+
+      expect(sentTokens(test)).toEqual([firstToken, secondToken]);
+      expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+        deviceToken: secondToken,
+        state: 'registered',
+      });
+    });
+
+    it('ignores a token that the stopped listener receives late', async () => {
+      const { fetchImplementation, release } = holdFirstRequest();
+      const test = harnessSaving(savedRecord(), {
+        fetchImplementation,
+        timeoutMs: heldTimeoutMs,
+      });
+      const listeners = recordTokenListeners(test);
+      const stopEarlier = test.adapters.startTokenRefresh('Australia/Sydney');
+      const later: unknown[] = [];
+      stopEarlier();
+      test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+        later.push(result),
+      );
+
+      listeners[1]?.({ data: firstToken });
+      await until(
+        () => test.dependencies.fetch.mock.calls.length === 1,
+        'The first request',
+      );
+      listeners[1]?.({ data: secondToken });
+      // The stopped listener must not take the place of the token waiting.
+      listeners[0]?.({ data: thirdToken });
+      release.open();
+      await until(() => later.length === 2, 'Both refresh results');
+      await quiet();
+
+      expect(sentTokens(test)).toEqual([firstToken, secondToken]);
+    });
+
+    it('does not disturb a listener started after it', async () => {
+      const test = harnessSaving(savedRecord());
+      const listeners = recordTokenListeners(test);
+      const stopEarlier = test.adapters.startTokenRefresh('Australia/Sydney');
+      const later: unknown[] = [];
+      test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+        later.push(result),
+      );
+
+      stopEarlier();
+      listeners[1]?.({ data: firstToken });
+      await until(() => later.length === 1, 'The later listener result');
+
+      expect(sentTokens(test)).toEqual([firstToken]);
+      expect(later).toEqual([{ kind: 'succeeded' }]);
+    });
+  });
+
+  describe('after a refresh fails', () => {
+    function failedRefresh(
+      saved: unknown,
+      options: Parameters<typeof harness>[0] = {},
+    ) {
+      const test = harnessSaving(saved, {
+        fetchImplementation: async () => new Response(null, { status: 503 }),
+        ...options,
+      });
+      const listeners = recordTokenListeners(test);
+      const outcomes: unknown[] = [];
+      test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+        outcomes.push(result),
+      );
+      return { listeners, outcomes, test };
+    }
+
+    it('reports a failed initial attempt as retryable', async () => {
+      const { listeners, outcomes } = failedRefresh(pendingRecord());
+
+      listeners[0]?.({ data: firstToken });
+      await until(() => outcomes.length === 1, 'The refresh result');
+
+      expect(outcomes).toEqual([{ kind: 'failed', retryable: true }]);
+    });
+
+    it('reports a failure that saved nothing as not retryable', async () => {
+      const { listeners, outcomes } = failedRefresh(savedRecord(), {
+        setItemImplementation: async () => {
+          throw new Error('SecureStore write failed');
+        },
+      });
+
+      listeners[0]?.({ data: firstToken });
+      await until(() => outcomes.length === 1, 'The refresh result');
+
+      expect(outcomes).toEqual([{ kind: 'failed', retryable: false }]);
+    });
+
+    it('reports a failure as not retryable when the saved record cannot be read', async () => {
+      const { listeners, outcomes, test } = failedRefresh(savedRecord());
+      let unreadable = false;
+      jest
+        .mocked(test.dependencies.secureStore.getItemAsync)
+        .mockImplementation(async () => {
+          if (unreadable) throw new Error('SecureStore read failed');
+          return test.stored();
+        });
+      jest.mocked(test.dependencies.fetch).mockImplementationOnce(async () => {
+        unreadable = true;
+        return new Response(null, { status: 503 });
+      });
+
+      listeners[0]?.({ data: firstToken });
+      await until(() => outcomes.length === 1, 'The refresh result');
+
+      expect(outcomes).toEqual([{ kind: 'failed', retryable: false }]);
+    });
+  });
+
+  it('refreshes for the zone chosen when reminders were enabled', async () => {
+    const test = harness();
+    const listeners = recordTokenListeners(test);
+    const outcomes: unknown[] = [];
+    test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+      outcomes.push(result),
+    );
+    await test.adapters.enable('Australia/Brisbane');
+
+    listeners[0]?.({ data: newToken });
+    await until(() => outcomes.length === 1, 'The refresh result');
+
+    expect(requestBodies(test)).toEqual([
+      expect.objectContaining({ homeTimeZone: 'Australia/Brisbane' }),
+      expect.objectContaining({
+        deviceToken: newToken,
+        homeTimeZone: 'Australia/Brisbane',
+      }),
+    ]);
+    expect(outcomes).toEqual([{ kind: 'succeeded' }]);
+  });
+});
