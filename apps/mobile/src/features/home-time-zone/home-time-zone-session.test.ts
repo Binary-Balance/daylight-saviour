@@ -472,8 +472,8 @@ describe('Home Time Zone session', () => {
     session.dispatch({ type: 'foreground' });
 
     expect(session.getSnapshot()).toMatchObject({
+      currentTime: { clock: '10:00' },
       kind: 'confirm',
-      uses24hourClock: true,
       zoneId: 'Australia/Sydney',
     });
     stop();
