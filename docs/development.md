@@ -391,9 +391,8 @@ shape:
 - Call product code inside tests, not while a test file or module loads. Seshat
   cannot attribute an implicit error thrown during loading, so the mutant stays
   unresolved and the mutation score is withheld.
-- Make a test fail, not hang, when awaited work never settles. In notifications
-  and mobile, Seshat treats a timeout as unresolved and withholds the mutation
-  score.
+- Make a test fail, not hang, when awaited work never settles. In notifications,
+  Seshat treats a timeout as unresolved and withholds the mutation score.
 - Avoid reading properties of results in background work that tests do not
   await. If a mutant empties the function that produced the result, or removes
   a `?.`, the read throws an uncaught error. Seshat attributes that error to a
@@ -414,4 +413,10 @@ loop endless, and the test runner's own timer cannot stop synchronous code.
 reaches the limit and stops cleanly counts as detected. The report keeps its
 `timed-out` verdict and adds it to `countedTimeouts`, which the summary shows.
 The cost is that a slow mutant that would have survived also counts as detected,
-so check any new counted timeout. Notifications and mobile leave the setting off.
+so check any new counted timeout.
+
+`seshat.mobile.json` sets it too, because a test can also time out on a mutant
+it has caught. A mutant that removes a timeout from the code leaves its test
+waiting, and one that crashes the screen can leave a test on fake timers waiting
+for a report that never appears. A test that times out has still failed.
+Notifications leaves the setting off.
