@@ -3483,3 +3483,412 @@ describe('Change Reminder check-in', () => {
     });
   });
 });
+
+const harnessToken = 'fcm-token:with_valid.characters-123';
+const oldToken = 'fcm-token:old_valid.characters-123';
+
+// A saved registration as the app writes it. An undefined override removes
+// the field, so a case can break one field of an otherwise valid record.
+function savedRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    ...responseBody,
+    attemptGeneration: 3,
+    deviceToken: harnessToken,
+    homeTimeZone: 'Australia/Sydney',
+    oneDayEnabled: true,
+    oneWeekEnabled: true,
+    registrationRequestId: 'a'.repeat(64),
+    state: 'registered',
+    version: 4,
+    ...overrides,
+  };
+}
+const withoutCredential = { credential: undefined, installationId: undefined };
+const pendingRecord = (overrides: Record<string, unknown> = {}) =>
+  savedRecord({ ...withoutCredential, state: 'pending', ...overrides });
+const pendingUpdateRecord = (overrides: Record<string, unknown> = {}) =>
+  savedRecord({ state: 'pending-update', ...overrides });
+const pendingDeleteRecord = (overrides: Record<string, unknown> = {}) =>
+  savedRecord({
+    deviceToken: undefined,
+    state: 'pending-delete',
+    ...overrides,
+  });
+const legacyRegisteredRecord = (overrides: Record<string, unknown> = {}) =>
+  savedRecord({ deviceToken: undefined, version: 2, ...overrides });
+const legacyPendingRecord = (overrides: Record<string, unknown> = {}) =>
+  legacyRegisteredRecord({
+    ...withoutCredential,
+    state: 'pending',
+    ...overrides,
+  });
+
+function harnessSaving(
+  record: unknown,
+  options: Parameters<typeof harness>[0] = {},
+) {
+  const value =
+    typeof record === 'string' || record === null
+      ? record
+      : JSON.stringify(record);
+  return harness({ ...options, storage: { value } });
+}
+
+const requestBodies = (test: ReturnType<typeof harness>) =>
+  test.dependencies.fetch.mock.calls.map((call) =>
+    JSON.parse(String(call[1]?.body)),
+  );
+
+describe('Change Reminder stored state', () => {
+  it.each<[string, string]>([
+    ['null', 'null'],
+    ['an array', '[]'],
+    ['a number', '7'],
+    ['text', '"registered"'],
+    ['a boolean', 'true'],
+  ])('rejects %s in place of a record', async (_name, saved) => {
+    await expect(harnessSaving(saved).adapters.restore()).rejects.toThrow(
+      'Invalid stored reminder state',
+    );
+  });
+
+  // Each case breaks one field of an otherwise valid record, so every check
+  // has to refuse it on its own.
+  const brokenCurrentFields: [string, Record<string, unknown>][] = [
+    ['a version that was never stored', { version: 5 }],
+    ['no device token', { deviceToken: undefined }],
+    ['a device token that is too short', { deviceToken: 'a'.repeat(19) }],
+    ['a request ID in capitals', { registrationRequestId: 'A'.repeat(64) }],
+    [
+      'a request ID of the wrong length',
+      { registrationRequestId: 'a'.repeat(63) },
+    ],
+    ['a generation of zero', { attemptGeneration: 0 }],
+    ['a fractional generation', { attemptGeneration: 1.5 }],
+    ['a generation as text', { attemptGeneration: '3' }],
+    ['a generation past the largest', { attemptGeneration: 2_147_483_648 }],
+    ['a zone that is not text', { homeTimeZone: 5 }],
+    [
+      'a zone that is not the canonical name',
+      { homeTimeZone: 'Australia/ACT' },
+    ],
+    ['a one-day flag that is not a boolean', { oneDayEnabled: 'yes' }],
+    ['a one-week flag that is not a boolean', { oneWeekEnabled: 1 }],
+    ['both timings off', { oneDayEnabled: false, oneWeekEnabled: false }],
+  ];
+
+  describe.each<[string, (overrides: Record<string, unknown>) => unknown]>([
+    ['registered', savedRecord],
+    ['pending', pendingRecord],
+    ['pending-update', pendingUpdateRecord],
+  ])('a %s record', (_state, build) => {
+    it.each(brokenCurrentFields)(
+      'is rejected with %s',
+      async (_name, broken) => {
+        await expect(
+          harnessSaving(build(broken)).adapters.restore(),
+        ).rejects.toThrow('Invalid stored reminder state');
+      },
+    );
+
+    it.each<[string, Record<string, unknown>]>([
+      ['the smallest generation', { attemptGeneration: 1 }],
+      ['the largest generation', { attemptGeneration: 2_147_483_647 }],
+      ['a device token of 20 characters', { deviceToken: 'a'.repeat(20) }],
+      ['either timing alone', { oneDayEnabled: false, oneWeekEnabled: true }],
+      [
+        'the other timing alone',
+        { oneDayEnabled: true, oneWeekEnabled: false },
+      ],
+    ])('is accepted with %s', async (_name, valid) => {
+      await expect(
+        harnessSaving(build(valid)).adapters.restore(),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['text instead of a zone', { confirmedHomeTimeZone: 5 }],
+    [
+      'a zone that is not the canonical name',
+      { confirmedHomeTimeZone: 'Australia/ACT' },
+    ],
+    [
+      'one confirmed timing that is not a boolean',
+      { confirmedOneDayEnabled: true, confirmedOneWeekEnabled: 'yes' },
+    ],
+    [
+      'the other confirmed timing that is not a boolean',
+      { confirmedOneDayEnabled: 'yes', confirmedOneWeekEnabled: true },
+    ],
+    ['a confirmed timing without its pair', { confirmedOneDayEnabled: true }],
+  ])('rejects a pending update with %s', async (_name, broken) => {
+    await expect(
+      harnessSaving(pendingUpdateRecord(broken)).adapters.restore(),
+    ).rejects.toThrow('Invalid stored reminder state');
+  });
+
+  it('restores a pending update with its confirmed zone and timings', async () => {
+    const test = harnessSaving(
+      pendingUpdateRecord({
+        confirmedHomeTimeZone: 'Australia/Brisbane',
+        confirmedOneDayEnabled: false,
+        confirmedOneWeekEnabled: true,
+      }),
+    );
+
+    await expect(test.adapters.restore()).resolves.toEqual({
+      homeTimeZone: 'Australia/Sydney',
+      kind: 'pending',
+      pendingHomeTimeZone: {
+        confirmed: 'Australia/Brisbane',
+        proposed: 'Australia/Sydney',
+      },
+      pendingPreferences: {
+        confirmed: { oneDayEnabled: false, oneWeekEnabled: true },
+        proposed: { oneDayEnabled: true, oneWeekEnabled: true },
+      },
+    });
+  });
+
+  // Version 3 is still read, but only as a registration or an initial attempt.
+  it('upgrades a version 3 registration with one update', async () => {
+    const test = harnessSaving(savedRecord({ version: 3 }));
+
+    await expect(test.adapters.restore()).resolves.toMatchObject({
+      kind: 'registered',
+      registration: { attemptGeneration: 4, version: 4 },
+    });
+    expect(
+      test.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
+    ).toEqual(['PUT']);
+  });
+
+  it('restores a version 3 initial attempt as pending', async () => {
+    await expect(
+      harnessSaving(pendingRecord({ version: 3 })).adapters.restore(),
+    ).resolves.toEqual({ homeTimeZone: 'Australia/Sydney', kind: 'pending' });
+  });
+
+  it('rejects a version 3 pending update', async () => {
+    await expect(
+      harnessSaving(pendingUpdateRecord({ version: 3 })).adapters.restore(),
+    ).rejects.toThrow('Invalid stored reminder state');
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['text for a state', { state: 'registering' }],
+    ['no state', { state: undefined }],
+  ])('rejects a record with %s', async (_name, broken) => {
+    await expect(
+      harnessSaving(savedRecord(broken)).adapters.restore(),
+    ).rejects.toThrow('Invalid stored reminder state');
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['an unknown field', { surprise: true }],
+    ['a credential on an initial attempt', { credential: 'c'.repeat(43) }],
+  ])('rejects a pending record with %s', async (_name, extra) => {
+    await expect(
+      harnessSaving(pendingRecord(extra)).adapters.restore(),
+    ).rejects.toThrow('Invalid stored reminder state');
+  });
+
+  describe('a pending-delete record', () => {
+    const brokenDeleteFields: [string, Record<string, unknown>][] = [
+      ['a version other than 4', { version: 3 }],
+      ['a credential that is not text', { credential: 5 }],
+      ['a credential that is too short', { credential: 'c'.repeat(31) }],
+      ['a credential that is too long', { credential: 'c'.repeat(129) }],
+      [
+        'a credential with a character that is not allowed',
+        { credential: `${'c'.repeat(42)}!` },
+      ],
+      ['an installation ID that is not text', { installationId: 5 }],
+      [
+        'an installation ID that is too short',
+        { installationId: 'i'.repeat(31) },
+      ],
+      [
+        'an installation ID that is too long',
+        { installationId: 'i'.repeat(129) },
+      ],
+      [
+        'an installation ID with a character that is not allowed',
+        { installationId: `${'i'.repeat(42)}!` },
+      ],
+      ['a request ID in capitals', { registrationRequestId: 'A'.repeat(64) }],
+      ['a generation of zero', { attemptGeneration: 0 }],
+      ['a fractional generation', { attemptGeneration: 1.5 }],
+      ['a generation past the largest', { attemptGeneration: 2_147_483_648 }],
+      ['a zone that is not text', { homeTimeZone: 5 }],
+      [
+        'a zone that is not the canonical name',
+        { homeTimeZone: 'Australia/ACT' },
+      ],
+      ['a one-day flag that is not a boolean', { oneDayEnabled: 'yes' }],
+      ['a one-week flag that is not a boolean', { oneWeekEnabled: 1 }],
+      ['both timings off', { oneDayEnabled: false, oneWeekEnabled: false }],
+      ['a device token left in', { deviceToken: oldToken }],
+    ];
+
+    it.each(brokenDeleteFields)(
+      'is rejected with %s',
+      async (_name, broken) => {
+        await expect(
+          harnessSaving(pendingDeleteRecord(broken)).adapters.restore(),
+        ).rejects.toThrow('Invalid stored reminder state');
+      },
+    );
+
+    it.each<[string, Record<string, unknown>]>([
+      ['the smallest generation', { attemptGeneration: 1 }],
+      ['the largest generation', { attemptGeneration: 2_147_483_647 }],
+      [
+        'credentials of the shortest length',
+        { credential: 'c'.repeat(32), installationId: 'i'.repeat(32) },
+      ],
+      [
+        'credentials of the longest length',
+        {
+          credential: 'c-_'.repeat(42) + 'cc',
+          installationId: 'i-_'.repeat(42) + 'ii',
+        },
+      ],
+    ])('is accepted with %s', async (_name, valid) => {
+      await expect(
+        harnessSaving(pendingDeleteRecord(valid)).adapters.restore(),
+      ).resolves.toMatchObject({ kind: 'deleting' });
+    });
+  });
+
+  describe('a version 2 record', () => {
+    const brokenLegacyFields: [string, Record<string, unknown>][] = [
+      ['a request ID in capitals', { registrationRequestId: 'A'.repeat(64) }],
+      ['a request ID that is not text', { registrationRequestId: 5 }],
+      ['a generation of zero', { attemptGeneration: 0 }],
+      ['a fractional generation', { attemptGeneration: 1.5 }],
+      ['a generation past the largest', { attemptGeneration: 2_147_483_648 }],
+      ['a zone that is not text', { homeTimeZone: 5 }],
+      [
+        'a zone that is not the canonical name',
+        { homeTimeZone: 'Australia/ACT' },
+      ],
+      ['the one-day timing off', { oneDayEnabled: false }],
+      ['the one-week timing off', { oneWeekEnabled: false }],
+      ['a device token', { deviceToken: oldToken }],
+    ];
+
+    describe.each<[string, (overrides: Record<string, unknown>) => unknown]>([
+      ['registered', legacyRegisteredRecord],
+      ['pending', legacyPendingRecord],
+    ])('that is %s', (_state, build) => {
+      it.each(brokenLegacyFields)(
+        'is rejected with %s',
+        async (_name, broken) => {
+          await expect(
+            harnessSaving(build(broken)).adapters.restore(),
+          ).rejects.toThrow('Invalid stored reminder state');
+        },
+      );
+
+      it.each<[string, Record<string, unknown>]>([
+        ['the smallest generation', { attemptGeneration: 1 }],
+        ['the largest generation', { attemptGeneration: 2_147_483_647 }],
+      ])('is accepted with %s', async (_name, valid) => {
+        await expect(
+          harnessSaving(build(valid)).adapters.restore(),
+        ).resolves.toBeDefined();
+      });
+    });
+
+    it('rejects an update that was never stored for version 2', async () => {
+      await expect(
+        harnessSaving(
+          legacyRegisteredRecord({ state: 'pending-update' }),
+        ).adapters.restore(),
+      ).rejects.toThrow('Invalid stored reminder state');
+    });
+
+    it('reads both timings as on and sends them with the upgrade', async () => {
+      const test = harnessSaving(legacyRegisteredRecord());
+
+      await expect(test.adapters.restore()).resolves.toMatchObject({
+        kind: 'registered',
+        registration: { oneDayEnabled: true, oneWeekEnabled: true },
+      });
+      expect(requestBodies(test)).toEqual([
+        {
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          platform: 'android',
+        },
+      ]);
+    });
+
+    it('reads both timings as on and sends them when an initial attempt is retried', async () => {
+      const test = harnessSaving(legacyPendingRecord());
+
+      await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+        kind: 'enabled',
+      });
+      expect(requestBodies(test)).toEqual([
+        {
+          attemptGeneration: 4,
+          deviceToken: 'fcm-token:with_valid.characters-123',
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          platform: 'android',
+          registrationRequestId: 'a'.repeat(64),
+        },
+      ]);
+    });
+  });
+});
+
+describe('Change Reminder device token', () => {
+  const enableWithToken = (data: unknown) => {
+    const test = harness();
+    jest
+      .mocked(test.dependencies.notifications.getDevicePushTokenAsync)
+      .mockResolvedValue({ data: data as string });
+    return test;
+  };
+
+  it.each<[string, string]>([
+    ['20 characters long', 'a'.repeat(20)],
+    ['4096 characters long', 'a'.repeat(4_096)],
+    ['made of every punctuation mark it may hold', 'Az09_:.-'.repeat(3)],
+  ])('is registered when it is %s', async (_name, token) => {
+    const test = enableWithToken(token);
+
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'enabled',
+    });
+    expect(requestBodies(test)).toEqual([
+      expect.objectContaining({ deviceToken: token }),
+    ]);
+  });
+
+  it.each<[string, unknown]>([
+    ['19 characters long', 'a'.repeat(19)],
+    ['4097 characters long', 'a'.repeat(4_097)],
+    ['holding a space', `${'a'.repeat(10)} ${'a'.repeat(10)}`],
+    ['holding a slash', `${'a'.repeat(10)}/${'a'.repeat(10)}`],
+    ['a number', 12_345_678_901_234_567_890],
+    ['missing', undefined],
+    ['a boxed string', Object('a'.repeat(25))],
+  ])('is refused when it is %s', async (_name, token) => {
+    const test = enableWithToken(token);
+
+    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+      kind: 'failed',
+    });
+    expect(test.dependencies.fetch).not.toHaveBeenCalled();
+    expect(test.stored()).toBeNull();
+  });
+});
