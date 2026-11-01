@@ -416,7 +416,7 @@ export function createTimeZoneDataPackManager(
     }
 
     const packBytes = await downloadPack(config.manifestUrl, manifest, signal);
-    // Digest, signature, key trust and schema, then Australian Coverage, then
+    // Digest, key trust, signature and schema, then Australian Coverage, then
     // the downgrade check. Nothing is saved or activated until all pass.
     const verified = verifySignedTimeZoneDataPackBytes(
       manifest,

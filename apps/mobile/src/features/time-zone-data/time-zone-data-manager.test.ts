@@ -709,6 +709,8 @@ describe('Time-Zone Data Pack manifest check', () => {
         {},
         { etag: '"saved"', lastModified: 'Sun, 19 Jul 2026 00:00:00 GMT' },
       ],
+      // Records what happens today, not a decision: at worst it costs one full
+      // download.
       [
         'takes empty ones as sent',
         { etag: '', 'last-modified': '' },
