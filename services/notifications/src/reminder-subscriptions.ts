@@ -684,6 +684,47 @@ function subscriptionSnapshot(
   };
 }
 
+// A row that is not there is an answer, not an error.
+async function findSubscription(
+  subscriptions: SubscriptionTable,
+  installationId: string,
+) {
+  try {
+    return await subscriptions.get(subscriptionPartitionKey, installationId);
+  } catch (error) {
+    if (statusCode(error) === 404) return null;
+    throw error;
+  }
+}
+
+// Why a stored row is not the subscription whose token was rejected, or null
+// when it is.
+function removalRefusal(
+  existing: SubscriptionEntity,
+  deviceToken: string,
+  attemptGeneration: number | undefined,
+  invalidatedAt: Date | undefined,
+) {
+  if (existing.state === 'retired' || existing.deviceToken === undefined) {
+    return 'not-found' as const;
+  }
+  if (existing.deviceToken !== deviceToken) {
+    return 'token-replaced' as const;
+  }
+  if (
+    attemptGeneration !== undefined &&
+    existing.attemptGeneration !== attemptGeneration
+  ) {
+    return 'token-replaced' as const;
+  }
+  if (
+    preservesPostInvalidationRegistration(existing.registeredAt, invalidatedAt)
+  ) {
+    return 'token-replaced' as const;
+  }
+  return null;
+}
+
 async function removeStoredSubscription(
   subscriptions: SubscriptionTable,
   subscription: Pick<
@@ -695,36 +736,18 @@ async function removeStoredSubscription(
 ) {
   const retiredAt = new Date();
   for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-    let existing: SubscriptionEntity;
-    try {
-      existing = await subscriptions.get(
-        subscriptionPartitionKey,
-        subscription.installationId,
-      );
-    } catch (error) {
-      if (statusCode(error) === 404) return 'not-found' as const;
-      throw error;
-    }
-    if (existing.state === 'retired' || existing.deviceToken === undefined) {
-      return 'not-found' as const;
-    }
-    if (existing.deviceToken !== subscription.deviceToken) {
-      return 'token-replaced' as const;
-    }
-    if (
-      attemptGeneration !== undefined &&
-      existing.attemptGeneration !== attemptGeneration
-    ) {
-      return 'token-replaced' as const;
-    }
-    if (
-      preservesPostInvalidationRegistration(
-        existing.registeredAt,
-        invalidatedAt,
-      )
-    ) {
-      return 'token-replaced' as const;
-    }
+    const existing = await findSubscription(
+      subscriptions,
+      subscription.installationId,
+    );
+    if (existing === null) return 'not-found' as const;
+    const refusal = removalRefusal(
+      existing,
+      subscription.deviceToken,
+      attemptGeneration,
+      invalidatedAt,
+    );
+    if (refusal !== null) return refusal;
     try {
       await subscriptions.replace(
         {
