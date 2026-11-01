@@ -277,7 +277,7 @@ describe('Time-Zone Data Pack manager', () => {
     [
       'corrupt bytes',
       (artifacts: ReturnType<typeof signedArtifacts>) => {
-        artifacts.bytes[0] ^= 1;
+        artifacts.bytes.fill(0, 0, 1);
       },
     ],
     [
