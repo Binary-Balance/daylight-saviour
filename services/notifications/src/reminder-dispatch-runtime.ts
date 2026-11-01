@@ -134,7 +134,7 @@ const productionDispatchBoundaries: ReminderDispatchBoundaries = {
 
 // The dispatcher removes a rejected token itself, fenced by the generation it
 // sent. A sender's unfenced removal could delete a same-token re-registration.
-export const dispatcherOwnsCleanup = {
+const dispatcherOwnsCleanup = {
   removeIfDeviceTokenMatches: async () => 'not-found' as const,
 };
 

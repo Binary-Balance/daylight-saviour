@@ -7,7 +7,7 @@ import { InvocationContext } from '@azure/functions';
 import { activateAustralianTimeZoneDataPack } from '@daylight-saviour/domain/node';
 
 import type { ApnsHttpRequest } from './apns-change-reminder-sender.ts';
-import { createFcmChangeReminderSender } from './fcm-change-reminder-sender.ts';
+import { fcmSendEndpoint } from './fcm-change-reminder-sender.ts';
 import {
   createTableReminderDispatchLedgerStore,
   type ReminderDispatchLedgerStore,
@@ -17,7 +17,6 @@ import {
   createActivePackReader,
   createReminderDispatchProvider,
   createReminderDispatchRunner,
-  dispatcherOwnsCleanup,
   runReminderDispatch,
   type ReminderDispatchBoundaries,
 } from './reminder-dispatch-runtime.ts';
@@ -1387,18 +1386,15 @@ describe('reminder dispatch composition', () => {
       }) as typeof globalThis.fetch,
     }) satisfies ReminderDispatchBoundaries;
 
-  it('sends through the real APNs sender with every bound', async (t) => {
-    t.mock.timers.enable({ apis: ['Date'], now: during.getTime() });
+  // Runs the composed runner on a signed pack and returns the invocation log.
+  // `routes` answer any other fetch.
+  async function runComposed(
+    test: ReturnType<typeof harness>,
+    overrides: Partial<ReminderDispatchBoundaries>,
+    routes: Readonly<Record<string, Response>> = {},
+  ) {
     const artifacts = signedArtifacts();
-    const test = harness([
-      subscriptionRow('apple', {
-        deviceToken: 'a'.repeat(64),
-        platform: 'ios',
-      }),
-    ]);
-    const requests: ApnsHttpRequest[] = [];
     const logs: unknown[] = [];
-
     await settled(
       createReminderDispatchRunner(
         {
@@ -1410,16 +1406,12 @@ describe('reminder dispatch composition', () => {
         },
         {
           ...boundaries(test),
-          createApnsTransport: () => ({
-            post: async (request) => {
-              requests.push(request);
-              return { body: '', status: 200 };
-            },
-          }),
           fetch: fetchFrom({
             [manifestUrl]: new Response(artifacts.manifest),
             [artifacts.packUrl]: new Response(artifacts.bytes),
+            ...routes,
           }).fetch,
+          ...overrides,
         },
       )(
         new InvocationContext({
@@ -1427,6 +1419,30 @@ describe('reminder dispatch composition', () => {
         }),
       ),
     );
+    return logs;
+  }
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status });
+
+  it('sends through the real APNs sender with every bound', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: during.getTime() });
+    const test = harness([
+      subscriptionRow('apple', {
+        deviceToken: 'a'.repeat(64),
+        platform: 'ios',
+      }),
+    ]);
+    const requests: ApnsHttpRequest[] = [];
+
+    const logs = await runComposed(test, {
+      createApnsTransport: () => ({
+        post: async (request) => {
+          requests.push(request);
+          return { body: '', status: 200 };
+        },
+      }),
+    });
 
     assert.equal(requests.length, 1);
     assert.equal(
@@ -1444,21 +1460,40 @@ describe('reminder dispatch composition', () => {
     ]);
   });
 
-  it('leaves removing a rejected FCM token to the dispatcher', async () => {
+  // A sender that removed the token itself would leave the dispatcher's fenced
+  // removal nothing to do, so the ledger would record `not-found`, not `removed`.
+  it('leaves removing a rejected FCM token to the dispatcher', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: during.getTime() });
     const test = harness([subscriptionRow('android')]);
-    const android = createFcmChangeReminderSender('portable-project', {
-      accessTokenProvider: {
-        getAccessToken: async () => ({
-          expiresAt: new Date(during.getTime() + 60 * 60 * 1000),
-          value: 'access-token',
+    const expiresAt = new Date(during.getTime() + 30 * 60 * 1000);
+    const serviceAccount = encodeURIComponent(
+      environment().FCM_SERVICE_ACCOUNT_EMAIL,
+    );
+
+    const logs = await runComposed(
+      test,
+      {
+        createCredential: () => ({
+          getToken: async () => ({
+            expiresOnTimestamp: expiresAt.getTime(),
+            token: 'entra-assertion',
+          }),
         }),
       },
-      clock: () => test.state.now,
-      logger: { write: (event) => test.logs.push(event) },
-      subscriptionRemover: dispatcherOwnsCleanup,
-      transport: {
-        post: async () => ({
-          body: JSON.stringify({
+      {
+        'https://sts.googleapis.com/v1/token': json({
+          access_token: 'federated-token',
+          expires_in: 1800,
+          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+          token_type: 'Bearer',
+        }),
+        [`https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${serviceAccount}:generateAccessToken`]:
+          json({
+            accessToken: 'fcm-access-token',
+            expireTime: expiresAt.toISOString(),
+          }),
+        [fcmSendEndpoint('portable-project').toString()]: json(
+          {
             error: {
               code: 404,
               details: [
@@ -1471,25 +1506,55 @@ describe('reminder dispatch composition', () => {
               message: 'Rejected',
               status: 'NOT_FOUND',
             },
-          }),
-          status: 404,
-        }),
+          },
+          404,
+        ),
       },
-    });
-    test.dependencies.provider = createReminderDispatchProvider({
-      android,
-      ios: { send: async () => assert.fail('Sent through the wrong provider') },
-    });
-
-    await test.run();
+    );
 
     assert.equal(test.subscriptions.size, 0);
     assert.equal(
       (await test.ledger.get(identity('android')))?.cleanupStatus,
       'removed',
     );
-    assert.deepEqual(test.logs, [
+    assert.deepEqual(logs, [
+      'fcm-credential-ready',
       'fcm-change-reminder-permanent-invalid-token',
+      `reminder-dispatch-permanent-failure ${sydney} count=1`,
+    ]);
+  });
+
+  it('leaves removing a rejected APNs token to the dispatcher', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: during.getTime() });
+    // APNs reports when it invalidated the token. The dispatcher keeps a
+    // registration newer than that, so this one must predate it.
+    const test = harness([
+      subscriptionRow('apple', {
+        deviceToken: 'a'.repeat(64),
+        platform: 'ios',
+        registeredAt: new Date(during.getTime() - 60 * 1000),
+      }),
+    ]);
+
+    const logs = await runComposed(test, {
+      createApnsTransport: () => ({
+        post: async () => ({
+          body: JSON.stringify({
+            reason: 'Unregistered',
+            timestamp: during.getTime(),
+          }),
+          status: 410,
+        }),
+      }),
+    });
+
+    assert.equal(test.subscriptions.size, 0);
+    assert.equal(
+      (await test.ledger.get(identity('apple')))?.cleanupStatus,
+      'removed',
+    );
+    assert.deepEqual(logs, [
+      'apns-change-reminder-permanent-invalid-token',
       `reminder-dispatch-permanent-failure ${sydney} count=1`,
     ]);
   });
