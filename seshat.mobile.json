@@ -22,6 +22,7 @@
     "node_modules"
   ],
   "workers": 4,
+  "countTimeoutsAsKilled": true,
   "setups": [
     {
       "name": "mobile",
