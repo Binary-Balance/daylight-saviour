@@ -404,7 +404,9 @@ shape:
 
 Seshat stops each mutant job at a time limit: five times the area's slowest
 baseline test run, at least 30 seconds and at most the setup's `timeoutMs`. That
-is 30 seconds for packages and notifications, and about 80 seconds for mobile.
+is 30 seconds for packages and about 80 seconds for mobile. Notifications sets
+`mutantTimeoutMinMs` to 60 seconds, because mutants that skip a `clearTimeout` hold
+a real 10-second timer open in each test file that reaches it.
 A mutant whose tests are still running at the limit is a timeout, even if they
 would have finished.
 
