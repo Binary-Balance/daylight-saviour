@@ -1026,14 +1026,33 @@ describe('Change Reminder session', () => {
   });
 
   it('ignores a failed load that finishes after the session stops', async () => {
-    const load = deferred<ChangeReminderRestoreResult>();
-    const { session } = createSession({ restore: jest.fn(() => load.promise) });
+    const load = deferred<void>();
+    // Rejects only if restore runs: a rejection nothing awaits would leave a
+    // mutant that skips restore unresolved, which fails the Seshat check.
+    const { session } = createSession({
+      restore: jest.fn(async () => {
+        await load.promise;
+        throw new Error('SecureStore failed');
+      }),
+    });
     const stop = session.start();
     stop();
-    load.reject(new Error('SecureStore failed'));
+    load.resolve();
     await flush();
 
     expect(session.getSnapshot()).toEqual({ kind: 'loading' });
+  });
+
+  it('does not restore again when an active session is started twice', async () => {
+    const { boundary, session } = createSession();
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+
+    expect(session.start()).toBe(stop);
+
+    expect(session.getSnapshot()).toEqual({ kind: 'untouched' });
+    expect(boundary.restore).toHaveBeenCalledTimes(1);
+    stop();
   });
 
   it('loads again when the session restarts', async () => {
