@@ -754,9 +754,11 @@ export function createProductionChangeReminderAdapters({
 
   function enqueue<T>(operation: () => Promise<T>) {
     const next = registrationQueue.then(operation, operation);
+    // A failed operation must not stop the ones behind it. Its caller still
+    // gets the outcome through `next`.
     registrationQueue = next.then(
-      () => undefined,
-      () => undefined,
+      () => {},
+      () => {},
     );
     return next;
   }
@@ -929,9 +931,7 @@ export function createProductionChangeReminderAdapters({
         // ponytail: a failed delete is not retried, so the old subscription
         // waits for provider cleanup; keep a pending deletion if that matters.
         if (saved.state !== 'pending' && registrationEndpoint !== null) {
-          await deleteRegistration(registrationEndpoint, saved).catch(
-            () => undefined,
-          );
+          await deleteRegistration(registrationEndpoint, saved).catch(() => {});
         }
         await secureStore.deleteItemAsync(registrationKey);
         return { kind: 'unregistered' };
@@ -1121,8 +1121,8 @@ export function createProductionChangeReminderAdapters({
       return saved?.state === 'registered' ? saved.installationId : null;
     },
     openSettings,
-    startTokenRefresh(homeTimeZone, onResult = () => undefined) {
-      if (platform === 'web') return () => undefined;
+    startTokenRefresh(homeTimeZone, onResult = () => {}) {
+      if (platform === 'web') return () => {};
       let listening = true;
       const listenerGeneration = ++tokenListenerGeneration;
       const subscription = notifications.addPushTokenListener((token) => {
