@@ -318,6 +318,155 @@ export function createTimeZoneDataPackManager(
     persisted = next;
   }
 
+  // A request that fails before it returns a response, including by running
+  // past the deadline, is a transport loss.
+  async function fetchResponse(
+    url: string,
+    headers: Readonly<Record<string, string>>,
+    signal: AbortSignal,
+  ) {
+    try {
+      return await beforeDeadline(signal, request(url, { headers, signal }));
+    } catch {
+      throw new TimeZoneDataPackTransportError();
+    }
+  }
+
+  async function downloadPack(
+    manifestUrl: string,
+    manifest: ActivatedSignedTimeZoneDataPackManifest,
+    signal: AbortSignal,
+  ) {
+    const packUrl = new URL(manifest.pack.path, manifestUrl);
+    if (packUrl.origin !== new URL(manifestUrl).origin) {
+      throw new Error('Pack URL must share manifest origin');
+    }
+    const response = await fetchResponse(
+      packUrl.toString(),
+      { Accept: 'application/json' },
+      signal,
+    );
+    if (response.status !== 200) {
+      throw new Error(`Pack request returned ${response.status}`);
+    }
+    return beforeDeadline(
+      signal,
+      responseBytes(response, manifest.pack.byteLength),
+    );
+  }
+
+  // The manifest names nothing newer than the active pack, so only the check
+  // is recorded.
+  async function keepActivePack(next: PersistedState, checkedAt: Date) {
+    await savePersisted(next);
+    update({
+      ...snapshot,
+      freshness: expired(snapshot.pack, checkedAt) ? 'expired' : 'current',
+      lastCheckedAt: next.lastCheckedAt,
+      lastError: null,
+    });
+  }
+
+  async function refreshFromRemote(
+    config: TimeZoneDataPackRemoteConfig,
+    checkedAt: Date,
+    signal: AbortSignal,
+  ) {
+    const checkedAtIso = checkedAt.toISOString();
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (persisted.etag !== null) headers['If-None-Match'] = persisted.etag;
+    if (persisted.lastModified !== null) {
+      headers['If-Modified-Since'] = persisted.lastModified;
+    }
+    const manifestResponse = await fetchResponse(
+      config.manifestUrl,
+      headers,
+      signal,
+    );
+    if (manifestResponse.status === 304) {
+      if (persisted.etag === null && persisted.lastModified === null) {
+        throw new Error('Unexpected 304 without a conditional validator');
+      }
+      await keepActivePack(
+        { ...persisted, lastCheckedAt: checkedAtIso },
+        checkedAt,
+      );
+      return;
+    }
+    if (manifestResponse.status !== 200) {
+      throw new Error(`Manifest request returned ${manifestResponse.status}`);
+    }
+
+    const manifestBytes = await beforeDeadline(
+      signal,
+      responseBytes(manifestResponse, maximumManifestBytes),
+    );
+    const manifest = activateSignedTimeZoneDataPackManifestBytes(manifestBytes);
+    const checked: PersistedState = {
+      ...persisted,
+      etag: manifestResponse.headers.get('etag') ?? persisted.etag,
+      lastCheckedAt: checkedAtIso,
+      lastModified:
+        manifestResponse.headers.get('last-modified') ?? persisted.lastModified,
+      manifestPackVersion: manifest.pack.packVersion,
+    };
+    if (manifest.pack.packVersion === snapshot.pack.packVersion) {
+      await keepActivePack(checked, checkedAt);
+      return;
+    }
+
+    const packBytes = await downloadPack(config.manifestUrl, manifest, signal);
+    // Digest, signature, key trust and schema, then Australian Coverage, then
+    // the downgrade check. Nothing is saved or activated until all pass.
+    const verified = verifySignedTimeZoneDataPackBytes(
+      manifest,
+      packBytes,
+      config.trustedKeys,
+    );
+    const candidate = activateAustralianTimeZoneDataPack(verified);
+    if (!isNewerPack(candidate, snapshot.pack)) {
+      throw new Error('Remote pack is not newer than active pack');
+    }
+
+    // Saving comes first, so a pack that cannot be cached is never activated.
+    await savePersisted({
+      ...checked,
+      artifact: { manifest, packBase64: encodeBase64(packBytes) },
+    });
+    update({
+      freshness: expired(candidate, checkedAt) ? 'expired' : 'current',
+      lastCheckedAt: checkedAtIso,
+      lastError: null,
+      pack: candidate,
+      remoteEnabled: true,
+      source: 'remote',
+    });
+  }
+
+  async function recordFailure(
+    error: unknown,
+    trigger: TimeZoneDataPackRefreshTrigger,
+    checkedAt: Date,
+  ) {
+    const checkedAtIso = checkedAt.toISOString();
+    try {
+      await savePersisted({ ...persisted, lastCheckedAt: checkedAtIso });
+    } catch {
+      // Active pack remains in memory when noncritical check metadata fails.
+    }
+    update({
+      ...snapshot,
+      freshness: expired(snapshot.pack, checkedAt)
+        ? 'expired'
+        : trigger !== 'manual' &&
+            error instanceof TimeZoneDataPackTransportError
+          ? 'offline-valid'
+          : 'retry-failed',
+      lastCheckedAt: checkedAtIso,
+      lastError: 'refresh-failed',
+    });
+  }
+
   async function doRefresh(trigger: TimeZoneDataPackRefreshTrigger) {
     const checkedAt = now();
     if (
@@ -342,146 +491,12 @@ export function createTimeZoneDataPackManager(
     }
 
     update({ ...snapshot, freshness: 'checking', lastError: null });
-    const checkedAtIso = checkedAt.toISOString();
     const deadline = new AbortController();
-    const { signal } = deadline;
     const timer = setTimeout(() => deadline.abort(), refreshTimeoutMs);
     try {
-      const headers: Record<string, string> = { Accept: 'application/json' };
-      if (persisted.etag !== null) headers['If-None-Match'] = persisted.etag;
-      if (persisted.lastModified !== null) {
-        headers['If-Modified-Since'] = persisted.lastModified;
-      }
-      let manifestResponse: HttpResponse;
-      try {
-        manifestResponse = await beforeDeadline(
-          signal,
-          request(options.remoteConfig.manifestUrl, { headers, signal }),
-        );
-      } catch {
-        throw new TimeZoneDataPackTransportError();
-      }
-      if (manifestResponse.status === 304) {
-        if (persisted.etag === null && persisted.lastModified === null) {
-          throw new Error('Unexpected 304 without a conditional validator');
-        }
-        const nextPersisted = { ...persisted, lastCheckedAt: checkedAtIso };
-        await savePersisted(nextPersisted);
-        update({
-          ...snapshot,
-          freshness: expired(snapshot.pack, checkedAt) ? 'expired' : 'current',
-          lastCheckedAt: checkedAtIso,
-          lastError: null,
-        });
-        return;
-      }
-      if (manifestResponse.status !== 200) {
-        throw new Error(`Manifest request returned ${manifestResponse.status}`);
-      }
-
-      const manifestBytes = await beforeDeadline(
-        signal,
-        responseBytes(manifestResponse, maximumManifestBytes),
-      );
-      const manifest =
-        activateSignedTimeZoneDataPackManifestBytes(manifestBytes);
-      const nextEtag = manifestResponse.headers.get('etag') ?? persisted.etag;
-      const nextLastModified =
-        manifestResponse.headers.get('last-modified') ?? persisted.lastModified;
-
-      if (manifest.pack.packVersion === snapshot.pack.packVersion) {
-        const nextPersisted = {
-          ...persisted,
-          etag: nextEtag,
-          lastCheckedAt: checkedAtIso,
-          lastModified: nextLastModified,
-          manifestPackVersion: manifest.pack.packVersion,
-        };
-        await savePersisted(nextPersisted);
-        update({
-          ...snapshot,
-          freshness: expired(snapshot.pack, checkedAt) ? 'expired' : 'current',
-          lastCheckedAt: checkedAtIso,
-          lastError: null,
-        });
-        return;
-      }
-
-      const packUrl = new URL(
-        manifest.pack.path,
-        options.remoteConfig.manifestUrl,
-      );
-      if (packUrl.origin !== new URL(options.remoteConfig.manifestUrl).origin) {
-        throw new Error('Pack URL must share manifest origin');
-      }
-      let packResponse: HttpResponse;
-      try {
-        packResponse = await beforeDeadline(
-          signal,
-          request(packUrl.toString(), {
-            headers: { Accept: 'application/json' },
-            signal,
-          }),
-        );
-      } catch {
-        throw new TimeZoneDataPackTransportError();
-      }
-      if (packResponse.status !== 200) {
-        throw new Error(`Pack request returned ${packResponse.status}`);
-      }
-      const packBytes = await beforeDeadline(
-        signal,
-        responseBytes(packResponse, manifest.pack.byteLength),
-      );
-      const verified = verifySignedTimeZoneDataPackBytes(
-        manifest,
-        packBytes,
-        options.remoteConfig.trustedKeys,
-      );
-      const candidate = activateAustralianTimeZoneDataPack(verified);
-      if (!isNewerPack(candidate, snapshot.pack)) {
-        throw new Error('Remote pack is not newer than active pack');
-      }
-
-      const artifact = {
-        manifest,
-        packBase64: encodeBase64(packBytes),
-      };
-      const nextPersisted: PersistedState = {
-        artifact,
-        cacheVersion: 1,
-        etag: nextEtag,
-        lastCheckedAt: checkedAtIso,
-        lastModified: nextLastModified,
-        manifestPackVersion: manifest.pack.packVersion,
-      };
-      await savePersisted(nextPersisted);
-      update({
-        freshness: expired(candidate, checkedAt) ? 'expired' : 'current',
-        lastCheckedAt: checkedAtIso,
-        lastError: null,
-        pack: candidate,
-        remoteEnabled: true,
-        source: 'remote',
-      });
+      await refreshFromRemote(options.remoteConfig, checkedAt, deadline.signal);
     } catch (error) {
-      const nextPersisted = { ...persisted, lastCheckedAt: checkedAtIso };
-      try {
-        await savePersisted(nextPersisted);
-      } catch {
-        // Active pack remains in memory when noncritical check metadata fails.
-      }
-      update({
-        ...snapshot,
-        freshness: expired(snapshot.pack, checkedAt)
-          ? 'expired'
-          : trigger !== 'manual' &&
-              error instanceof TimeZoneDataPackTransportError
-            ? 'offline-valid'
-            : 'retry-failed',
-        lastCheckedAt: checkedAtIso,
-        lastError: 'refresh-failed',
-      });
+      await recordFailure(error, trigger, checkedAt);
     } finally {
       clearTimeout(timer);
       // Expo buffers an unread body in native memory, and on iOS cancelling a
