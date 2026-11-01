@@ -319,15 +319,15 @@ describe('reminder dispatch gate', () => {
     return { log: (event: string) => logs.push(event) } as never;
   }
 
-  for (const [name, environment] of [
-    ['a missing', {}],
-    ['an empty', { REMINDER_DISPATCH_ENABLED: '' }],
-    ['a false', { REMINDER_DISPATCH_ENABLED: 'false' }],
-    ['a capitalised', { REMINDER_DISPATCH_ENABLED: 'TRUE' }],
-    ['a padded', { REMINDER_DISPATCH_ENABLED: ' true ' }],
-    ['a numeric', { REMINDER_DISPATCH_ENABLED: '1' }],
+  for (const [name, environment, event] of [
+    ['a false', { REMINDER_DISPATCH_ENABLED: 'false' }, 'suspended'],
+    ['a missing', {}, 'gate-invalid'],
+    ['an empty', { REMINDER_DISPATCH_ENABLED: '' }, 'gate-invalid'],
+    ['a capitalised', { REMINDER_DISPATCH_ENABLED: 'TRUE' }, 'gate-invalid'],
+    ['a padded', { REMINDER_DISPATCH_ENABLED: ' true ' }, 'gate-invalid'],
+    ['a numeric', { REMINDER_DISPATCH_ENABLED: '1' }, 'gate-invalid'],
   ] as const) {
-    it(`suspends dispatch with ${name} value`, async () => {
+    it(`stops dispatch with ${name} value`, async () => {
       const logs: string[] = [];
       let loads = 0;
       await createReminderDispatchTimerHandler(environment, async () => {
@@ -336,9 +336,38 @@ describe('reminder dispatch gate', () => {
       })({}, context(logs));
 
       assert.equal(loads, 0);
-      assert.deepEqual(logs, ['reminder-dispatch-suspended']);
+      assert.deepEqual(logs, [`reminder-dispatch-${event}`]);
     });
   }
+
+  it('stops a warm runner, and resumes only on an explicit true', async () => {
+    const logs: string[] = [];
+    const environment: NodeJS.ProcessEnv = {
+      REMINDER_DISPATCH_ENABLED: 'true',
+    };
+    let runs = 0;
+    const handler = createReminderDispatchTimerHandler(
+      environment,
+      async () => async () => {
+        runs += 1;
+      },
+    );
+
+    await handler({}, context(logs));
+    environment.REMINDER_DISPATCH_ENABLED = 'false';
+    await handler({}, context(logs));
+    delete environment.REMINDER_DISPATCH_ENABLED;
+    await handler({}, context(logs));
+    assert.equal(runs, 1);
+
+    environment.REMINDER_DISPATCH_ENABLED = 'true';
+    await handler({}, context(logs));
+    assert.equal(runs, 2);
+    assert.deepEqual(logs, [
+      'reminder-dispatch-suspended',
+      'reminder-dispatch-gate-invalid',
+    ]);
+  });
 
   it('runs when the value is exactly true, and reuses the runner', async () => {
     const logs: string[] = [];
@@ -1031,6 +1060,16 @@ describe('partitioned reminder dispatch', () => {
       test.logs.length = 0;
       await test.run();
       assert.deepEqual(windowLogs(test), []);
+    });
+
+    it('never replays a window that closed while dispatch was stopped', async () => {
+      const test = harness([subscriptionRow('sydney')], { now: checked });
+
+      await test.run();
+
+      assert.deepEqual(test.sent, []);
+      assert.deepEqual(statuses(test), []);
+      assert.deepEqual(windowLogs(test), events('not-swept'));
     });
 
     it('reports a one-day window no run swept', async () => {
