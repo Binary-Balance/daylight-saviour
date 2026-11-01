@@ -149,8 +149,8 @@ describe('Home Time Zone session', () => {
     );
 
     expect(ready).toMatchObject({
-      acknowledgedEventAt: '2026-04-04T16:00:00.000Z',
       kind: 'ready',
+      openingAcknowledgedEventAt: '2026-04-04T16:00:00.000Z',
       secondaryCopySeed: 'test-installation-seed',
       uses24hourClock: true,
       zoneId: 'Australia/Sydney',
@@ -270,11 +270,35 @@ describe('Home Time Zone session', () => {
       (snapshot) => snapshot.kind === 'ready',
     );
     expect(ready).toMatchObject({
-      acknowledgedEventAt: null,
       kind: 'ready',
+      openingAcknowledgedEventAt: null,
       zoneId: 'Australia/Sydney',
     });
     expect(harness.storedZone()).toBe('Australia/Sydney');
+
+    stop();
+  });
+
+  it('opens a newly selected zone with its saved acknowledgement', async () => {
+    const harness = createHarness();
+    jest
+      .mocked(harness.adapters.aftermathAcknowledgements.load)
+      .mockResolvedValue('2026-04-04T16:00:00.000Z');
+    const session = createSession(harness.adapters);
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'confirm');
+
+    session.dispatch({ type: 'select-zone', zoneId: 'Australia/Sydney' });
+
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'ready'),
+    ).toMatchObject({
+      openingAcknowledgedEventAt: '2026-04-04T16:00:00.000Z',
+      zoneId: 'Australia/Sydney',
+    });
+    expect(
+      harness.adapters.aftermathAcknowledgements.load,
+    ).toHaveBeenLastCalledWith('Australia/Sydney');
 
     stop();
   });
@@ -323,8 +347,8 @@ describe('Home Time Zone session', () => {
     });
     session.dispatch({ type: 'cancel-selection' });
     expect(session.getSnapshot()).toMatchObject({
-      acknowledgedEventAt: '2026-04-04T16:00:00.000Z',
       kind: 'ready',
+      openingAcknowledgedEventAt: '2026-04-04T16:00:00.000Z',
       zoneId: 'Australia/Brisbane',
     });
     expect(harness.adapters.storage.save).not.toHaveBeenCalled();
@@ -368,10 +392,6 @@ describe('Home Time Zone session', () => {
       type: 'acknowledge-aftermath',
     });
     const acknowledged = session.getSnapshot();
-    expect(acknowledged).toMatchObject({
-      acknowledgedEventAt: '2026-10-03T16:00:00.000Z',
-      kind: 'ready',
-    });
     session.dispatch({
       eventAt: '2026-10-03T16:00:00.000Z',
       type: 'acknowledge-aftermath',
@@ -382,6 +402,49 @@ describe('Home Time Zone session', () => {
     ).toHaveBeenCalledTimes(1);
     await Promise.resolve();
     expect(session.getSnapshot().kind).toBe('ready');
+
+    // The unsaved acknowledgement still ends the Aftermath on the next opening.
+    session.dispatch({ type: 'foreground' });
+    expect(session.getSnapshot()).toMatchObject({
+      kind: 'ready',
+      openingAcknowledgedEventAt: '2026-10-03T16:00:00.000Z',
+    });
+
+    stop();
+  });
+
+  it('keeps the opening acknowledgement until the app returns from the background', async () => {
+    const harness = createHarness({ savedZone: 'Australia/Sydney' });
+    const session = createSession(harness.adapters);
+    const stop = session.start();
+    const loading = session.getSnapshot();
+    session.dispatch({ type: 'foreground' });
+    expect(session.getSnapshot()).toBe(loading);
+    const ready = await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'ready',
+    );
+
+    session.dispatch({ type: 'foreground' });
+    expect(session.getSnapshot()).toBe(ready);
+    session.dispatch({
+      eventAt: '2026-10-03T16:00:00.000Z',
+      type: 'acknowledge-aftermath',
+    });
+    expect(
+      harness.adapters.aftermathAcknowledgements.save,
+    ).toHaveBeenCalledWith('Australia/Sydney', '2026-10-03T16:00:00.000Z');
+    expect(session.getSnapshot()).toMatchObject({
+      openingAcknowledgedEventAt: null,
+    });
+
+    session.dispatch({ type: 'foreground' });
+    const reopened = session.getSnapshot();
+    expect(reopened).toMatchObject({
+      openingAcknowledgedEventAt: '2026-10-03T16:00:00.000Z',
+    });
+    session.dispatch({ type: 'foreground' });
+    expect(session.getSnapshot()).toBe(reopened);
 
     stop();
   });
