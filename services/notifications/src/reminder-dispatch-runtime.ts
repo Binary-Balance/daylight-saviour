@@ -192,11 +192,11 @@ async function forEachBounded<T>(
 }
 
 async function countResult(
-  work: Promise<ReminderDispatchResult>,
+  work: () => Promise<ReminderDispatchResult>,
   count: CountEvent,
 ) {
   try {
-    const result = await work;
+    const result = await work();
     count(
       result.alreadyRecorded === true
         ? 'reminder-dispatch-already-recorded'
@@ -222,7 +222,9 @@ async function processPages<T>(
   let pagesRead = 0;
   try {
     for await (const page of pages) {
-      await forEachBounded(page, (item) => countResult(work(item), count));
+      await forEachBounded(page, (item) =>
+        countResult(() => work(item), count),
+      );
       afterPage?.();
       pagesRead += 1;
       if (pagesRead === maxPagesPerQuery) {
