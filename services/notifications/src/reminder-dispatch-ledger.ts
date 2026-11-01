@@ -568,6 +568,66 @@ function packExpiryCanReset(
   );
 }
 
+function preparedRecord(preparation: ReminderDispatchPreparation) {
+  const identity = normalizeIdentity(preparation);
+  const now = nowDate(preparation.now);
+  const startsAt = nowDate(preparation.deliveryWindowStartsAt);
+  const endsAt = nowDate(preparation.deliveryWindowEndsAt);
+  const packValidUntil = nowDate(preparation.packValidUntil);
+  if (
+    !Number.isSafeInteger(preparation.attemptGeneration) ||
+    preparation.attemptGeneration < 1 ||
+    endsAt.getTime() < startsAt.getTime()
+  ) {
+    throw new Error('Invalid reminder dispatch preparation');
+  }
+  return {
+    ...identity,
+    attemptGeneration: preparation.attemptGeneration,
+    createdAt: now,
+    deliveryWindowEndsAt: endsAt,
+    deliveryWindowStartsAt: startsAt,
+    packValidUntil,
+    status: 'pending' as const,
+    updatedAt: now,
+  };
+}
+
+/**
+ * The record that replaces `existing` for a preparation, or null when
+ * `existing` stands. A newer registration restarts the delivery unless it
+ * was accepted, is uncertain or expired for good, and a claim that may have
+ * sent becomes uncertain instead. The same registration only refreshes a
+ * delivery that can still be retried, and an older one never overwrites a
+ * newer.
+ */
+function preparedReplacement(
+  existing: ReminderDispatchLedgerRecord,
+  base: ReturnType<typeof preparedRecord>,
+) {
+  const resettableExpiry =
+    terminalExpiryCanReset(existing) ||
+    packExpiryCanReset(existing, base.packValidUntil, base.updatedAt);
+  if (existing.attemptGeneration > base.attemptGeneration) return null;
+  if (existing.attemptGeneration === base.attemptGeneration) {
+    const canRefresh =
+      existing.status === 'transient-failure' ||
+      existing.status === 'pending' ||
+      resettableExpiry;
+    return canRefresh ? { ...base, createdAt: existing.createdAt } : null;
+  }
+  if (
+    existing.status === 'accepted' ||
+    existing.status === 'uncertain' ||
+    (existing.status === 'expired' && !resettableExpiry)
+  ) {
+    return null;
+  }
+  return existing.status === 'claimed' && existing.sendStartedAt !== undefined
+    ? uncertainRecord(existing, base.updatedAt)
+    : base;
+}
+
 function isUnsettled(record: ReminderDispatchLedgerRecord, now: Date) {
   if (record.status === 'permanent-failure') {
     return (
@@ -640,104 +700,61 @@ export function createTableReminderDispatchLedgerStore(
     await table.replace(entityFromRecord(record, key), etag);
   }
 
-  async function prepare(preparation: ReminderDispatchPreparation) {
-    const identity = normalizeIdentity(preparation);
-    const now = nowDate(preparation.now);
-    const startsAt = nowDate(preparation.deliveryWindowStartsAt);
-    const endsAt = nowDate(preparation.deliveryWindowEndsAt);
-    const packValidUntil = nowDate(preparation.packValidUntil);
-    if (
-      !Number.isSafeInteger(preparation.attemptGeneration) ||
-      preparation.attemptGeneration < 1 ||
-      endsAt.getTime() < startsAt.getTime()
-    ) {
-      throw new Error('Invalid reminder dispatch preparation');
+  /**
+   * Replaces `existing` and reads the record back. Undefined when another
+   * worker's write won, so the caller reads again.
+   */
+  async function replaceAndRead(
+    next: Omit<ReminderDispatchLedgerRecord, 'etag'>,
+    existing: ReminderDispatchLedgerRecord,
+  ) {
+    try {
+      await replace(next, existing.etag);
+      const updated = await get(existing);
+      if (updated !== null) {
+        return { kind: 'updated' as const, record: updated };
+      }
+    } catch (error) {
+      if (!conflict(error)) throw error;
     }
-    const base = {
-      ...identity,
-      attemptGeneration: preparation.attemptGeneration,
-      createdAt: now,
-      deliveryWindowEndsAt: endsAt,
-      deliveryWindowStartsAt: startsAt,
-      packValidUntil,
-      status: 'pending' as const,
-      updatedAt: now,
-    };
+    return undefined;
+  }
 
-    for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-      const existing = await get(identity);
-      if (existing === null) {
-        try {
-          await table.create(
-            entityFromRecord(base, reminderDispatchStorageKey(identity)),
-          );
-          const created = await get(identity);
-          if (created !== null) return created;
-        } catch (error) {
-          if (!conflict(error)) {
-            try {
-              const reconciled = await get(identity);
-              if (reconciled !== null) return reconciled;
-            } catch {
-              // Preserve the original create failure when reconciliation is
-              // unavailable; a later operation can retry the preparation.
-            }
-            throw error;
-          }
-        }
-        continue;
-      }
-      if (existing.attemptGeneration > base.attemptGeneration) return existing;
-      if (existing.attemptGeneration === base.attemptGeneration) {
-        const canRefresh =
-          existing.status === 'transient-failure' ||
-          existing.status === 'pending' ||
-          terminalExpiryCanReset(existing) ||
-          packExpiryCanReset(existing, packValidUntil, now);
-        if (!canRefresh) return existing;
-        const refreshed = {
-          ...base,
-          createdAt: existing.createdAt,
-        };
-        try {
-          await replace(refreshed, existing.etag);
-          const updated = await get(identity);
-          if (updated !== null) return updated;
-        } catch (error) {
-          if (!conflict(error)) throw error;
-        }
-        continue;
-      }
-      if (
-        existing.status === 'accepted' ||
-        existing.status === 'uncertain' ||
-        (existing.status === 'expired' &&
-          !terminalExpiryCanReset(existing) &&
-          !packExpiryCanReset(existing, packValidUntil, now))
-      ) {
-        return existing;
-      }
-      if (
-        existing.status === 'claimed' &&
-        existing.sendStartedAt !== undefined
-      ) {
-        const uncertain = uncertainRecord(existing, now);
-        try {
-          await replace(uncertain, existing.etag);
-          const updated = await get(identity);
-          if (updated !== null) return updated;
-        } catch (error) {
-          if (!conflict(error)) throw error;
-        }
-        continue;
-      }
+  /** Undefined when another worker created the record first. */
+  async function createPrepared(base: ReturnType<typeof preparedRecord>) {
+    try {
+      await table.create(
+        entityFromRecord(base, reminderDispatchStorageKey(base)),
+      );
+      const created = await get(base);
+      if (created !== null) return created;
+    } catch (error) {
+      if (conflict(error)) return undefined;
       try {
-        await replace(base, existing.etag);
-        const updated = await get(identity);
-        if (updated !== null) return updated;
-      } catch (error) {
-        if (!conflict(error)) throw error;
+        const reconciled = await get(base);
+        if (reconciled !== null) return reconciled;
+      } catch {
+        // Preserve the original create failure when reconciliation is
+        // unavailable; a later operation can retry the preparation.
       }
+      throw error;
+    }
+    return undefined;
+  }
+
+  async function prepare(preparation: ReminderDispatchPreparation) {
+    const base = preparedRecord(preparation);
+    for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
+      const existing = await get(base);
+      if (existing === null) {
+        const created = await createPrepared(base);
+        if (created !== undefined) return created;
+        continue;
+      }
+      const next = preparedReplacement(existing, base);
+      if (next === null) return existing;
+      const updated = await replaceAndRead(next, existing);
+      if (updated !== undefined) return updated.record;
     }
     throw new Error(
       'Reminder dispatch preparation contention exceeded retry limit',
