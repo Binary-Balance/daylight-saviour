@@ -95,3 +95,14 @@ jobs:
         env:
           NODE_ENV: development
         run: apps/mobile/android/gradlew -p apps/mobile/android assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      # Expo inlines EXPO_PUBLIC_ values while bundling, so only a real export
+      # shows that it found the file. This runs last because it leaves the
+      # example's values in Metro's cache.
+      - name: Check public environment discovery
+        run: |
+          cp apps/mobile/.env.example apps/mobile/.env
+          npm run web:export -- --clear --output-dir "$RUNNER_TEMP/env-export"
+          for value in time-zone-data.example.invalid reminders.example.invalid REPLACE_WITH_RAW_32_BYTE_ED25519_PUBLIC_KEY_BASE64; do
+            grep -rq "$value" "$RUNNER_TEMP/env-export"
+          done
