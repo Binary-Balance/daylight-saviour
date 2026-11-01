@@ -13,6 +13,10 @@ const ledgerPartitionPrefix = 'reminder-dispatch-v1-';
 const tableMutationRetryLimit = 12;
 const defaultClaimLeaseMs = 60_000;
 const maxClaimLeaseMs = 60 * 60 * 1_000;
+const unsettledPageSize = 100;
+// Shorter than any real installation ID, so a sweep marker takes a storage key
+// no delivery can have, and keeps the ledger's retention and purge.
+const sweepInstallationId = 'zone-sweep';
 
 export type ReminderDispatchStatus =
   | 'pending'
@@ -31,6 +35,14 @@ export interface ReminderDispatchIdentity {
   readonly installationId: string;
   readonly timing: ReminderDispatchTiming;
 }
+
+/** The zone, Change Event and timing that one Delivery Window belongs to. */
+export type ReminderDispatchWindow = Omit<
+  ReminderDispatchIdentity,
+  'installationId'
+>;
+
+export type ReminderDispatchWindowReport = 'not-swept' | 'sweep-incomplete';
 
 export type ReminderDispatchExpiryReason =
   | 'event'
@@ -113,6 +125,9 @@ export interface ReminderDispatchLedgerTable {
     partitionKey: string,
     rowKey: string,
   ) => Promise<Record<string, unknown>>;
+  readonly listUnsettledPages: (
+    now: Date,
+  ) => AsyncIterable<readonly Record<string, unknown>[]>;
   readonly listUpdatedBefore: (
     cutoff: Date,
   ) => AsyncIterable<Record<string, unknown>>;
@@ -145,10 +160,38 @@ export interface ReminderDispatchLedgerStore {
     preparation: ReminderDispatchPreparation,
   ) => Promise<ReminderDispatchLedgerRecord>;
   /**
-   * Deletes, in one pass, records last updated more than 30 days ago whose
-   * Change Event has passed.
+   * Yields bounded pages of records no later dispatch will reach: those left
+   * open after their Delivery Window, and rejected tokens still to clean up.
+   * A row that cannot be read is skipped and passed to `onInvalidRow`.
    */
-  readonly purgeExpired: (now: Date) => Promise<void>;
+  readonly listUnsettledPages: (
+    now: Date,
+    onInvalidRow: () => void,
+  ) => AsyncIterable<readonly ReminderDispatchLedgerRecord[]>;
+  /**
+   * Deletes, in one pass, records last updated more than 30 days ago whose
+   * Change Event has passed, or cannot be read. Returns how many rows it left
+   * because it could not date or key them.
+   */
+  readonly purgeExpired: (now: Date) => Promise<number>;
+  /**
+   * Records a finished sweep of a zone. One sweep that reached the last page
+   * completes the window, whatever the other sweeps did.
+   */
+  readonly recordSweep: (
+    window: ReminderDispatchWindow,
+    reachedLastPage: boolean,
+    now: Date,
+  ) => Promise<void>;
+  /**
+   * Says, to at most one run, what stopped a closed window being fully swept.
+   * The report is marked before the caller logs it, so a run killed between
+   * the two loses the event.
+   */
+  readonly reportClosedWindow: (
+    window: ReminderDispatchWindow,
+    now: Date,
+  ) => Promise<ReminderDispatchWindowReport | null>;
   readonly release: (
     claim: ReminderDispatchClaim,
     now: Date,
@@ -189,6 +232,28 @@ export function reminderDispatchStorageKey(
         normalized.timing,
       ].join(':'),
     ),
+  };
+}
+
+function sweepStorageKey(window: ReminderDispatchWindow) {
+  return reminderDispatchStorageKey({
+    ...window,
+    installationId: sweepInstallationId,
+  });
+}
+
+function sweepEntity(
+  window: ReminderDispatchWindow,
+  sweep: 'complete' | 'incomplete' | 'reported',
+  updatedAt: Date,
+) {
+  return {
+    ...sweepStorageKey(window),
+    changeEventAt: window.changeEventAt,
+    homeTimeZone: window.homeTimeZone,
+    sweep,
+    timing: window.timing,
+    updatedAt,
   };
 }
 
@@ -501,6 +566,51 @@ function packExpiryCanReset(
     record.expiryReason === 'pack' &&
     packValidUntil.getTime() >= now.getTime()
   );
+}
+
+function isUnsettled(record: ReminderDispatchLedgerRecord, now: Date) {
+  if (record.status === 'permanent-failure') {
+    return (
+      record.cleanupStatus === 'pending' || record.cleanupStatus === 'failed'
+    );
+  }
+  return (
+    (record.status === 'pending' ||
+      record.status === 'claimed' ||
+      record.status === 'transient-failure') &&
+    record.deliveryWindowEndsAt.getTime() < now.getTime()
+  );
+}
+
+function changeEventAhead(value: unknown, now: Date) {
+  try {
+    return instant(value, 'Change Event instant').getTime() > now.getTime();
+  } catch {
+    // Dispatch first writes a row at most about eight days before its event,
+    // so a row old enough to purge has passed it. With none to read, age
+    // alone decides.
+    return false;
+  }
+}
+
+/**
+ * The keys of a listed row due for deletion, or null to keep it. Throws for
+ * a row it cannot date or key.
+ */
+function expiredRowKeys(
+  entity: Record<string, unknown>,
+  now: Date,
+  cutoff: number,
+) {
+  if (dateValue(entity.updatedAt, 'updatedAt').getTime() >= cutoff) return null;
+  // A deleted record no longer fences its delivery identity. Keep it while
+  // its Change Event is ahead so a later dispatch cannot send it again.
+  if (changeEventAhead(entity.changeEventAt, now)) return null;
+  return {
+    etag: requiredString(entity.etag, 'ETag'),
+    partitionKey: requiredString(entity.partitionKey, 'partition key'),
+    rowKey: requiredString(entity.rowKey, 'row key'),
+  };
 }
 
 export function createTableReminderDispatchLedgerStore(
@@ -1123,34 +1233,101 @@ export function createTableReminderDispatchLedgerStore(
     );
   }
 
+  async function* listUnsettledPages(
+    nowInput: Date,
+    onInvalidRow: () => void,
+  ): AsyncGenerator<readonly ReminderDispatchLedgerRecord[], void, unknown> {
+    const now = nowDate(nowInput);
+    for await (const page of table.listUnsettledPages(now)) {
+      yield page.flatMap((entity) => {
+        try {
+          const record = recordFromEntity(entity);
+          return isUnsettled(record, now) ? [record] : [];
+        } catch {
+          // A bad row stays listed until the daily purge deletes it, or for
+          // good if its last update is unreadable. Throwing here would cost
+          // every later row, every run, until then.
+          onInvalidRow();
+          return [];
+        }
+      });
+    }
+  }
+
+  async function readSweep(window: ReminderDispatchWindow) {
+    const key = sweepStorageKey(window);
+    try {
+      return await table.get(key.partitionKey, key.rowKey);
+    } catch (error) {
+      if (statusCode(error) === 404) return null;
+      throw error;
+    }
+  }
+
+  /** Returns false when an overlapping run wrote first. */
+  async function writeSweep(
+    entity: ReturnType<typeof sweepEntity>,
+    existing: Record<string, unknown> | null,
+  ) {
+    try {
+      if (existing === null) await table.create(entity);
+      else await table.replace(entity, requiredString(existing.etag, 'ETag'));
+      return true;
+    } catch (error) {
+      if (conflict(error)) return false;
+      throw error;
+    }
+  }
+
+  async function recordSweep(
+    window: ReminderDispatchWindow,
+    reachedLastPage: boolean,
+    now: Date,
+  ) {
+    const existing = await readSweep(window);
+    if (
+      existing !== null &&
+      !(reachedLastPage && existing.sweep === 'incomplete')
+    ) {
+      return;
+    }
+    const sweep = reachedLastPage ? 'complete' : 'incomplete';
+    await writeSweep(sweepEntity(window, sweep, nowDate(now)), existing);
+  }
+
+  async function reportClosedWindow(window: ReminderDispatchWindow, now: Date) {
+    const existing = await readSweep(window);
+    if (existing?.sweep === 'complete' || existing?.sweep === 'reported') {
+      return null;
+    }
+    const entity = sweepEntity(window, 'reported', nowDate(now));
+    if (!(await writeSweep(entity, existing))) return null;
+    return existing === null ? 'not-swept' : 'sweep-incomplete';
+  }
+
   async function purgeExpired(nowInput: Date) {
     const now = nowDate(nowInput);
     const cutoff = now.getTime() - operationalRetentionMs;
+    let unreadable = 0;
     for await (const entity of table.listUpdatedBefore(new Date(cutoff))) {
-      const updatedAt = dateValue(entity.updatedAt, 'updatedAt');
-      const changeEventAt = instant(
-        entity.changeEventAt,
-        'Change Event instant',
-      );
-      // A deleted record no longer fences its delivery identity. Keep it while
-      // its Change Event is ahead so a later dispatch cannot send it again.
-      if (
-        updatedAt.getTime() >= cutoff ||
-        changeEventAt.getTime() > now.getTime()
-      ) {
+      let keys: ReturnType<typeof expiredRowKeys>;
+      try {
+        keys = expiredRowKeys(entity, now, cutoff);
+      } catch {
+        // Throwing here would stop the purge at this row, every day, and
+        // leave every row listed after it.
+        unreadable += 1;
         continue;
       }
+      if (keys === null) continue;
       try {
-        await table.delete(
-          requiredString(entity.partitionKey, 'partition key'),
-          requiredString(entity.rowKey, 'row key'),
-          requiredString(entity.etag, 'ETag'),
-        );
+        await table.delete(keys.partitionKey, keys.rowKey, keys.etag);
       } catch (error) {
         // A newer write or an overlapping run wins; the next run reconsiders.
         if (statusCode(error) !== 404 && !conflict(error)) throw error;
       }
     }
+    return unreadable;
   }
 
   return {
@@ -1158,9 +1335,12 @@ export function createTableReminderDispatchLedgerStore(
     complete,
     get,
     invalidate,
+    listUnsettledPages,
     prepare,
     purgeExpired,
+    recordSweep,
     release,
+    reportClosedWindow,
     beginSend,
     cancelBeforeProvider,
     updateCleanup,
@@ -1227,6 +1407,14 @@ export function createAzureReminderDispatchLedgerStore(
         rowKey,
       };
     },
+    listUnsettledPages: (now) =>
+      table
+        .listEntities<Record<string, unknown>>({
+          queryOptions: {
+            filter: odata`((status eq 'pending' or status eq 'claimed' or status eq 'transient-failure') and deliveryWindowEndsAt lt ${now}) or (status eq 'permanent-failure' and (cleanupStatus eq 'pending' or cleanupStatus eq 'failed'))`,
+          },
+        })
+        .byPage({ maxPageSize: unsettledPageSize }),
     listUpdatedBefore: (cutoff) =>
       table.listEntities<Record<string, unknown>>({
         queryOptions: { filter: odata`updatedAt lt ${cutoff}` },

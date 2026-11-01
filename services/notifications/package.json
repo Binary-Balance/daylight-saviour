@@ -10,9 +10,9 @@
     "host.json"
   ],
   "scripts": {
-    "prebuild": "npm run build --workspace @daylight-saviour/copy",
-    "pretest": "npm run build --workspace @daylight-saviour/copy",
-    "pretypecheck": "npm run build --workspace @daylight-saviour/copy",
+    "prebuild": "npm run build --workspace @daylight-saviour/copy && npm run build --workspace @daylight-saviour/domain",
+    "pretest": "npm run build --workspace @daylight-saviour/copy && npm run build --workspace @daylight-saviour/domain",
+    "pretypecheck": "npm run build --workspace @daylight-saviour/copy && npm run build --workspace @daylight-saviour/domain",
     "build": "tsc --project tsconfig.build.json",
     "test": "node --test src/*.test.ts",
     "typecheck": "tsc --noEmit"

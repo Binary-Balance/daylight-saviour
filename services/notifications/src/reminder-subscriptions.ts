@@ -21,6 +21,7 @@ const registrationRequestFutureSkewMs = 5 * 60 * 1000;
 const throttleLimit = 5;
 const tableMutationRetryLimit = 12;
 const subscriptionPartitionKey = 'subscriptions-v1';
+const zoneSubscriptionPageSize = 100;
 const versionedRegistrationPrefix = 'v2.';
 
 interface ReminderSubscriptionRegistration {
@@ -75,6 +76,9 @@ interface SubscriptionTable {
     rowKey: string,
   ) => Promise<SubscriptionEntity>;
   readonly listRetiredExpired: (now: Date) => AsyncIterable<SubscriptionEntity>;
+  readonly listZonePages: (
+    homeTimeZone: string,
+  ) => AsyncIterable<readonly SubscriptionEntity[]>;
   readonly replace: (
     entity: Record<string, unknown>,
     etag: string,
@@ -131,6 +135,13 @@ export interface ReminderSubscriptionStore {
   readonly getSubscriptionSnapshot: (
     installationId: string,
   ) => Promise<ReminderSubscriptionSnapshot | null>;
+  /**
+   * Yields one bounded page at a time. Azure Tables has no secondary index, so
+   * it scans the shared partition and a page can be empty.
+   */
+  readonly listZoneSubscriptionPages: (
+    homeTimeZone: string,
+  ) => AsyncIterable<readonly ReminderSubscriptionSnapshot[]>;
   /**
    * Provider invalid-token cleanup must include the generation that was sent.
    * This prevents a same-token re-registration from being removed by a late
@@ -713,6 +724,15 @@ export function createTableReminderSubscriptionStore(
         throw error;
       }
     },
+    async *listZoneSubscriptionPages(
+      homeTimeZone,
+    ): AsyncGenerator<readonly ReminderSubscriptionSnapshot[], void, unknown> {
+      for await (const page of subscriptions.listZonePages(homeTimeZone)) {
+        yield page.flatMap(
+          (entity) => subscriptionSnapshot(entity, entity.rowKey) ?? [],
+        );
+      }
+    },
     async removeIfDeviceTokenMatches(subscription, invalidatedAt) {
       return removeStoredSubscription(
         subscriptions,
@@ -970,6 +990,56 @@ async function takeThrottleAllowance(
   throw new Error('Throttle update contention exceeded retry limit');
 }
 
+interface SubscriptionRow {
+  attemptGeneration: number;
+  credentialHash?: string;
+  deviceToken?: string;
+  homeTimeZone?: string;
+  oneDayEnabled?: boolean;
+  oneWeekEnabled?: boolean;
+  platform?: 'android' | 'ios';
+  registeredAt?: unknown;
+  retiredAt?: unknown;
+  state?: 'retired';
+}
+
+function subscriptionEntityFromRow(
+  entity: SubscriptionRow & { readonly etag: string },
+  partitionKey: string,
+  rowKey: string,
+): SubscriptionEntity {
+  return {
+    attemptGeneration: entity.attemptGeneration,
+    credentialHash:
+      typeof entity.credentialHash === 'string'
+        ? entity.credentialHash
+        : undefined,
+    deviceToken:
+      typeof entity.deviceToken === 'string' ? entity.deviceToken : undefined,
+    etag: entity.etag,
+    homeTimeZone:
+      typeof entity.homeTimeZone === 'string' ? entity.homeTimeZone : undefined,
+    oneDayEnabled:
+      typeof entity.oneDayEnabled === 'boolean'
+        ? entity.oneDayEnabled
+        : undefined,
+    oneWeekEnabled:
+      typeof entity.oneWeekEnabled === 'boolean'
+        ? entity.oneWeekEnabled
+        : undefined,
+    partitionKey,
+    platform:
+      entity.platform === 'android' || entity.platform === 'ios'
+        ? entity.platform
+        : undefined,
+    registeredAt:
+      entity.registeredAt instanceof Date ? entity.registeredAt : undefined,
+    retiredAt: entity.retiredAt instanceof Date ? entity.retiredAt : undefined,
+    rowKey,
+    state: entity.state === 'retired' ? 'retired' : undefined,
+  };
+}
+
 const azureReminderSubscriptionStoreDependencies: AzureReminderSubscriptionStoreDependencies =
   {
     createCredential: (clientId) => new ManagedIdentityCredential(clientId),
@@ -1011,61 +1081,17 @@ export function createAzureReminderSubscriptionStore(
         await subscriptions.createEntity(entity as never);
       },
       get: async (partitionKey, rowKey) => {
-        const entity = await subscriptions.getEntity<{
-          attemptGeneration: number;
-          credentialHash?: string;
-          deviceToken?: string;
-          homeTimeZone?: string;
-          oneDayEnabled?: boolean;
-          oneWeekEnabled?: boolean;
-          platform?: 'android' | 'ios';
-          registeredAt?: unknown;
-          retiredAt?: unknown;
-          state?: 'retired';
-        }>(partitionKey, rowKey);
+        const entity = await subscriptions.getEntity<SubscriptionRow>(
+          partitionKey,
+          rowKey,
+        );
         if (
           entity.state !== 'retired' &&
           typeof entity.deviceToken !== 'string'
         ) {
           throw new Error('Stored subscription record is invalid');
         }
-        return {
-          attemptGeneration: entity.attemptGeneration,
-          credentialHash:
-            typeof entity.credentialHash === 'string'
-              ? entity.credentialHash
-              : undefined,
-          deviceToken:
-            typeof entity.deviceToken === 'string'
-              ? entity.deviceToken
-              : undefined,
-          etag: entity.etag,
-          homeTimeZone:
-            typeof entity.homeTimeZone === 'string'
-              ? entity.homeTimeZone
-              : undefined,
-          oneDayEnabled:
-            typeof entity.oneDayEnabled === 'boolean'
-              ? entity.oneDayEnabled
-              : undefined,
-          oneWeekEnabled:
-            typeof entity.oneWeekEnabled === 'boolean'
-              ? entity.oneWeekEnabled
-              : undefined,
-          partitionKey,
-          platform:
-            entity.platform === 'android' || entity.platform === 'ios'
-              ? entity.platform
-              : undefined,
-          registeredAt:
-            entity.registeredAt instanceof Date
-              ? entity.registeredAt
-              : undefined,
-          retiredAt:
-            entity.retiredAt instanceof Date ? entity.retiredAt : undefined,
-          rowKey,
-          state: entity.state === 'retired' ? 'retired' : undefined,
-        };
+        return subscriptionEntityFromRow(entity, partitionKey, rowKey);
       },
       listRetiredExpired: (now) =>
         subscriptions.listEntities<{
@@ -1077,6 +1103,26 @@ export function createAzureReminderSubscriptionStore(
             filter: odata`state eq 'retired' and retiredAt lt ${now}`,
           },
         }) as AsyncIterable<SubscriptionEntity>,
+      listZonePages: async function* (
+        homeTimeZone,
+      ): AsyncGenerator<readonly SubscriptionEntity[], void, unknown> {
+        const pages = subscriptions
+          .listEntities<SubscriptionRow>({
+            queryOptions: {
+              filter: odata`PartitionKey eq ${subscriptionPartitionKey} and homeTimeZone eq ${homeTimeZone}`,
+            },
+          })
+          .byPage({ maxPageSize: zoneSubscriptionPageSize });
+        for await (const page of pages) {
+          yield page.map((row) =>
+            subscriptionEntityFromRow(
+              row,
+              subscriptionPartitionKey,
+              row.rowKey as string,
+            ),
+          );
+        }
+      },
       replace: async (entity, etag) => {
         await subscriptions.updateEntity(entity as never, 'Replace', { etag });
       },
