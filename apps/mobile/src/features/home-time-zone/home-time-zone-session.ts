@@ -93,17 +93,10 @@ type FlowState =
       readonly zoneId: string;
     };
 
-// Takes the work, not a started promise, so mutation testing, which empties
-// functions in turn, cannot leave a rejection unhandled.
-async function ignoreFailure(work: () => Promise<void>) {
-  try {
-    await work();
-  } catch {
-    // The data pack manager reports its own outcome in its snapshot, and an
-    // acknowledgement that is not saved only repeats one factual aftermath
-    // opening, so neither failure needs handling.
-  }
-}
+// The data pack manager reports its own outcome in its snapshot, and an
+// acknowledgement that is not saved only repeats one factual aftermath opening,
+// so neither failure needs handling.
+function ignoreFailure() {}
 
 export function createHomeTimeZoneSession({
   adapters,
@@ -298,9 +291,9 @@ export function createHomeTimeZoneSession({
       setFlow({ ...flow, returnAcknowledgedEventAt: eventAt });
     }
     if (zoneId !== null) {
-      void ignoreFailure(() =>
-        adapters.aftermathAcknowledgements.save(zoneId, eventAt),
-      );
+      void adapters.aftermathAcknowledgements
+        .save(zoneId, eventAt)
+        .catch(ignoreFailure);
     }
   }
 
@@ -391,14 +384,14 @@ export function createHomeTimeZoneSession({
         acknowledgeAftermath(event.eventAt);
         return;
       case 'manual-refresh':
-        void ignoreFailure(() => adapters.timeZoneDataPacks.refresh('manual'));
+        void adapters.timeZoneDataPacks.refresh('manual').catch(ignoreFailure);
         return;
       case 'foreground':
         startOpening();
         refreshHourCycle();
-        void ignoreFailure(() =>
-          adapters.timeZoneDataPacks.refresh('foreground'),
-        );
+        void adapters.timeZoneDataPacks
+          .refresh('foreground')
+          .catch(ignoreFailure);
     }
   }
 
@@ -425,7 +418,7 @@ export function createHomeTimeZoneSession({
     dataPackSnapshot = adapters.timeZoneDataPacks.getSnapshot();
     stopDataPackSubscription =
       adapters.timeZoneDataPacks.subscribe(onDataPackChange);
-    void ignoreFailure(() => adapters.timeZoneDataPacks.initialize());
+    void adapters.timeZoneDataPacks.initialize().catch(ignoreFailure);
     void restore(generation);
     return stop;
   }
