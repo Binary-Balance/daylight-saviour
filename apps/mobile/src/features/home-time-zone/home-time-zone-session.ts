@@ -169,6 +169,30 @@ export function createHomeTimeZoneSession({
     return active && generation === expectedGeneration;
   }
 
+  // Shows the report for a saved zone, whether restored or newly selected.
+  async function openReport(
+    zoneId: string,
+    secondaryCopySeed: string,
+    expectedGeneration: number,
+  ) {
+    let acknowledgedEventAt: string | null = null;
+    try {
+      acknowledgedEventAt =
+        await adapters.aftermathAcknowledgements.load(zoneId);
+    } catch {
+      // Noncritical acknowledgement failure may repeat one factual aftermath
+      // opening but cannot block the report.
+    }
+    if (!current(expectedGeneration)) return;
+    setFlow({
+      acknowledgedEventAt,
+      kind: 'ready',
+      openingAcknowledgedEventAt: acknowledgedEventAt,
+      secondaryCopySeed,
+      zoneId,
+    });
+  }
+
   async function restore(expectedGeneration: number) {
     try {
       const saved = await adapters.storage.load();
@@ -181,24 +205,8 @@ export function createHomeTimeZoneSession({
       if (!current(expectedGeneration)) return;
 
       if (saved !== null) {
-        const canonical = normalizeAustralianZoneId(saved);
-        if (canonical === saved) {
-          let acknowledgedEventAt: string | null = null;
-          try {
-            acknowledgedEventAt =
-              await adapters.aftermathAcknowledgements.load(canonical);
-          } catch {
-            // Noncritical acknowledgement failure may repeat one factual
-            // aftermath opening but cannot block the report.
-          }
-          if (!current(expectedGeneration)) return;
-          setFlow({
-            acknowledgedEventAt,
-            kind: 'ready',
-            openingAcknowledgedEventAt: acknowledgedEventAt,
-            secondaryCopySeed,
-            zoneId: canonical,
-          });
+        if (normalizeAustralianZoneId(saved) === saved) {
+          await openReport(saved, secondaryCopySeed, expectedGeneration);
         } else {
           setFlow({
             kind: 'choose',
@@ -254,23 +262,11 @@ export function createHomeTimeZoneSession({
       try {
         await adapters.storage.save(zone.id);
         if (!current(expectedGeneration)) return;
-        let acknowledgedEventAt: string | null = null;
-        try {
-          acknowledgedEventAt = await adapters.aftermathAcknowledgements.load(
-            zone.id,
-          );
-        } catch {
-          // A successfully saved Home Time Zone remains usable when its
-          // acknowledgement cannot be restored.
-        }
-        if (!current(expectedGeneration)) return;
-        setFlow({
-          acknowledgedEventAt,
-          kind: 'ready',
-          openingAcknowledgedEventAt: acknowledgedEventAt,
-          secondaryCopySeed: selectionFlow.secondaryCopySeed,
-          zoneId: zone.id,
-        });
+        await openReport(
+          zone.id,
+          selectionFlow.secondaryCopySeed,
+          expectedGeneration,
+        );
       } catch {
         if (!current(expectedGeneration)) return;
         setFlow({ ...selectionFlow, saveError: 'save-failed', saving: false });
