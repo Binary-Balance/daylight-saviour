@@ -132,25 +132,19 @@ function validRegistrationRequestId(value: unknown): value is string {
   );
 }
 
-function parseStoredState(value: string): StoredChangeReminderState {
-  const parsed: unknown = JSON.parse(value);
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error('Invalid stored reminder state');
-  }
-  const candidate = parsed as Record<string, unknown>;
-  const isLegacy = candidate.version === 2;
-  const isV3 = candidate.version === 3;
-  const hasConfirmedPreferences =
+function hasConfirmedPreferences(candidate: Record<string, unknown>) {
+  return (
     typeof candidate.confirmedOneDayEnabled === 'boolean' &&
-    typeof candidate.confirmedOneWeekEnabled === 'boolean';
-  const hasConfirmedHomeTimeZone =
-    typeof candidate.confirmedHomeTimeZone === 'string';
-  const hasLastContactAt = typeof candidate.lastContactAt === 'string';
-  const expectedKeys =
-    candidate.state === 'pending' && !isLegacy
+    typeof candidate.confirmedOneWeekEnabled === 'boolean'
+  );
+}
+
+// The fields a record of this kind holds, and no others.
+function expectedStoredKeys(candidate: Record<string, unknown>) {
+  if (candidate.version === 2) {
+    return candidate.state === 'pending'
       ? [
           'attemptGeneration',
-          'deviceToken',
           'homeTimeZone',
           'oneDayEnabled',
           'oneWeekEnabled',
@@ -158,100 +152,88 @@ function parseStoredState(value: string): StoredChangeReminderState {
           'state',
           'version',
         ]
-      : candidate.state === 'pending-update' && !isLegacy
-        ? [
-            'attemptGeneration',
-            ...(hasConfirmedPreferences
-              ? ['confirmedOneDayEnabled', 'confirmedOneWeekEnabled']
-              : []),
-            ...(hasConfirmedHomeTimeZone ? ['confirmedHomeTimeZone'] : []),
-            'credential',
-            'deviceToken',
-            'homeTimeZone',
-            'installationId',
-            'oneDayEnabled',
-            'oneWeekEnabled',
-            'registrationRequestId',
-            'state',
-            'version',
-          ]
-        : candidate.state === 'pending-delete' && !isLegacy
-          ? [
-              'attemptGeneration',
-              'credential',
-              'homeTimeZone',
-              'installationId',
-              'oneDayEnabled',
-              'oneWeekEnabled',
-              'registrationRequestId',
-              'state',
-              'version',
-            ]
-          : isLegacy
-            ? candidate.state === 'pending'
-              ? [
-                  'attemptGeneration',
-                  'homeTimeZone',
-                  'oneDayEnabled',
-                  'oneWeekEnabled',
-                  'registrationRequestId',
-                  'state',
-                  'version',
-                ]
-              : [
-                  'attemptGeneration',
-                  'credential',
-                  'homeTimeZone',
-                  'installationId',
-                  'oneDayEnabled',
-                  'oneWeekEnabled',
-                  'registrationRequestId',
-                  'state',
-                  'version',
-                ]
-            : [
-                'attemptGeneration',
-                'credential',
-                'deviceToken',
-                'homeTimeZone',
-                'installationId',
-                ...(hasLastContactAt ? ['lastContactAt'] : []),
-                'oneDayEnabled',
-                'oneWeekEnabled',
-                'registrationRequestId',
-                'state',
-                'version',
-              ];
-  const validBase =
-    candidate.state === 'pending-delete'
-      ? validStoredPendingDelete(candidate)
-      : isLegacy
-        ? validLegacyStoredBase(candidate)
-        : validStoredBase(candidate);
-  if (
-    Object.keys(candidate).sort().join(',') !== expectedKeys.sort().join(',') ||
-    !validBase
-  ) {
-    throw new Error('Invalid stored reminder state');
+      : [
+          'attemptGeneration',
+          'credential',
+          'homeTimeZone',
+          'installationId',
+          'oneDayEnabled',
+          'oneWeekEnabled',
+          'registrationRequestId',
+          'state',
+          'version',
+        ];
   }
-
+  if (candidate.state === 'pending') {
+    return [
+      'attemptGeneration',
+      'deviceToken',
+      'homeTimeZone',
+      'oneDayEnabled',
+      'oneWeekEnabled',
+      'registrationRequestId',
+      'state',
+      'version',
+    ];
+  }
+  if (candidate.state === 'pending-update') {
+    return [
+      'attemptGeneration',
+      ...(hasConfirmedPreferences(candidate)
+        ? ['confirmedOneDayEnabled', 'confirmedOneWeekEnabled']
+        : []),
+      ...(typeof candidate.confirmedHomeTimeZone === 'string'
+        ? ['confirmedHomeTimeZone']
+        : []),
+      'credential',
+      'deviceToken',
+      'homeTimeZone',
+      'installationId',
+      'oneDayEnabled',
+      'oneWeekEnabled',
+      'registrationRequestId',
+      'state',
+      'version',
+    ];
+  }
   if (candidate.state === 'pending-delete') {
-    const response = parseReminderSubscriptionRegistrationResponse({
-      credential: candidate.credential,
-      installationId: candidate.installationId,
-    });
-    return {
-      attemptGeneration: Number(candidate.attemptGeneration),
-      ...response,
-      homeTimeZone: String(candidate.homeTimeZone),
-      oneDayEnabled: Boolean(candidate.oneDayEnabled),
-      oneWeekEnabled: Boolean(candidate.oneWeekEnabled),
-      registrationRequestId: String(candidate.registrationRequestId),
-      state: 'pending-delete',
-      version: 4,
-    } satisfies StoredChangeReminderPendingDelete;
+    return [
+      'attemptGeneration',
+      'credential',
+      'homeTimeZone',
+      'installationId',
+      'oneDayEnabled',
+      'oneWeekEnabled',
+      'registrationRequestId',
+      'state',
+      'version',
+    ];
   }
-  const base = {
+  return [
+    'attemptGeneration',
+    'credential',
+    'deviceToken',
+    'homeTimeZone',
+    'installationId',
+    ...(typeof candidate.lastContactAt === 'string' ? ['lastContactAt'] : []),
+    'oneDayEnabled',
+    'oneWeekEnabled',
+    'registrationRequestId',
+    'state',
+    'version',
+  ];
+}
+
+function validStoredFields(candidate: Record<string, unknown>) {
+  return candidate.state === 'pending-delete'
+    ? validStoredPendingDelete(candidate)
+    : candidate.version === 2
+      ? validLegacyStoredBase(candidate)
+      : validStoredBase(candidate);
+}
+
+function storedBase(candidate: Record<string, unknown>) {
+  return {
     attemptGeneration: Number(candidate.attemptGeneration),
     deviceToken: String(candidate.deviceToken),
     homeTimeZone: String(candidate.homeTimeZone),
@@ -260,59 +242,36 @@ function parseStoredState(value: string): StoredChangeReminderState {
     registrationRequestId: String(candidate.registrationRequestId),
     version: candidate.version as 3 | 4,
   };
-  if (isLegacy) {
-    if (candidate.state === 'pending') {
-      return {
-        attemptGeneration: Number(candidate.attemptGeneration),
-        homeTimeZone: String(candidate.homeTimeZone),
-        oneDayEnabled: true,
-        oneWeekEnabled: true,
-        registrationRequestId: String(candidate.registrationRequestId),
-        state: 'pending',
-        version: 2,
-      } satisfies StoredLegacyChangeReminderPending;
-    }
-    if (candidate.state !== 'registered') {
-      throw new Error('Invalid stored reminder state');
-    }
-    const response = parseReminderSubscriptionRegistrationResponse({
-      credential: candidate.credential,
-      installationId: candidate.installationId,
-    });
+}
+
+function parseStoredPendingDelete(candidate: Record<string, unknown>) {
+  const response = parseReminderSubscriptionRegistrationResponse({
+    credential: candidate.credential,
+    installationId: candidate.installationId,
+  });
+  return {
+    attemptGeneration: Number(candidate.attemptGeneration),
+    ...response,
+    homeTimeZone: String(candidate.homeTimeZone),
+    oneDayEnabled: Boolean(candidate.oneDayEnabled),
+    oneWeekEnabled: Boolean(candidate.oneWeekEnabled),
+    registrationRequestId: String(candidate.registrationRequestId),
+    state: 'pending-delete',
+    version: 4,
+  } satisfies StoredChangeReminderPendingDelete;
+}
+
+function parseLegacyStoredState(candidate: Record<string, unknown>) {
+  if (candidate.state === 'pending') {
     return {
       attemptGeneration: Number(candidate.attemptGeneration),
-      ...response,
       homeTimeZone: String(candidate.homeTimeZone),
       oneDayEnabled: true,
       oneWeekEnabled: true,
       registrationRequestId: String(candidate.registrationRequestId),
-      state: 'registered',
+      state: 'pending',
       version: 2,
-    } satisfies StoredLegacyChangeReminderRegistration;
-  }
-  if (candidate.state === 'pending') {
-    return { ...base, state: 'pending' } as StoredChangeReminderPending;
-  }
-  if (candidate.state === 'pending-update') {
-    if (isV3) throw new Error('Invalid stored reminder state');
-    const response = parseReminderSubscriptionRegistrationResponse({
-      credential: candidate.credential,
-      installationId: candidate.installationId,
-    });
-    return {
-      ...base,
-      ...response,
-      ...(hasConfirmedPreferences
-        ? {
-            confirmedOneDayEnabled: Boolean(candidate.confirmedOneDayEnabled),
-            confirmedOneWeekEnabled: Boolean(candidate.confirmedOneWeekEnabled),
-          }
-        : {}),
-      ...(hasConfirmedHomeTimeZone
-        ? { confirmedHomeTimeZone: String(candidate.confirmedHomeTimeZone) }
-        : {}),
-      state: 'pending-update',
-    } as StoredChangeReminderPendingUpdate;
+    } satisfies StoredLegacyChangeReminderPending;
   }
   if (candidate.state !== 'registered') {
     throw new Error('Invalid stored reminder state');
@@ -322,13 +281,85 @@ function parseStoredState(value: string): StoredChangeReminderState {
     installationId: candidate.installationId,
   });
   return {
-    ...base,
+    attemptGeneration: Number(candidate.attemptGeneration),
     ...response,
-    ...(hasLastContactAt
+    homeTimeZone: String(candidate.homeTimeZone),
+    oneDayEnabled: true,
+    oneWeekEnabled: true,
+    registrationRequestId: String(candidate.registrationRequestId),
+    state: 'registered',
+    version: 2,
+  } satisfies StoredLegacyChangeReminderRegistration;
+}
+
+function parseStoredPendingUpdate(candidate: Record<string, unknown>) {
+  if (candidate.version === 3) throw new Error('Invalid stored reminder state');
+  const response = parseReminderSubscriptionRegistrationResponse({
+    credential: candidate.credential,
+    installationId: candidate.installationId,
+  });
+  return {
+    ...storedBase(candidate),
+    ...response,
+    ...(hasConfirmedPreferences(candidate)
+      ? {
+          confirmedOneDayEnabled: Boolean(candidate.confirmedOneDayEnabled),
+          confirmedOneWeekEnabled: Boolean(candidate.confirmedOneWeekEnabled),
+        }
+      : {}),
+    ...(typeof candidate.confirmedHomeTimeZone === 'string'
+      ? { confirmedHomeTimeZone: String(candidate.confirmedHomeTimeZone) }
+      : {}),
+    state: 'pending-update',
+  } as StoredChangeReminderPendingUpdate;
+}
+
+function parseCurrentStoredState(candidate: Record<string, unknown>) {
+  if (candidate.state === 'pending') {
+    return {
+      ...storedBase(candidate),
+      state: 'pending',
+    } as StoredChangeReminderPending;
+  }
+  if (candidate.state === 'pending-update') {
+    return parseStoredPendingUpdate(candidate);
+  }
+  if (candidate.state !== 'registered') {
+    throw new Error('Invalid stored reminder state');
+  }
+  const response = parseReminderSubscriptionRegistrationResponse({
+    credential: candidate.credential,
+    installationId: candidate.installationId,
+  });
+  return {
+    ...storedBase(candidate),
+    ...response,
+    ...(typeof candidate.lastContactAt === 'string'
       ? { lastContactAt: String(candidate.lastContactAt) }
       : {}),
     state: 'registered',
   } as StoredChangeReminderState;
+}
+
+function parseStoredState(value: string): StoredChangeReminderState {
+  const parsed: unknown = JSON.parse(value);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('Invalid stored reminder state');
+  }
+  const candidate = parsed as Record<string, unknown>;
+  if (
+    Object.keys(candidate).sort().join(',') !==
+      expectedStoredKeys(candidate).sort().join(',') ||
+    !validStoredFields(candidate)
+  ) {
+    throw new Error('Invalid stored reminder state');
+  }
+  if (candidate.state === 'pending-delete') {
+    return parseStoredPendingDelete(candidate);
+  }
+  return candidate.version === 2
+    ? parseLegacyStoredState(candidate)
+    : parseCurrentStoredState(candidate);
 }
 
 function bytesToLowerHex(bytes: Uint8Array) {
