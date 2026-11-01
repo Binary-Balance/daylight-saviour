@@ -15,6 +15,16 @@ module platform '../modules/minimal-functions-platform.bicep' = {
   name: 'sample-notify-platform'
   params: {
     resourceNames: resourceNames
+    reminderDispatch: {
+      enabled: true
+      timeZoneDataManifestUrl: 'https://time-zone-data.example.invalid/manifest.json'
+      timeZoneDataTrustedKeysJson: '{"sample-key":"sample-public-key"}'
+      apnsEnvironment: 'sandbox'
+      apnsTopic: 'example.invalid.app'
+      apnsTeamId: 'SAMPLETEAM'
+      apnsKeyId: 'SAMPLEKEY'
+      apnsPrivateKeyReference: '@Microsoft.KeyVault(SecretUri=https://sample-notify-vault.vault.azure.net/secrets/sample)'
+    }
   }
 }
 

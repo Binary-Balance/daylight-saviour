@@ -85,7 +85,7 @@ type ReminderDispatchSettings = {
 
   timeZoneDataTrustedKeysJson: string
 
-  apnsEnvironment: '' | 'production' | 'sandbox'
+  apnsEnvironment: 'production' | 'sandbox'
 
   apnsTopic: string
 
@@ -135,16 +135,7 @@ param fcm FcmSettings = {
 }
 
 @description('Optional caller-supplied Change Reminder dispatch settings. Dispatch stays suspended unless enabled is true. apnsPrivateKeyReference is a Key Vault reference, never the key.')
-param reminderDispatch ReminderDispatchSettings = {
-  enabled: false
-  timeZoneDataManifestUrl: ''
-  timeZoneDataTrustedKeysJson: ''
-  apnsEnvironment: ''
-  apnsTopic: ''
-  apnsTeamId: ''
-  apnsKeyId: ''
-  apnsPrivateKeyReference: ''
-}
+param reminderDispatch ReminderDispatchSettings?
 
 @description('Build identifier returned by the notification-service health endpoint.')
 @minLength(1)
@@ -226,14 +217,7 @@ module compute './internal/compute.bicep' = {
     fcmProjectId: fcm.projectId
     fcmServiceAccountEmail: fcm.serviceAccountEmail
     fcmWorkloadIdentityProvider: fcm.workloadIdentityProvider
-    reminderDispatchEnabled: reminderDispatch.enabled
-    timeZoneDataManifestUrl: reminderDispatch.timeZoneDataManifestUrl
-    timeZoneDataTrustedKeysJson: reminderDispatch.timeZoneDataTrustedKeysJson
-    apnsEnvironment: reminderDispatch.apnsEnvironment
-    apnsTopic: reminderDispatch.apnsTopic
-    apnsTeamId: reminderDispatch.apnsTeamId
-    apnsKeyId: reminderDispatch.apnsKeyId
-    apnsPrivateKeyReference: reminderDispatch.apnsPrivateKeyReference
+    reminderDispatch: reminderDispatch
     instanceMemoryMB: scale.instanceMemoryMB
     keyVaultUri: vault.outputs.uri
     location: location
