@@ -44,7 +44,7 @@ function request(
     source = '198.51.100.7:43125',
   }: {
     readonly contentLength?: string;
-    readonly contentType?: string;
+    readonly contentType?: string | null;
     readonly authorization?: string | undefined;
     readonly source?: string | null;
   } = {},
@@ -55,7 +55,8 @@ function request(
       : new TextEncoder().encode(
           typeof body === 'string' ? body : JSON.stringify(body),
         );
-  const headers = new Headers({ 'content-type': contentType });
+  const headers = new Headers();
+  if (contentType !== null) headers.set('content-type', contentType);
   if (authorization !== undefined) {
     headers.set('authorization', authorization);
   }
@@ -223,44 +224,63 @@ describe('reminder subscription registration', () => {
     assert.equal(new Headers(result.headers).get('Cache-Control'), 'no-store');
   });
 
-  for (const [name, input, options, status] of [
+  for (const [name, input, options, status, message] of [
     [
       'JSON prefix media type',
       validRegistration,
       { contentType: 'application/jsonp' },
       415,
+      'Expected application/json',
     ],
     [
       'JSON media type parameters',
       validRegistration,
       { contentType: 'application/json; charset=utf-8' },
       415,
+      'Expected application/json',
     ],
-    ['malformed JSON', '{', {}, 400],
-    ['arbitrary fields', { ...validRegistration, arbitrary: true }, {}, 400],
+    [
+      'a missing media type',
+      validRegistration,
+      { contentType: null },
+      415,
+      'Expected application/json',
+    ],
+    ['malformed JSON', '{', {}, 400, 'Invalid registration request'],
+    [
+      'arbitrary fields',
+      { ...validRegistration, arbitrary: true },
+      {},
+      400,
+      'Invalid registration request',
+    ],
     [
       'noncanonical zone alias',
       { ...validRegistration, homeTimeZone: 'Australia/ACT' },
       {},
       400,
+      'Invalid registration request',
     ],
     [
       'invalid platform token',
       { ...validRegistration, deviceToken: ' '.repeat(32) },
       {},
       400,
+      'Invalid registration request',
     ],
     [
       'oversized declared body',
       validRegistration,
       { contentLength: '8193' },
       413,
+      'Request too large',
     ],
     [
       'invalid declared body length',
       validRegistration,
       { contentLength: 'unknown' },
       400,
+      'Invalid Content-Length',
     ],
   ] as const) {
     it(`rejects ${name}`, async () => {
@@ -275,6 +295,7 @@ describe('reminder subscription registration', () => {
         }),
       );
       assert.equal(result.status, status);
+      assert.deepEqual(result.jsonBody, { error: message });
       assert.equal(saves, 0);
     });
   }
@@ -303,6 +324,20 @@ describe('reminder subscription registration', () => {
     assert.equal(result.status, 413);
     assert.equal(cancelled, true);
   });
+
+  // Trailing whitespace is valid JSON, so padding reaches the limit exactly.
+  for (const [name, options] of [
+    ['declares', { contentLength: '8192' }],
+    ['streams', {}],
+  ] as const) {
+    it(`accepts a body that ${name} exactly the byte limit`, async () => {
+      const result = await registerReminderSubscription(
+        request(JSON.stringify(validRegistration).padEnd(8192), options),
+        store(),
+      );
+      assert.equal(result.status, 201);
+    });
+  }
 
   it('returns generic availability errors for throttle and storage failures', async () => {
     const throttleFailure = await registerReminderSubscription(
@@ -359,6 +394,15 @@ describe('reminder subscription registration', () => {
     assert.deepEqual(result.jsonBody, {
       error: 'Registration request expired',
     });
+  });
+
+  it('reports a conflicting registration as unavailable', async () => {
+    const result = await registerReminderSubscription(
+      request(validRegistration),
+      store({ createSubscription: async () => 'conflict' }),
+    );
+    assert.equal(result.status, 409);
+    assert.deepEqual(result.jsonBody, { error: 'Registration unavailable' });
   });
 
   it('derives one stable row while issuing fresh accepted credentials', async () => {
@@ -492,6 +536,19 @@ describe('reminder subscription updates', () => {
         400,
       );
     }
+  });
+
+  it('rejects an update with no media type', async () => {
+    const result = await updateReminderSubscription(
+      request(update, {
+        authorization: `Bearer ${credential}`,
+        contentType: null,
+      }),
+      store(),
+      installationId,
+    );
+    assert.equal(result.status, 415);
+    assert.deepEqual(result.jsonBody, { error: 'Expected application/json' });
   });
 
   it('routes an update through its handler to the requested installation', async () => {
@@ -674,6 +731,160 @@ describe('reminder subscription deletion', () => {
       assert.equal(result.status, 401);
       assert.equal(deletions, 0);
     });
+  }
+
+  it('retires the installation at the time of the request', async () => {
+    const now = new Date('2026-07-24T05:00:00.000Z');
+    let retiredAt: Date | undefined;
+    await deleteReminderSubscription(
+      request('', { authorization: `Bearer ${credential}` }),
+      store({
+        deleteSubscription: async (_target, _credentialHash, at) => {
+          retiredAt = at;
+          return 'deleted';
+        },
+      }),
+      installationId,
+      now,
+    );
+    assert.equal(retiredAt, now);
+  });
+
+  // A client with nothing to send may declare no length, a zero length, or
+  // give the runtime no body to read.
+  const authorization = `Bearer ${credential}`;
+  for (const [name, makeRequest] of [
+    [
+      'declares an empty body',
+      () => request('', { authorization, contentLength: '0' }),
+    ],
+    [
+      'has no body at all',
+      () => Object.assign(request('', { authorization }), { body: null }),
+    ],
+  ] as const) {
+    it(`accepts a deletion that ${name}`, async () => {
+      const result = await deleteReminderSubscription(
+        makeRequest(),
+        store(),
+        installationId,
+      );
+      assert.equal(result.status, 204);
+    });
+  }
+
+  it('reports a coarse failure when the store fails', async () => {
+    const result = await deleteReminderSubscription(
+      request('', { authorization: `Bearer ${credential}` }),
+      store({
+        deleteSubscription: async () => {
+          throw azureError(500);
+        },
+      }),
+      installationId,
+    );
+    assert.equal(result.status, 503);
+    assert.deepEqual(result.jsonBody, { error: 'Registration unavailable' });
+  });
+
+  for (const [name, overrides] of [
+    ['source', { takeSourceAllowance: async () => false }],
+    ['installation', { takeInstallationAllowance: async () => false }],
+  ] as const) {
+    it(`throttles a deletion by ${name} before touching the subscription`, async () => {
+      let deletions = 0;
+      const result = await deleteReminderSubscription(
+        request('', { authorization: `Bearer ${credential}` }),
+        store({
+          ...overrides,
+          deleteSubscription: async () => ((deletions += 1), 'deleted'),
+        }),
+        installationId,
+      );
+      assert.equal(result.status, 429);
+      assert.deepEqual(result.jsonBody, { error: 'Try again later' });
+      assert.equal(new Headers(result.headers).get('Retry-After'), '600');
+      assert.equal(deletions, 0);
+    });
+  }
+});
+
+describe('request body handling', () => {
+  const installationId = 'i'.repeat(43);
+  const authorization = `Bearer ${'c'.repeat(43)}`;
+  const endpoints = [
+    [
+      'registration',
+      (candidate: never) => registerReminderSubscription(candidate, store()),
+    ],
+    [
+      'update',
+      (candidate: never) =>
+        updateReminderSubscription(candidate, store(), installationId),
+    ],
+    [
+      'deletion',
+      (candidate: never) =>
+        deleteReminderSubscription(candidate, store(), installationId),
+    ],
+  ] as const;
+  // Every endpoint reads its body the same way, so each fault is sent to all
+  // three. The default store would accept a request that got past the check.
+  const faults = [
+    [
+      'a negative declared length',
+      () => request('', { authorization, contentLength: '-1' }),
+      400,
+      'Invalid Content-Length',
+    ],
+    [
+      'an unparseable declared length',
+      () => request('', { authorization, contentLength: 'unknown' }),
+      400,
+      'Invalid Content-Length',
+    ],
+    [
+      'an oversized declared length',
+      () => request('', { authorization, contentLength: '8193' }),
+      413,
+      'Request too large',
+    ],
+    [
+      'an oversized stream',
+      () => request(new Uint8Array(8193), { authorization }),
+      413,
+      'Request too large',
+    ],
+    [
+      'bytes that are not UTF-8',
+      () => request(new Uint8Array([0xff]), { authorization }),
+      400,
+      'Invalid request body',
+    ],
+    [
+      'a chunk that is not bytes',
+      () =>
+        Object.assign(request('', { authorization }), {
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue('text');
+              controller.close();
+            },
+          }),
+        }),
+      400,
+      'Invalid request body',
+    ],
+  ] as const;
+
+  for (const [endpoint, send] of endpoints) {
+    for (const [fault, makeRequest, status, message] of faults) {
+      it(`${endpoint} rejects ${fault}`, async () => {
+        const result = await send(makeRequest());
+        assert.equal(result.status, status);
+        assert.deepEqual(result.jsonBody, { error: message });
+      });
+    }
   }
 });
 
