@@ -2935,6 +2935,7 @@ describe('Change Reminder check-in', () => {
       const test = harness({ fetchImplementation, storage: seeded() });
 
       const restoring = test.adapters.restore();
+      restoring.catch(() => undefined);
       await settled(started, 'check-in');
       const updating = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -2974,6 +2975,9 @@ describe('Change Reminder check-in', () => {
         });
       // Restore has read the Sydney registration and now waits.
       const restoring = test.adapters.restore();
+      // A mutant can reject this before the test awaits it. Left unhandled,
+      // Seshat reports an execution error instead of a failed test.
+      restoring.catch(() => undefined);
       await expect(
         test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
       ).resolves.toMatchObject({ kind: 'enabled' });
