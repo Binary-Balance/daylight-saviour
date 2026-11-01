@@ -1,11 +1,12 @@
 import * as ed25519 from '@noble/ed25519';
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 
-import type { ActivatedTimeZoneDataPack } from './index.ts';
+import type { ActivatedTimeZoneDataPack } from './time-zone-data-pack.ts';
 import {
   timeZoneDataPackSchemaVersion,
   type TimeZoneDataPackSchemaVersion,
 } from './time-zone-data-pack-version.ts';
+import * as field from './validation.ts';
 
 export const signedTimeZoneDataPackManifestVersion = 1 as const;
 export const maximumTimeZoneDataPackBytes = 2 * 1024 * 1024;
@@ -35,44 +36,23 @@ export class SignedTimeZoneDataPackValidationError extends Error {
   }
 }
 
-type JsonObject = Record<string, unknown>;
 const activatedManifests = new WeakSet<object>();
 
 function fail(path: string, problem: string): never {
   throw new SignedTimeZoneDataPackValidationError(path, problem);
 }
 
-function objectAt(value: unknown, path: string): JsonObject {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return fail(path, 'expected an object');
-  }
-  return value as JsonObject;
-}
-
-function exactKeys(object: JsonObject, path: string, expected: string[]) {
-  const actual = Object.keys(object).sort();
-  const wanted = [...expected].sort();
-  if (
-    actual.length !== wanted.length ||
-    actual.some((key, index) => key !== wanted[index])
-  ) {
-    fail(path, `expected keys ${wanted.join(', ')}`);
-  }
-}
-
-function nonEmptyStringAt(value: unknown, path: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    return fail(path, 'expected a non-empty string');
-  }
-  return value;
-}
-
-function safeIntegerAt(value: unknown, path: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
-    return fail(path, 'expected a safe integer');
-  }
-  return value;
-}
+const objectAt = (value: unknown, path: string) =>
+  field.objectAt(value, path, fail);
+const exactKeys = (
+  object: field.JsonObject,
+  path: string,
+  expected: string[],
+) => field.exactKeys(object, path, expected, fail);
+const nonEmptyStringAt = (value: unknown, path: string) =>
+  field.stringAt(value, path, fail);
+const safeIntegerAt = (value: unknown, path: string) =>
+  field.integerAt(value, path, fail);
 
 const base64Digits =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
