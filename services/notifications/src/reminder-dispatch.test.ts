@@ -1473,6 +1473,50 @@ describe('reminder dispatch operation', () => {
     assert.equal((await fixture.ledger.get(identity))?.status, 'pending');
   });
 
+  describe('a plan that changes under a claim', () => {
+    // The current context is read before the send intent, and again after it.
+    async function dispatchChangedAtRead(
+      changedRead: number,
+      changed: ReminderDispatchContext | null,
+    ) {
+      const fixture = operationFixture();
+      let reads = 0;
+      const operation = createReminderDispatchOperation({
+        ledger: fixture.ledger,
+        provider: { send: async () => assert.fail('Sent a changed plan') },
+        readCurrentContext: async () =>
+          ++reads < changedRead ? context() : changed,
+        subscriptionStore: {
+          getSubscriptionSnapshot: async () => null,
+          removeIfDeviceTokenAndGenerationMatches: async () => 'removed',
+        },
+        clock: () => new Date(window.startsAt),
+      });
+      assert.equal((await operation.dispatch(context())).kind, 'stale');
+      return fixture.ledger.get(identity);
+    }
+
+    for (const [when, changedRead] of [
+      ['before', 1],
+      ['after', 2],
+    ] as const) {
+      it(`closes the record when the subscription is deleted ${when} the send intent`, async () => {
+        const record = await dispatchChangedAtRead(changedRead, null);
+
+        assert.equal(record?.status, 'expired');
+        assert.equal(record?.expiryReason, 'superseded');
+      });
+    }
+
+    it('keeps the record for a newer registration seen before the send intent', async () => {
+      const newer = context({
+        subscription: { ...subscription, attemptGeneration: 2 },
+      });
+
+      assert.equal((await dispatchChangedAtRead(1, newer))?.status, 'pending');
+    });
+  });
+
   for (const [given, sent] of [
     ['forward', 'forward'],
     ['Forward Change', 'forward'],
