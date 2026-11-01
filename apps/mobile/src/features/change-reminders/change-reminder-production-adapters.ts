@@ -386,6 +386,26 @@ export function createProductionChangeReminderAdapters({
   secureStore,
   timeoutMs = requestTimeoutMs,
 }: ProductionAdapterDependencies): ChangeReminderAdapters {
+  // The native request has no timeout, and on iOS it never settles without a
+  // network connection. Registration holds its queue while it waits, so an
+  // unbounded wait would leave the card busy until the app restarts.
+  async function devicePushToken() {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const token = await Promise.race([
+        notifications.getDevicePushTokenAsync(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error('Device push token timed out'));
+          }, timeoutMs);
+        }),
+      ]);
+      return token.data;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
   async function loadStoredState() {
     const saved = await secureStore.getItemAsync(registrationKey);
     return saved === null ? null : parseStoredState(saved);
@@ -619,9 +639,9 @@ export function createProductionChangeReminderAdapters({
       if (parseReminderRegistrationEndpoint(endpoint) === null) {
         return { kind: 'failed' };
       }
-      const token = await notifications.getDevicePushTokenAsync();
+      const token = await devicePushToken();
       const saved = await loadStoredState();
-      return synchronize(homeTimeZone, token.data, false, {
+      return synchronize(homeTimeZone, token, false, {
         oneDayEnabled: saved?.oneDayEnabled ?? true,
         oneWeekEnabled: saved?.oneWeekEnabled ?? true,
       });
@@ -758,9 +778,7 @@ export function createProductionChangeReminderAdapters({
         return { kind: 'failed' };
       }
       const deviceToken =
-        'deviceToken' in saved
-          ? saved.deviceToken
-          : (await notifications.getDevicePushTokenAsync()).data;
+        'deviceToken' in saved ? saved.deviceToken : await devicePushToken();
       if (!validDeviceToken(deviceToken)) return { kind: 'failed' };
       const preferences = {
         oneDayEnabled: saved.oneDayEnabled,
@@ -863,7 +881,7 @@ export function createProductionChangeReminderAdapters({
       }
       let currentToken: string;
       try {
-        currentToken = (await notifications.getDevicePushTokenAsync()).data;
+        currentToken = await devicePushToken();
       } catch {
         return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
       }

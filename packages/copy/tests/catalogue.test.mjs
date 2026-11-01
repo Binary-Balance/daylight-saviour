@@ -105,6 +105,15 @@ describe('Australian-English copy catalogue', () => {
     );
   });
 
+  it('says registration is in progress and reminders are not enabled yet', () => {
+    const { saving } = australianEnglish.changeReminders;
+    assert.equal(Object.isFrozen(saving), true);
+    assert.deepEqual(saving, {
+      body: 'Waiting for confirmation. Reminders are not enabled yet.',
+      heading: 'REGISTERING REMINDERS',
+    });
+  });
+
   it('owns exact safe Change Reminder report-context wording', () => {
     assert.deepEqual(australianEnglish.changeReminders.notificationContext, {
       opened: {
