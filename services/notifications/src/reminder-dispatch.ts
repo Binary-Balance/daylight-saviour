@@ -518,8 +518,11 @@ export function createReminderDispatchOperation(
           initial.subscription.installationId,
           identity,
         );
+        if (refused !== null) parsedContext(refused);
       } catch {
-        // Unreadable is not changed: the record stays open for a later run.
+        // Unreadable or invalid is not changed: the record stays open for a
+        // later run.
+        refused = finalCurrent;
       }
       if (refused === null || !sameProviderContext(refused, finalCurrent)) {
         await dependencies.ledger.cancelBeforeProvider(
@@ -580,6 +583,9 @@ export function createReminderDispatchOperation(
         initial.subscription.installationId,
         identity,
       );
+      // Thrown after the send intent, an invalid plan would leave the
+      // delivery uncertain though nothing was sent.
+      if (finalCurrent !== null) parsedContext(finalCurrent);
     } catch {
       await dependencies.ledger.cancelBeforeProvider(
         claim,
@@ -646,18 +652,19 @@ export function createReminderDispatchOperation(
       } catch {
         return false;
       }
-      if (
-        authorizedCurrent === null ||
-        !sameProviderContext(authorizedCurrent, finalCurrent) ||
-        authorizedCurrent.subscription.attemptGeneration !==
-          claim.attemptGeneration
-      ) {
-        return false;
-      }
+      if (authorizedCurrent === null) return false;
+      // Parsed first, as `sameProviderContext` throws on an invalid plan.
       let authorizedParsed: ReturnType<typeof parsedContext>;
       try {
         authorizedParsed = parsedContext(authorizedCurrent);
       } catch {
+        return false;
+      }
+      if (
+        !sameProviderContext(authorizedCurrent, finalCurrent) ||
+        authorizedCurrent.subscription.attemptGeneration !==
+          claim.attemptGeneration
+      ) {
         return false;
       }
       const authorizedNow = copyDate(clock(), 'clock');

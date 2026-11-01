@@ -1709,6 +1709,90 @@ describe('reminder dispatch operation', () => {
     assert.equal(await authorizedAfter(context()), true);
   });
 
+  for (const [name, invalid] of [
+    [
+      'an unknown Home Time Zone',
+      context({
+        delivery: { ...context().delivery, homeTimeZone: 'Australia/Nowhere' },
+      }),
+    ],
+    [
+      'an invalid generation',
+      context({ subscription: { ...subscription, attemptGeneration: 0 } }),
+    ],
+    [
+      'a subscription in another zone',
+      context({
+        subscription: { ...subscription, homeTimeZone: 'Australia/Perth' },
+      }),
+    ],
+  ] as const) {
+    it(`refuses ${name} at final authorization, to retry later`, async () => {
+      assert.equal(await authorizedAfter(invalid), false);
+
+      const fixture = operationFixture();
+      const operation = createReminderDispatchOperation({
+        clock: () => new Date(window.startsAt),
+        ledger: fixture.ledger,
+        provider: {
+          send: async (_request, authorize) => {
+            fixture.setCurrent(invalid);
+            return (await authorize())
+              ? { kind: 'accepted' }
+              : { kind: 'not-authorized' };
+          },
+        },
+        readCurrentContext: async () => fixture.getCurrent(),
+        subscriptionStore: {
+          getSubscriptionSnapshot: async () =>
+            fixture.getCurrent().subscription,
+          removeIfDeviceTokenAndGenerationMatches: async () => 'removed',
+        },
+      });
+
+      const result = await operation.dispatch(context());
+
+      assert.equal(result.kind, 'transient-failure');
+      assert.equal(
+        (await fixture.ledger.get(identity))?.status,
+        'transient-failure',
+      );
+    });
+
+    it(`sends nothing for ${name} found after the send intent`, async () => {
+      const fixture = operationFixture();
+      const operation = createReminderDispatchOperation({
+        clock: () => new Date(window.startsAt),
+        ledger: {
+          ...fixture.ledger,
+          beginSend: async (claim, at) => {
+            const started = await fixture.ledger.beginSend(claim, at);
+            fixture.setCurrent(invalid);
+            return started;
+          },
+        },
+        provider: {
+          send: async () => {
+            throw new Error('Must not reach the provider');
+          },
+        },
+        readCurrentContext: async () => fixture.getCurrent(),
+        subscriptionStore: {
+          getSubscriptionSnapshot: async () =>
+            fixture.getCurrent().subscription,
+          removeIfDeviceTokenAndGenerationMatches: async () => 'removed',
+        },
+      });
+
+      const result = await operation.dispatch(context());
+
+      assert.equal(result.kind, 'transient-failure');
+      const record = await fixture.ledger.get(identity);
+      assert.equal(record?.sendStartedAt, undefined);
+      assert.notEqual(record?.status, 'uncertain');
+    });
+  }
+
   for (const [change, next, initial] of [
     ...registrationChanges,
     ...planChanges,
