@@ -80,14 +80,6 @@ function hasReviewedCopy(content: ChangeReminderNotificationContent) {
   );
 }
 
-export function isReviewedChangeReminderReceipt(
-  content: ChangeReminderNotificationContent,
-) {
-  return (
-    hasReviewedCopy(content) && parseChangeReminderTap(content.data) !== null
-  );
-}
-
 function reviewedTap(
   content: ChangeReminderNotificationContent,
 ): ReviewedNotificationTap | null {

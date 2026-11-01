@@ -1253,6 +1253,11 @@ describe('reminder dispatch warning', () => {
     ['a contact two years ago', { lastContactAt: daysBefore(730) }, true],
     ['a contact just now', { lastContactAt: during }, false],
     [
+      'a contact in the future',
+      { lastContactAt: new Date(during.getTime() + day) },
+      false,
+    ],
+    [
       'an old registration after a recent contact',
       { lastContactAt: daysBefore(1), registeredAt: daysBefore(800) },
       false,
