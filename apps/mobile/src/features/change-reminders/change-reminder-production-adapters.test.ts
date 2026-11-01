@@ -4674,3 +4674,148 @@ describe('Change Reminder token refresh', () => {
     expect(outcomes).toEqual([{ kind: 'succeeded' }]);
   });
 });
+
+describe('Change Reminder restore and disable', () => {
+  const accepted = async () => new Response(null, { status: 204 });
+  const pendingResult = { homeTimeZone: 'Australia/Sydney', kind: 'pending' };
+
+  describe('after updating the token', () => {
+    // The record is replaced as soon as the update has been sent.
+    it.each<[string, unknown]>([
+      ['nothing is saved', null],
+      ['an update is pending', pendingUpdateRecord({ deviceToken: newToken })],
+      ['the record is still version 3', savedRecord({ version: 3 })],
+    ])('reports pending when %s', async (_name, after) => {
+      const test = harnessSaving(savedRecord({ deviceToken: oldToken }), {
+        currentToken: newToken,
+        fetchImplementation: accepted,
+      });
+      jest
+        .mocked(test.dependencies.secureStore.getItemAsync)
+        .mockImplementation(async () =>
+          test.dependencies.fetch.mock.calls.length === 0
+            ? test.stored()
+            : after === null
+              ? null
+              : JSON.stringify(after),
+        );
+
+      await expect(test.adapters.restore()).resolves.toEqual(pendingResult);
+
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('when a check-in finds the saved record changed', () => {
+    it.each<[string, unknown]>([
+      ['an update is pending', pendingUpdateRecord()],
+      ['an initial attempt is pending', pendingRecord()],
+    ])('sends nothing when %s by then', async (_name, changed) => {
+      const saved = savedRecord();
+      const test = harnessSaving(saved, { fetchImplementation: accepted });
+      jest
+        .mocked(test.dependencies.secureStore.getItemAsync)
+        .mockResolvedValueOnce(JSON.stringify(saved))
+        .mockResolvedValueOnce(JSON.stringify(changed));
+
+      await expect(test.adapters.restore()).resolves.toEqual({
+        kind: 'registered',
+        notificationPermissionGranted: true,
+        registration: saved,
+      });
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reading the installation ID', () => {
+    it('returns the ID of a registration', async () => {
+      const test = harnessSaving(savedRecord());
+
+      await expect(test.adapters.readInstallationId!()).resolves.toBe(
+        responseBody.installationId,
+      );
+    });
+
+    it.each<[string, unknown]>([
+      ['nothing is saved', null],
+      ['an initial attempt is pending', pendingRecord()],
+    ])('returns nothing when %s', async (_name, saved) => {
+      const test = harnessSaving(saved);
+
+      await expect(test.adapters.readInstallationId!()).resolves.toBeNull();
+    });
+  });
+
+  describe('changing the timing choices', () => {
+    it.each<[string, unknown]>([
+      ['an initial attempt is pending', pendingRecord()],
+      ['a deletion is pending', pendingDeleteRecord()],
+      ['a version 2 registration is saved', legacyRegisteredRecord()],
+    ])('sends nothing when %s', async (_name, record) => {
+      const saved = JSON.stringify(record);
+      const test = harnessSaving(saved, { fetchImplementation: accepted });
+
+      await expect(
+        test.adapters.updatePreferences({
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+        }),
+      ).resolves.toEqual({ kind: 'failed' });
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+      expect(test.stored()).toBe(saved);
+    });
+  });
+
+  describe('disabling', () => {
+    it('shares one in-flight disable', async () => {
+      const release = gate();
+      const test = harnessSaving(savedRecord(), {
+        fetchImplementation: jest.fn(async (_input: URL | RequestInfo) => {
+          await release.opened;
+          return new Response(null, { status: 204 });
+        }) as jest.MockedFunction<typeof fetch>,
+        timeoutMs: 2_000,
+      });
+
+      const first = test.adapters.disable();
+      const second = test.adapters.disable();
+      first.catch(() => undefined);
+      expect(second).toBe(first);
+      release.open();
+
+      await expect(first).resolves.toEqual({ kind: 'disabled' });
+      expect(
+        test.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
+      ).toEqual(['DELETE']);
+    });
+
+    it('changes nothing when the endpoint cannot be used', async () => {
+      const saved = JSON.stringify(savedRecord());
+      const test = harnessSaving(saved, {
+        endpoint: 'http://reminders.example.test',
+        fetchImplementation: accepted,
+      });
+
+      await expect(test.adapters.disable()).resolves.toEqual({
+        kind: 'failed',
+      });
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+      expect(test.stored()).toBe(saved);
+    });
+
+    it('changes nothing while an initial attempt is pending', async () => {
+      const saved = JSON.stringify(pendingRecord());
+      const test = harnessSaving(saved, { fetchImplementation: accepted });
+
+      await expect(test.adapters.disable()).resolves.toEqual({
+        kind: 'failed',
+      });
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+      expect(test.stored()).toBe(saved);
+    });
+  });
+});
