@@ -4217,6 +4217,25 @@ describe('Change Reminder registration requests', () => {
     });
   });
 
+  // Only an unauthenticated first registration can be abandoned on a 410.
+  it('keeps a registration whose update is answered 410', async () => {
+    const test = harnessSaving(savedRecord(), {
+      fetchImplementation: async () => new Response(null, { status: 410 }),
+    });
+
+    await expect(
+      test.adapters.updatePreferences({
+        oneDayEnabled: false,
+        oneWeekEnabled: true,
+      }),
+    ).resolves.toEqual({ kind: 'failed' });
+
+    expect(
+      test.dependencies.secureStore.deleteItemAsync,
+    ).not.toHaveBeenCalled();
+    expect(test.stored()).not.toBeNull();
+  });
+
   describe('when the saved record cannot be cleared', () => {
     const failToClear = async () => {
       throw new Error('SecureStore delete failed');
