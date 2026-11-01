@@ -48,7 +48,7 @@ export const productionHomeTimeZoneAdapters: HomeTimeZoneAdapters = {
       const calendar = getCalendars()[0];
       return {
         timeZone: calendar?.timeZone ?? null,
-        uses24hourClock: calendar?.uses24hourClock ?? false,
+        uses24hourClock: calendar?.uses24hourClock ?? null,
       };
     },
   },

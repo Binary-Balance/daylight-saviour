@@ -12,7 +12,9 @@ export interface AftermathAcknowledgementStorage {
 
 export interface DeviceLocalization {
   readonly timeZone: string | null;
-  readonly uses24hourClock: boolean;
+  // `null` when the device reports no preference, which is not the same as
+  // preferring the 12-hour clock.
+  readonly uses24hourClock: boolean | null;
 }
 
 export interface DeviceLocalizationReader {
