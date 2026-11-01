@@ -398,6 +398,123 @@ describe('APNs Change Reminder sender', () => {
     }
   });
 
+  for (const [name, providerResponse] of [
+    [
+      'a body that is not JSON',
+      { body: '<html>Bad gateway</html>', status: 500 },
+    ],
+    ['an empty body', { body: '', status: 500 }],
+    ['null', { body: 'null', status: 500 }],
+    ['a list', { body: '[]', status: 500 }],
+    ['text', { body: '"InternalServerError"', status: 500 }],
+    ['a number', { body: '42', status: 500 }],
+    ['a body that is not text', { body: undefined as never, status: 500 }],
+    [
+      'an unexpected field',
+      { body: '{"reason":"BadDeviceToken","extra":true}', status: 400 },
+    ],
+    ['no reason', { body: '{}', status: 400 }],
+    ['an empty reason', { body: '{"reason":""}', status: 400 }],
+    ['a reason that is not text', { body: '{"reason":400}', status: 400 }],
+    ['a reason that is null', { body: '{"reason":null}', status: 400 }],
+    // A list prints as its items, so it would otherwise read as a known reason.
+    [
+      'a reason that is a list',
+      { body: '{"reason":["BadDeviceToken"]}', status: 400 },
+    ],
+    [
+      'a timestamp that is not a number',
+      { body: '{"reason":"Unregistered","timestamp":"1"}', status: 410 },
+    ],
+  ] as const) {
+    it(`reports a provider response with ${name} as malformed`, async () => {
+      const test = sender(providerResponse);
+
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, immediate),
+        { kind: 'malformed-response' },
+      );
+      assert.deepEqual(test.removalRequests, []);
+      assert.deepEqual(test.logs, ['apns-change-reminder-malformed-response']);
+    });
+  }
+
+  it('reads a response body of 64 KiB but not one character more', async () => {
+    // JSON allows trailing whitespace, so padding keeps the body valid.
+    const body = JSON.stringify({ reason: 'BadDeviceToken' });
+    const atLimit = sender({ body: body.padEnd(64 * 1024), status: 400 });
+    assert.deepEqual(
+      await atLimit.instance.send(subscription, facts, immediate),
+      { kind: 'permanent-rejection' },
+    );
+
+    const overLimit = sender({ body: body.padEnd(64 * 1024 + 1), status: 400 });
+    assert.deepEqual(
+      await overLimit.instance.send(subscription, facts, immediate),
+      { kind: 'malformed-response' },
+    );
+  });
+
+  for (const timestamp of [0, 8_640_000_000_000_000]) {
+    it(`accepts an invalidation timestamp of ${timestamp}`, async () => {
+      const test = sender(response(410, 'Unregistered', timestamp));
+
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, immediate),
+        {
+          cleanupStatus: 'removed',
+          invalidatedAt: new Date(timestamp),
+          invalidTokenReason: 'unregistered',
+          kind: 'permanent-invalid-token',
+        },
+      );
+      assert.deepEqual(test.removalRequests, [
+        { invalidatedAt: new Date(timestamp), subscription },
+      ]);
+    });
+  }
+
+  it('accepts a device token of 4096 characters but not 4098', () => {
+    const longest = 'b'.repeat(4096);
+    assert.equal(
+      apnsSendEndpoint('sandbox', longest).pathname,
+      `/3/device/${longest}`,
+    );
+    assert.throws(() => apnsSendEndpoint('sandbox', 'b'.repeat(4098)), {
+      message: 'Invalid reminder subscription token',
+    });
+  });
+
+  it('rejects an empty device token', () => {
+    assert.throws(() => apnsSendEndpoint('sandbox', ''), {
+      message: 'Invalid reminder subscription token',
+    });
+  });
+
+  it('sends with a provider token of 16 KiB but treats one longer as unusable', async () => {
+    const longest = `${'a'.repeat(16 * 1024 - 4)}.b.c`;
+    const accepted = sender(undefined, {
+      getProviderToken: async () => longest,
+    });
+    assert.deepEqual(
+      await accepted.instance.send(subscription, facts, immediate),
+      { kind: 'accepted' },
+    );
+    assert.equal(
+      accepted.requests[0]?.headers.authorization,
+      `bearer ${longest}`,
+    );
+
+    const tooLong = sender(undefined, {
+      getProviderToken: async () => `${'a'.repeat(16 * 1024 - 3)}.b.c`,
+    });
+    assert.deepEqual(
+      await tooLong.instance.send(subscription, facts, immediate),
+      { kind: 'transient-rejection' },
+    );
+    assert.deepEqual(tooLong.requests, []);
+  });
+
   describe('a scheduled send', () => {
     const now = new Date('2026-09-27T01:00:00.900Z');
     const expiresAt = new Date('2026-09-27T11:00:00.500Z');
