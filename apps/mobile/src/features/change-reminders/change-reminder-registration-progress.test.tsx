@@ -30,6 +30,11 @@ const granted: Permission = {
   granted: true,
   status: PermissionStatus.GRANTED,
 };
+const blocked: Permission = {
+  canAskAgain: false,
+  granted: false,
+  status: PermissionStatus.DENIED,
+};
 const registration = {
   credential: 'c'.repeat(43),
   installationId: 'i'.repeat(43),
@@ -131,6 +136,9 @@ function setup({
   return {
     adapters,
     request,
+    setPermission: (next: Permission) => {
+      permission = next;
+    },
     stored: () => (storage.value === null ? null : JSON.parse(storage.value)),
   };
 }
@@ -165,6 +173,8 @@ function expectRegistrationInProgress() {
   expect(screen.getByText(copy.changeReminders.saving.heading)).toBeTruthy();
   const busy = screen.getByText(copy.changeReminders.saving.body);
   expect(busy).toBeBusy();
+  expect(busy.props.accessibilityLabel).toBe(copy.changeReminders.saving.body);
+  expect(busy.props.accessibilityLiveRegion).toBe('none');
   expect(screen.queryByText(copy.changeReminders.enabled.heading)).toBeNull();
   expect(screen.queryByRole('button')).toBeNull();
 }
@@ -242,21 +252,64 @@ describe('announcements', () => {
   });
   const spoken = () => announce.mock.calls.map(([message]) => message);
 
-  it('announces registration starting and its confirmed outcome once each', async () => {
-    const test = setup({
-      fetchImplementation: inOrder(
-        Promise.resolve(Response.json(registration)),
-      ),
-    });
+  it.each(['android', 'ios'] as const)(
+    'on %s announces registration starting and its confirmed outcome once each',
+    async (platform) => {
+      jest.replaceProperty(Platform, 'OS', platform);
+      const test = setup({
+        fetchImplementation: inOrder(
+          Promise.resolve(Response.json(registration)),
+        ),
+      });
+
+      await startRegistration(test.adapters);
+      await screen.findByText(enabledBody);
+
+      expect(spoken()).toEqual([copy.changeReminders.saving.body, enabledBody]);
+      expect(screen.getByText(enabledBody).props.accessibilityLiveRegion).toBe(
+        'none',
+      );
+    },
+  );
+
+  it('does not reuse the busy view for the message that follows it', async () => {
+    const response = deferred<Response>();
+    const test = setup({ fetchImplementation: () => response.promise });
 
     await startRegistration(test.adapters);
-    await screen.findByText(enabledBody);
+    const busy = screen.getByText(copy.changeReminders.saving.body);
+    await act(async () => response.resolve(Response.json(registration)));
 
-    expect(spoken()).toEqual([copy.changeReminders.saving.body, enabledBody]);
-    expect(screen.getByText(enabledBody).props.accessibilityLiveRegion).toBe(
-      'none',
-    );
+    await screen.findByText(enabledBody);
+    // Reading a view that has unmounted throws.
+    expect(() => busy.props).toThrow();
   });
+
+  it.each(['android', 'ios'] as const)(
+    'on %s says nothing when a blocked permission is rechecked with no change',
+    async (platform) => {
+      jest.replaceProperty(Platform, 'OS', platform);
+      const test = setup({
+        fetchImplementation: inOrder(
+          Promise.resolve(Response.json(registration)),
+        ),
+        prompt: async () => blocked,
+      });
+      await startRegistration(test.adapters);
+      await screen.findByText(copy.changeReminders.osBlocked.body);
+      announce.mockClear();
+
+      await act(async () => returnToApp?.('active'));
+      await screen.findByText(copy.changeReminders.osBlocked.body);
+      expect(spoken()).toEqual([]);
+
+      // Allowed in Settings: the one recheck worth announcing.
+      test.setPermission(granted);
+      await act(async () => returnToApp?.('active'));
+      await screen.findByText(enabledBody);
+      expect(spoken()).toEqual([enabledBody]);
+    },
+  );
 
   it('stays silent when the card restores itself', async () => {
     const test = setup({

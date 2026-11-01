@@ -33,17 +33,24 @@ function useRegistrationAnnouncements(
   outcomeReadByRegion: boolean,
 ) {
   const previousKind = useRef(kind);
+  const recheckingBlock = useRef(false);
   useEffect(() => {
-    const wasRegistering = previousKind.current === 'saving';
+    const previous = previousKind.current;
     previousKind.current = kind;
     if (kind === 'saving') {
-      AccessibilityInfo.announceForAccessibility(
-        copy.changeReminders.saving.body,
-      );
+      // Every return to the app rechecks a blocked permission, usually with no
+      // change, so only a new outcome is worth saying.
+      recheckingBlock.current = previous === 'os-blocked';
+      if (!recheckingBlock.current) {
+        AccessibilityInfo.announceForAccessibility(
+          copy.changeReminders.saving.body,
+        );
+      }
     } else if (
-      wasRegistering &&
+      previous === 'saving' &&
       outcome !== undefined &&
-      !outcomeReadByRegion
+      !outcomeReadByRegion &&
+      !(recheckingBlock.current && kind === 'os-blocked')
     ) {
       AccessibilityInfo.announceForAccessibility(outcome);
     }
@@ -241,12 +248,15 @@ export default function ChangeReminderSection({
           {/*
             Text, not a spinner: nothing in this design loops, so reduced
             motion keeps the same meaning. The label keeps Android from
-            reading only "busy".
+            reading only "busy". The key stops the message that follows
+            reusing this view, because Android keeps a reused view's busy
+            state and would read "busy" for that message.
           */}
           <Text
             accessibilityLabel={pendingText}
             accessibilityLiveRegion="none"
             accessibilityState={{ busy: true }}
+            key="pending"
             style={[styles.body, { color: palette.ink }]}
           >
             {pendingText}
