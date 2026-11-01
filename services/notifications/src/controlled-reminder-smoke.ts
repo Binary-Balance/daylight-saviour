@@ -13,6 +13,7 @@ import {
   createApnsChangeReminderSender,
   type ApnsChangeReminderSender,
   type ApnsHttpTransport,
+  type ApnsSubscriptionRemover,
 } from './apns-change-reminder-sender.ts';
 import {
   createApnsProviderTokenProvider,
@@ -22,6 +23,7 @@ import {
   createFcmChangeReminderSender,
   createFetchFcmHttpTransport,
   type FcmChangeReminderSender,
+  type FcmSubscriptionRemover,
   type ReviewedChangeReminderFacts,
 } from './fcm-change-reminder-sender.ts';
 import {
@@ -64,7 +66,7 @@ export interface ControlledReminderSmokeBoundaries {
   readonly fetch: typeof fetch;
 }
 
-const productionBoundaries: ControlledReminderSmokeBoundaries = {
+export const productionBoundaries: ControlledReminderSmokeBoundaries = {
   createApnsTransport: createNodeApnsHttpTransport,
   createCredential: (clientId) => new ManagedIdentityCredential(clientId),
   createStore: createAzureReminderSubscriptionStore,
@@ -74,8 +76,8 @@ const productionBoundaries: ControlledReminderSmokeBoundaries = {
 // A warm worker reuses the composed runtime, and overlapping invocations
 // share it. Its loggers therefore look up the invocation they run in, rather
 // than capturing the one that composed the runtime.
-const invocation = new AsyncLocalStorage<InvocationContext>();
-const invocationLogger = {
+export const invocation = new AsyncLocalStorage<InvocationContext>();
+export const invocationLogger = {
   write: (event: string) => invocation.getStore()?.log(event),
 };
 
@@ -203,11 +205,75 @@ async function readRequest(
   };
 }
 
-function required(environment: NodeJS.ProcessEnv, name: string) {
+export function required(environment: NodeJS.ProcessEnv, name: string) {
   const value = environment[name]?.trim();
   if (value === undefined || value.length === 0)
     throw new Error('Missing configuration');
   return value;
+}
+
+export function composeApnsSender(
+  environment: NodeJS.ProcessEnv,
+  boundaries: Pick<ControlledReminderSmokeBoundaries, 'createApnsTransport'>,
+  subscriptionRemover: ApnsSubscriptionRemover,
+) {
+  return createApnsChangeReminderSender(
+    apnsEnvironment(required(environment, 'APNS_ENVIRONMENT')),
+    required(environment, 'APNS_TOPIC'),
+    {
+      logger: invocationLogger,
+      providerTokenProvider: createApnsProviderTokenProvider({
+        keyId: required(environment, 'APNS_KEY_ID'),
+        privateKey: required(environment, 'APNS_PRIVATE_KEY'),
+        teamId: required(environment, 'APNS_TEAM_ID'),
+      }),
+      subscriptionRemover,
+      transport: boundaries.createApnsTransport(),
+    },
+  );
+}
+
+export function composeFcmSender(
+  environment: NodeJS.ProcessEnv,
+  boundaries: Pick<
+    ControlledReminderSmokeBoundaries,
+    'createCredential' | 'fetch'
+  >,
+  subscriptionRemover: FcmSubscriptionRemover,
+) {
+  return createFcmChangeReminderSender(
+    required(environment, 'FCM_PROJECT_ID'),
+    {
+      accessTokenProvider: createKeylessFcmAccessTokenProvider(
+        {
+          entraAssertionAudience: required(
+            environment,
+            'FCM_ENTRA_ASSERTION_AUDIENCE',
+          ),
+          managedIdentityClientId: required(
+            environment,
+            'REMINDER_MANAGED_IDENTITY_CLIENT_ID',
+          ),
+          serviceAccountEmail: required(
+            environment,
+            'FCM_SERVICE_ACCOUNT_EMAIL',
+          ),
+          workloadIdentityProvider: required(
+            environment,
+            'FCM_WORKLOAD_IDENTITY_PROVIDER',
+          ),
+        },
+        {
+          createCredential: boundaries.createCredential,
+          fetch: boundaries.fetch,
+          logger: invocationLogger,
+        },
+      ),
+      logger: invocationLogger,
+      subscriptionRemover,
+      transport: createFetchFcmHttpTransport(boundaries.fetch),
+    },
+  );
 }
 
 export function createControlledReminderSmokeRuntime(
@@ -231,61 +297,12 @@ export function createControlledReminderSmokeRuntime(
 
   return {
     ...(apnsActive
-      ? {
-          apnsSender: createApnsChangeReminderSender(
-            apnsEnvironment(required(environment, 'APNS_ENVIRONMENT')),
-            required(environment, 'APNS_TOPIC'),
-            {
-              logger: invocationLogger,
-              providerTokenProvider: createApnsProviderTokenProvider({
-                keyId: required(environment, 'APNS_KEY_ID'),
-                privateKey: required(environment, 'APNS_PRIVATE_KEY'),
-                teamId: required(environment, 'APNS_TEAM_ID'),
-              }),
-              subscriptionRemover: store,
-              transport: boundaries.createApnsTransport(),
-            },
-          ),
-        }
+      ? { apnsSender: composeApnsSender(environment, boundaries, store) }
       : {}),
     apnsRuntimeEnabled,
     runtimeEnabled,
     ...(fcmActive
-      ? {
-          sender: createFcmChangeReminderSender(
-            required(environment, 'FCM_PROJECT_ID'),
-            {
-              accessTokenProvider: createKeylessFcmAccessTokenProvider(
-                {
-                  entraAssertionAudience: required(
-                    environment,
-                    'FCM_ENTRA_ASSERTION_AUDIENCE',
-                  ),
-                  managedIdentityClientId: required(
-                    environment,
-                    'REMINDER_MANAGED_IDENTITY_CLIENT_ID',
-                  ),
-                  serviceAccountEmail: required(
-                    environment,
-                    'FCM_SERVICE_ACCOUNT_EMAIL',
-                  ),
-                  workloadIdentityProvider: required(
-                    environment,
-                    'FCM_WORKLOAD_IDENTITY_PROVIDER',
-                  ),
-                },
-                {
-                  createCredential: boundaries.createCredential,
-                  fetch: boundaries.fetch,
-                  logger: invocationLogger,
-                },
-              ),
-              logger: invocationLogger,
-              subscriptionRemover: store,
-              transport: createFetchFcmHttpTransport(boundaries.fetch),
-            },
-          ),
-        }
+      ? { sender: composeFcmSender(environment, boundaries, store) }
       : {}),
     store,
     testSendEnabled,
@@ -363,7 +380,9 @@ export function createControlledReminderSmokeHandler(
       ) {
         return outcome(503, 'unavailable');
       }
-      const result = await runtime.apnsSender.send(target, facts);
+      const result = await runtime.apnsSender.send(target, facts, {
+        kind: 'immediate',
+      });
       if (result.kind === 'accepted') return outcome(202, 'accepted');
       // This fixed outcome is deliberately narrower than the sender result:
       // only APNs 410/Unregistered plus conditional removal proves the stale

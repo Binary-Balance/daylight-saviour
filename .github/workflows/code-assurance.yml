@@ -51,8 +51,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build copy package
-        run: npm run build --workspace @daylight-saviour/copy
+      - name: Build Node runtime bridges
+        run: |
+          npm run build --workspace @daylight-saviour/copy
+          npm run build --workspace @daylight-saviour/domain
 
       - name: Run Seshat
         run: |

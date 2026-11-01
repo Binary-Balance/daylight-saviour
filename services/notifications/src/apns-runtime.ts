@@ -124,7 +124,7 @@ export function createNodeApnsHttpTransport(
           };
           timer = setTimeout(
             () => fail(new Error('APNs transport timeout')),
-            timeoutMs,
+            Math.min(timeoutMs, request.timeoutMs ?? timeoutMs),
           );
           const finish = (response: ApnsHttpResponse) => {
             if (settled) return;

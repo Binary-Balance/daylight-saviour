@@ -38,6 +38,13 @@ Tests assert source and public runtime wording plus immutability. Mobile code
 continues through the `australianEnglish` facade; no other copy may bypass these
 boundaries.
 
+`@daylight-saviour/contracts/node` and `@daylight-saviour/domain/node` are the
+same kind of bridge, for the notification service's reminder planner and pack
+verification. Node refuses TypeScript under `node_modules`, so a deployed
+service cannot load either package root. Each `build` emits the package to
+ignored `dist/`. The domain build then points its compiled imports at the
+compiled contracts, so a pack activated by one is recognised by the other.
+
 ## Ownership boundaries
 
 The canonical domain and contract packages continue to own Friendly Zone

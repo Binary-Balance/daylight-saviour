@@ -213,6 +213,38 @@ describe('APNs runtime', () => {
       return { result, streamClosed, timerClears };
     }
 
+    for (const [name, requestTimeoutMs, expected] of [
+      ['shortens', 1_234, 1_234],
+      ['never extends', 60_000, timeoutMs],
+    ] as const) {
+      it(`${name} its limit for a request deadline`, async (t) => {
+        const setTimer = t.mock.method(globalThis, 'setTimeout');
+        const stream = Object.assign(new EventEmitter(), {
+          end() {
+            queueMicrotask(() => {
+              stream.emit('response', { ':status': 200 });
+              stream.emit('end');
+            });
+          },
+        });
+        const session = Object.assign(new EventEmitter(), {
+          close() {},
+          request: () => stream,
+        });
+
+        await settled(
+          createNodeApnsHttpTransport({
+            connect: () => session as never,
+            timeoutMs,
+          }).post({ ...request(), timeoutMs: requestTimeoutMs }),
+        );
+
+        assert.ok(
+          setTimer.mock.calls.some((call) => call.arguments[1] === expected),
+        );
+      });
+    }
+
     it('ignores a stream error after the response has ended', async (t) => {
       const { result, streamClosed, timerClears } = await settle(
         t,
