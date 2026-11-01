@@ -1,6 +1,7 @@
 import type {
   ChangeReminderAdapters,
   ChangeReminderEnableResult,
+  ChangeReminderRestoreResult,
 } from './change-reminder-adapters';
 import {
   createChangeReminderSession,
@@ -19,6 +20,20 @@ const registration = {
   state: 'registered' as const,
   version: 2 as const,
 };
+
+const registered = {
+  kind: 'registered' as const,
+  notificationPermissionGranted: true,
+  registration,
+};
+
+// Saved for another Home Time Zone than the one the sessions below are in.
+const registeredElsewhere = {
+  ...registered,
+  registration: { ...registration, homeTimeZone: 'Australia/Brisbane' },
+};
+
+const bothTimings = { oneDayEnabled: true, oneWeekEnabled: true };
 
 async function waitForSnapshot(
   session: ChangeReminderSession,
@@ -50,6 +65,40 @@ function adapters(
     ...overrides,
   };
 }
+
+function createSession(overrides: Partial<ChangeReminderAdapters> = {}) {
+  const boundary = adapters(overrides);
+  const session = createChangeReminderSession({
+    adapters: boundary,
+    homeTimeZone: 'Australia/Sydney',
+  });
+  return { boundary, session };
+}
+
+async function startEnabledSession(
+  overrides: Partial<ChangeReminderAdapters> = {},
+) {
+  const { boundary, session } = createSession({
+    restore: jest.fn(async () => registered),
+    ...overrides,
+  });
+  const stop = session.start();
+  await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+  return { boundary, session, stop };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, reject, resolve };
+}
+
+// Lets promise callbacks that the session should ignore run before asserting.
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('Change Reminder session', () => {
   it('restores one stored registration on relaunch without registering again', async () => {
@@ -895,6 +944,393 @@ describe('Change Reminder session', () => {
     ).toMatchObject({
       preferences: { oneDayEnabled: true, oneWeekEnabled: true },
     });
+    stop();
+  });
+
+  it('ignores events before the session starts and after it stops', async () => {
+    const { boundary, session } = createSession();
+    session.dispatch({ type: 'foreground' });
+    expect(boundary.restore).not.toHaveBeenCalled();
+
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+    stop();
+    session.dispatch({ type: 'show-explainer' });
+    session.dispatch({ type: 'foreground' });
+
+    expect(session.getSnapshot()).toEqual({ kind: 'untouched' });
+    expect(boundary.restore).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores events that do not apply to an enabled registration', async () => {
+    const { boundary, session, stop } = await startEnabledSession();
+    const before = session.getSnapshot();
+
+    session.dispatch({ type: 'show-explainer' });
+    session.dispatch({ type: 'enable' });
+    session.dispatch({ type: 'retry-load' });
+    session.dispatch({ type: 'retry-zone' });
+    session.dispatch({ type: 'retry-preferences' });
+    session.dispatch({ type: 'cancel-preferences' });
+    session.dispatch({ type: 'confirm-disable' });
+    session.dispatch({ type: 'cancel-disable' });
+
+    expect(session.getSnapshot()).toBe(before);
+    expect(boundary.restore).toHaveBeenCalledTimes(1);
+    expect(boundary.enable).not.toHaveBeenCalled();
+    expect(boundary.updatePreferences).not.toHaveBeenCalled();
+    expect(boundary.disable).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('ignores events other than enable while the explainer is open', async () => {
+    const { boundary, session } = createSession();
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+    session.dispatch({ type: 'show-explainer' });
+    const before = session.getSnapshot();
+
+    session.dispatch({ type: 'retry-load' });
+    session.dispatch({ type: 'retry-zone' });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    session.dispatch({ type: 'retry-preferences' });
+    session.dispatch({ type: 'cancel-preferences' });
+    session.dispatch({ type: 'confirm-disable' });
+    session.dispatch({ type: 'cancel-disable' });
+    session.dispatch({ result: { kind: 'succeeded' }, type: 'token-refresh' });
+    expect(session.getSnapshot()).toBe(before);
+
+    // Coming back to the app rechecks the stored state; it never registers.
+    session.dispatch({ type: 'foreground' });
+    expect(boundary.restore).toHaveBeenCalledTimes(2);
+    expect(boundary.enable).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('reports reminders as unavailable when the device cannot register', async () => {
+    const { session } = createSession({
+      restore: jest.fn(async () => ({ kind: 'unavailable' as const })),
+    });
+    const stop = session.start();
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'unavailable',
+      ),
+    ).toEqual({ kind: 'unavailable' });
+    stop();
+  });
+
+  it('ignores a failed load that finishes after the session stops', async () => {
+    const load = deferred<void>();
+    // Rejects only if restore runs: a rejection nothing awaits would leave a
+    // mutant that skips restore unresolved, which fails the Seshat check.
+    const { session } = createSession({
+      restore: jest.fn(async () => {
+        await load.promise;
+        throw new Error('SecureStore failed');
+      }),
+    });
+    const stop = session.start();
+    stop();
+    load.resolve();
+    await flush();
+
+    expect(session.getSnapshot()).toEqual({ kind: 'loading' });
+  });
+
+  it('does not restore again when an active session is started twice', async () => {
+    const { boundary, session } = createSession();
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+
+    expect(session.start()).toBe(stop);
+
+    expect(session.getSnapshot()).toEqual({ kind: 'untouched' });
+    expect(boundary.restore).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('loads again when the session restarts', async () => {
+    const { boundary, session } = createSession();
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+    stop();
+
+    const restart = session.start();
+    expect(session.getSnapshot()).toEqual({ kind: 'loading' });
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+    expect(boundary.restore).toHaveBeenCalledTimes(2);
+    restart();
+  });
+
+  it('offers a retry when a pending Home Time Zone change cannot be sent', async () => {
+    const { session } = createSession({
+      restore: jest.fn(async () => ({
+        homeTimeZone: 'Australia/Sydney',
+        kind: 'pending' as const,
+        pendingHomeTimeZone: {
+          confirmed: 'Australia/Melbourne',
+          proposed: 'Australia/Sydney',
+        },
+      })),
+    });
+    const stop = session.start();
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'zone-failed',
+      ),
+    ).toEqual({ kind: 'zone-failed', preferences: bothTimings });
+    // Without an adapter that updates the zone, a retry cannot resolve it.
+    session.dispatch({ type: 'retry-zone' });
+    expect(session.getSnapshot()).toEqual({ kind: 'zone-mismatch' });
+    stop();
+  });
+
+  it('offers a retry when a Home Time Zone update is rejected', async () => {
+    const updateHomeTimeZone = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ kind: 'enabled' as const });
+    const { session } = createSession({
+      restore: jest.fn(async () => registeredElsewhere),
+      updateHomeTimeZone,
+    });
+    const stop = session.start();
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'zone-failed',
+      ),
+    ).toEqual({ kind: 'zone-failed', preferences: bothTimings });
+    session.dispatch({ type: 'retry-zone' });
+    expect(session.getSnapshot()).toMatchObject({ kind: 'saving-zone' });
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'enabled');
+    expect(updateHomeTimeZone).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it('ignores a Home Time Zone update that finishes after the session stops', async () => {
+    const update = deferred<ChangeReminderEnableResult>();
+    const { session } = createSession({
+      restore: jest.fn(async () => registeredElsewhere),
+      updateHomeTimeZone: jest.fn(() => update.promise),
+    });
+    const stop = session.start();
+    await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'saving-zone',
+    );
+    stop();
+    update.resolve({ kind: 'enabled' });
+    await flush();
+
+    expect(session.getSnapshot()).toMatchObject({ kind: 'saving-zone' });
+  });
+
+  it('keeps revoked notification permission across a Home Time Zone update retry', async () => {
+    const { session } = createSession({
+      restore: jest.fn(async () => ({
+        ...registeredElsewhere,
+        notificationPermissionGranted: false,
+      })),
+      updateHomeTimeZone: jest
+        .fn()
+        .mockResolvedValueOnce({ kind: 'failed' as const })
+        .mockResolvedValueOnce({ kind: 'enabled' as const }),
+    });
+    const stop = session.start();
+    await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'zone-failed',
+    );
+
+    session.dispatch({ type: 'retry-zone' });
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'permission-revoked',
+      ),
+    ).toEqual({ kind: 'permission-revoked' });
+    stop();
+  });
+
+  it('ignores a foreground while timings are being saved', async () => {
+    const { boundary, session, stop } = await startEnabledSession({
+      updatePreferences: jest.fn(
+        () => new Promise<ChangeReminderEnableResult>(() => undefined),
+      ),
+    });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+
+    session.dispatch({ type: 'foreground' });
+
+    expect(session.getSnapshot()).toMatchObject({ kind: 'saving-preferences' });
+    expect(boundary.restore).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('ignores a foreground while the Home Time Zone is being updated', async () => {
+    const { boundary, session } = createSession({
+      restore: jest.fn(async () => registeredElsewhere),
+      updateHomeTimeZone: jest.fn(
+        () => new Promise<ChangeReminderEnableResult>(() => undefined),
+      ),
+    });
+    const stop = session.start();
+    await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'saving-zone',
+    );
+
+    session.dispatch({ type: 'foreground' });
+
+    expect(session.getSnapshot()).toMatchObject({ kind: 'saving-zone' });
+    expect(boundary.restore).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('ignores a foreground while reminders are being deleted', async () => {
+    const { boundary, session, stop } = await startEnabledSession({
+      disable: jest.fn(
+        () => new Promise<{ readonly kind: 'disabled' }>(() => undefined),
+      ),
+    });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+    session.dispatch({ type: 'confirm-disable' });
+
+    session.dispatch({ type: 'foreground' });
+
+    expect(session.getSnapshot()).toMatchObject({ kind: 'disabling' });
+    expect(boundary.restore).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('does not save timings that are already confirmed', async () => {
+    const { boundary, session, stop } = await startEnabledSession();
+    const before = session.getSnapshot();
+
+    session.dispatch({ type: 'change-preferences', preferences: bothTimings });
+
+    expect(session.getSnapshot()).toBe(before);
+    expect(boundary.updatePreferences).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('offers a retry when saving timings is rejected', async () => {
+    const { session, stop } = await startEnabledSession({
+      updatePreferences: jest.fn().mockRejectedValueOnce(new Error('offline')),
+    });
+
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'preferences-failed',
+      ),
+    ).toEqual({
+      kind: 'preferences-failed',
+      preferences: bothTimings,
+      proposedPreferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    stop();
+  });
+
+  it('ignores a timing save that finishes after the session stops', async () => {
+    const save = deferred<ChangeReminderEnableResult>();
+    const { session, stop } = await startEnabledSession({
+      updatePreferences: jest.fn(() => save.promise),
+    });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+    });
+    stop();
+    save.resolve({ kind: 'failed' });
+    await flush();
+
+    expect(session.getSnapshot()).toMatchObject({ kind: 'saving-preferences' });
+  });
+
+  it('keeps confirmed reminders recoverable when deletion is rejected', async () => {
+    const { session, stop } = await startEnabledSession({
+      disable: jest.fn().mockRejectedValueOnce(new Error('offline')),
+    });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+
+    session.dispatch({ type: 'confirm-disable' });
+    expect(session.getSnapshot()).toEqual({
+      kind: 'disabling',
+      preferences: bothTimings,
+    });
+
+    expect(
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'disable-failed',
+      ),
+    ).toEqual({ kind: 'disable-failed', preferences: bothTimings });
+    stop();
+  });
+
+  it('shows a failure when a token refresh fails for good', async () => {
+    const { session, stop } = await startEnabledSession();
+
+    session.dispatch({
+      result: { kind: 'failed', retryable: false },
+      type: 'token-refresh',
+    });
+
+    expect(session.getSnapshot()).toEqual({ kind: 'failed' });
+    stop();
+  });
+
+  it('stops notifying a listener once it unsubscribes', async () => {
+    const { session } = createSession();
+    const listener = jest.fn();
+    const unsubscribe = session.subscribe(listener);
+    const stop = session.start();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('keeps a listener that subscribed again when an old unsubscribe is repeated', () => {
+    const { session } = createSession();
+    const listener = jest.fn();
+    const unsubscribe = session.subscribe(listener);
+    unsubscribe();
+    session.subscribe(listener);
+    unsubscribe();
+
+    const stop = session.start();
+
+    expect(listener).toHaveBeenCalledTimes(1);
     stop();
   });
 });
