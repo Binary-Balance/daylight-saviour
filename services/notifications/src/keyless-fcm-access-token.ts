@@ -235,144 +235,158 @@ export function createKeylessFcmAccessTokenProvider(
     configuration.managedIdentityClientId,
   );
 
+  async function acquireAssertion(): Promise<ManagedIdentityAssertion> {
+    let assertion: ManagedIdentityAssertion | null;
+    try {
+      assertion = await withTimeout(timeoutMs, () =>
+        credential.getToken(`${configuration.entraAssertionAudience}/.default`),
+      );
+    } catch (error) {
+      const kind =
+        error instanceof ExchangeTimeoutError ? 'timeout' : 'entra-denied';
+      report(dependencies.logger, `fcm-credential-${kind}`);
+      throw new KeylessFcmAccessTokenError(kind);
+    }
+    if (assertion === null || !validToken(assertion.token)) {
+      report(dependencies.logger, 'fcm-credential-entra-malformed');
+      throw new KeylessFcmAccessTokenError('entra-malformed');
+    }
+    if (
+      !Number.isSafeInteger(assertion.expiresOnTimestamp) ||
+      !validFutureTimestamp(assertion.expiresOnTimestamp, clock())
+    ) {
+      report(dependencies.logger, 'fcm-credential-entra-expired');
+      throw new KeylessFcmAccessTokenError('entra-expired');
+    }
+    return assertion;
+  }
+
+  // Returns the federated token that the impersonation request presents.
+  async function exchangeAssertion(
+    assertion: ManagedIdentityAssertion,
+  ): Promise<string> {
+    let stsResponse: Awaited<ReturnType<typeof readResponse>>;
+    try {
+      stsResponse = await readResponse(
+        exchangeFetch,
+        timeoutMs,
+        googleStsEndpoint,
+        {
+          body: new URLSearchParams({
+            audience: configuration.workloadIdentityProvider,
+            grant_type: tokenExchangeGrant,
+            requested_token_type: accessTokenType,
+            scope: cloudPlatformScope,
+            subject_token: assertion.token,
+            subject_token_type: jwtTokenType,
+          }).toString(),
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+          },
+          method: 'POST',
+        },
+      );
+    } catch (error) {
+      const kind =
+        error instanceof ExchangeTimeoutError ? 'timeout' : 'sts-transport';
+      report(dependencies.logger, `fcm-credential-${kind}`);
+      throw new KeylessFcmAccessTokenError(kind);
+    }
+    if (stsResponse.status !== 200) {
+      report(dependencies.logger, 'fcm-credential-sts-denied');
+      throw new KeylessFcmAccessTokenError('sts-denied');
+    }
+    const sts = stsResponse.body;
+    if (
+      !isRecord(sts) ||
+      !hasAllowedKeys(sts, [
+        'access_token',
+        'expires_in',
+        'issued_token_type',
+        'scope',
+        'token_type',
+      ]) ||
+      !validToken(sts.access_token) ||
+      sts.issued_token_type !== accessTokenType ||
+      sts.token_type !== 'Bearer' ||
+      (sts.scope !== undefined && sts.scope !== cloudPlatformScope) ||
+      !Number.isSafeInteger(sts.expires_in)
+    ) {
+      report(dependencies.logger, 'fcm-credential-sts-malformed');
+      throw new KeylessFcmAccessTokenError('sts-malformed');
+    }
+    if (
+      typeof sts.expires_in !== 'number' ||
+      sts.expires_in <= 0 ||
+      sts.expires_in * 1000 > maximumTokenLifetimeMs
+    ) {
+      report(dependencies.logger, 'fcm-credential-sts-expired');
+      throw new KeylessFcmAccessTokenError('sts-expired');
+    }
+    return sts.access_token;
+  }
+
+  async function impersonateServiceAccount(
+    federatedToken: string,
+  ): Promise<FcmAccessToken> {
+    const endpoint = new URL(
+      `/v1/projects/-/serviceAccounts/${encodeURIComponent(configuration.serviceAccountEmail)}:generateAccessToken`,
+      googleIamCredentialsOrigin,
+    ).toString();
+    let impersonationResponse: Awaited<ReturnType<typeof readResponse>>;
+    try {
+      impersonationResponse = await readResponse(
+        exchangeFetch,
+        timeoutMs,
+        endpoint,
+        {
+          body: JSON.stringify({
+            lifetime: requestedAccessTokenLifetime,
+            scope: [firebaseMessagingScope],
+          }),
+          headers: {
+            Authorization: `Bearer ${federatedToken}`,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          method: 'POST',
+        },
+      );
+    } catch (error) {
+      const kind =
+        error instanceof ExchangeTimeoutError
+          ? 'timeout'
+          : 'impersonation-transport';
+      report(dependencies.logger, `fcm-credential-${kind}`);
+      throw new KeylessFcmAccessTokenError(kind);
+    }
+    if (impersonationResponse.status !== 200) {
+      report(dependencies.logger, 'fcm-credential-impersonation-denied');
+      throw new KeylessFcmAccessTokenError('impersonation-denied');
+    }
+    const impersonation = impersonationResponse.body;
+    if (
+      !isRecord(impersonation) ||
+      !hasAllowedKeys(impersonation, ['accessToken', 'expireTime']) ||
+      !validToken(impersonation.accessToken) ||
+      typeof impersonation.expireTime !== 'string'
+    ) {
+      report(dependencies.logger, 'fcm-credential-impersonation-malformed');
+      throw new KeylessFcmAccessTokenError('impersonation-malformed');
+    }
+    const expiresAt = new Date(impersonation.expireTime);
+    if (!validExpiry(expiresAt, clock())) {
+      report(dependencies.logger, 'fcm-credential-impersonation-expired');
+      throw new KeylessFcmAccessTokenError('impersonation-expired');
+    }
+    report(dependencies.logger, 'fcm-credential-ready');
+    return { expiresAt, value: impersonation.accessToken };
+  }
+
   return {
     async getAccessToken(): Promise<FcmAccessToken> {
-      let assertion: ManagedIdentityAssertion | null;
-      try {
-        assertion = await withTimeout(timeoutMs, () =>
-          credential.getToken(
-            `${configuration.entraAssertionAudience}/.default`,
-          ),
-        );
-      } catch (error) {
-        const kind =
-          error instanceof ExchangeTimeoutError ? 'timeout' : 'entra-denied';
-        report(dependencies.logger, `fcm-credential-${kind}`);
-        throw new KeylessFcmAccessTokenError(kind);
-      }
-      if (assertion === null || !validToken(assertion.token)) {
-        report(dependencies.logger, 'fcm-credential-entra-malformed');
-        throw new KeylessFcmAccessTokenError('entra-malformed');
-      }
-      if (
-        !Number.isSafeInteger(assertion.expiresOnTimestamp) ||
-        !validFutureTimestamp(assertion.expiresOnTimestamp, clock())
-      ) {
-        report(dependencies.logger, 'fcm-credential-entra-expired');
-        throw new KeylessFcmAccessTokenError('entra-expired');
-      }
-
-      let stsResponse: Awaited<ReturnType<typeof readResponse>>;
-      try {
-        stsResponse = await readResponse(
-          exchangeFetch,
-          timeoutMs,
-          googleStsEndpoint,
-          {
-            body: new URLSearchParams({
-              audience: configuration.workloadIdentityProvider,
-              grant_type: tokenExchangeGrant,
-              requested_token_type: accessTokenType,
-              scope: cloudPlatformScope,
-              subject_token: assertion.token,
-              subject_token_type: jwtTokenType,
-            }).toString(),
-            headers: {
-              'Content-Type':
-                'application/x-www-form-urlencoded; charset=utf-8',
-            },
-            method: 'POST',
-          },
-        );
-      } catch (error) {
-        const kind =
-          error instanceof ExchangeTimeoutError ? 'timeout' : 'sts-transport';
-        report(dependencies.logger, `fcm-credential-${kind}`);
-        throw new KeylessFcmAccessTokenError(kind);
-      }
-      if (stsResponse.status !== 200) {
-        report(dependencies.logger, 'fcm-credential-sts-denied');
-        throw new KeylessFcmAccessTokenError('sts-denied');
-      }
-      const sts = stsResponse.body;
-      if (
-        !isRecord(sts) ||
-        !hasAllowedKeys(sts, [
-          'access_token',
-          'expires_in',
-          'issued_token_type',
-          'scope',
-          'token_type',
-        ]) ||
-        !validToken(sts.access_token) ||
-        sts.issued_token_type !== accessTokenType ||
-        sts.token_type !== 'Bearer' ||
-        (sts.scope !== undefined && sts.scope !== cloudPlatformScope) ||
-        !Number.isSafeInteger(sts.expires_in)
-      ) {
-        report(dependencies.logger, 'fcm-credential-sts-malformed');
-        throw new KeylessFcmAccessTokenError('sts-malformed');
-      }
-      if (
-        typeof sts.expires_in !== 'number' ||
-        sts.expires_in <= 0 ||
-        sts.expires_in * 1000 > maximumTokenLifetimeMs
-      ) {
-        report(dependencies.logger, 'fcm-credential-sts-expired');
-        throw new KeylessFcmAccessTokenError('sts-expired');
-      }
-
-      const endpoint = new URL(
-        `/v1/projects/-/serviceAccounts/${encodeURIComponent(configuration.serviceAccountEmail)}:generateAccessToken`,
-        googleIamCredentialsOrigin,
-      ).toString();
-      let impersonationResponse: Awaited<ReturnType<typeof readResponse>>;
-      try {
-        impersonationResponse = await readResponse(
-          exchangeFetch,
-          timeoutMs,
-          endpoint,
-          {
-            body: JSON.stringify({
-              lifetime: requestedAccessTokenLifetime,
-              scope: [firebaseMessagingScope],
-            }),
-            headers: {
-              Authorization: `Bearer ${sts.access_token}`,
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            method: 'POST',
-          },
-        );
-      } catch (error) {
-        const kind =
-          error instanceof ExchangeTimeoutError
-            ? 'timeout'
-            : 'impersonation-transport';
-        report(dependencies.logger, `fcm-credential-${kind}`);
-        throw new KeylessFcmAccessTokenError(kind);
-      }
-      if (impersonationResponse.status !== 200) {
-        report(dependencies.logger, 'fcm-credential-impersonation-denied');
-        throw new KeylessFcmAccessTokenError('impersonation-denied');
-      }
-      const impersonation = impersonationResponse.body;
-      if (
-        !isRecord(impersonation) ||
-        !hasAllowedKeys(impersonation, ['accessToken', 'expireTime']) ||
-        !validToken(impersonation.accessToken) ||
-        typeof impersonation.expireTime !== 'string'
-      ) {
-        report(dependencies.logger, 'fcm-credential-impersonation-malformed');
-        throw new KeylessFcmAccessTokenError('impersonation-malformed');
-      }
-      const expiresAt = new Date(impersonation.expireTime);
-      if (!validExpiry(expiresAt, clock())) {
-        report(dependencies.logger, 'fcm-credential-impersonation-expired');
-        throw new KeylessFcmAccessTokenError('impersonation-expired');
-      }
-      report(dependencies.logger, 'fcm-credential-ready');
-      return { expiresAt, value: impersonation.accessToken };
+      const assertion = await acquireAssertion();
+      const federatedToken = await exchangeAssertion(assertion);
+      return impersonateServiceAccount(federatedToken);
     },
   };
 }

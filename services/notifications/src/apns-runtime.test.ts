@@ -122,6 +122,78 @@ describe('APNs runtime', () => {
     );
   });
 
+  it('reuses the provider token at the instant it was issued', async () => {
+    const provider = createApnsProviderTokenProvider(
+      { keyId: 'ABCDE12345', privateKey, teamId: 'ZYXWV98765' },
+      { clock: () => fixedNow },
+    );
+    const token = await provider.getProviderToken();
+
+    // ES256 signatures differ on every signing, so a token signed again here
+    // would not be equal.
+    assert.equal(await provider.getProviderToken(), token);
+  });
+
+  it('signs a new provider token when the clock moves backwards', async () => {
+    let now = fixedNow;
+    const provider = createApnsProviderTokenProvider(
+      { keyId: 'ABCDE12345', privateKey, teamId: 'ZYXWV98765' },
+      { clock: () => now },
+    );
+    const token = await provider.getProviderToken();
+    now = new Date(fixedNow.getTime() - 1000);
+
+    const earlier = await provider.getProviderToken();
+
+    assert.notEqual(earlier, token);
+    assert.equal(
+      decode(earlier.split('.')[1]!).iat,
+      Math.floor(now.getTime() / 1000),
+    );
+  });
+
+  it('fails closed for a malformed team ID', () => {
+    assert.throws(
+      () =>
+        createApnsProviderTokenProvider({
+          keyId: 'ABCDE12345',
+          privateKey,
+          teamId: 'too-short',
+        }),
+      { message: 'Invalid APNs team ID' },
+    );
+  });
+
+  it('fails closed for an elliptic-curve key on another curve', () => {
+    const p384 = generateKeyPairSync('ec', { namedCurve: 'secp384r1' })
+      .privateKey.export({ format: 'pem', type: 'pkcs8' })
+      .toString();
+
+    assert.throws(
+      () =>
+        createApnsProviderTokenProvider({
+          keyId: 'ABCDE12345',
+          privateKey: p384,
+          teamId: 'ZYXWV98765',
+        }),
+      { message: 'APNs private key must use P-256' },
+    );
+  });
+
+  for (const timeoutMs of [0, -1, 1.5, Number.NaN, 60_001]) {
+    it(`rejects a transport timeout of ${timeoutMs}`, () => {
+      assert.throws(() => createNodeApnsHttpTransport({ timeoutMs }), {
+        message: 'Invalid APNs transport timeout',
+      });
+    });
+  }
+
+  for (const timeoutMs of [1, 60_000]) {
+    it(`accepts a transport timeout of ${timeoutMs}`, () => {
+      assert.doesNotThrow(() => createNodeApnsHttpTransport({ timeoutMs }));
+    });
+  }
+
   it('maps one request through HTTP/2 and closes the session', async () => {
     const stream = Object.assign(new EventEmitter(), {
       close() {},
@@ -214,12 +286,16 @@ describe('APNs runtime', () => {
     }
 
     for (const [name, requestTimeoutMs, expected] of [
-      ['shortens', 1_234, 1_234],
-      ['never extends', 60_000, timeoutMs],
+      ['shortens its limit', 1_234, 1_234],
+      ['never extends its limit', 60_000, timeoutMs],
+      ['allows no time', 0, 0],
     ] as const) {
-      it(`${name} its limit for a request deadline`, async (t) => {
+      it(`${name} for a request deadline of ${requestTimeoutMs}`, async (t) => {
         const setTimer = t.mock.method(globalThis, 'setTimeout');
         const stream = Object.assign(new EventEmitter(), {
+          // A mutant can leave the request to its timer, which fires after
+          // this test and closes the stream.
+          close() {},
           end() {
             queueMicrotask(() => {
               stream.emit('response', { ':status': 200 });
@@ -275,6 +351,73 @@ describe('APNs runtime', () => {
       assert.deepEqual(result, { error: failure });
       assert.equal(streamClosed, 1);
       assert.equal(timerClears, 1);
+    });
+
+    it('returns the body in the order its chunks arrive', async (t) => {
+      const { result } = await settle(t, (stream) => {
+        stream.emit('response', { ':status': 400 });
+        stream.emit('data', Buffer.from('{"reason"'));
+        stream.emit('data', ':"BadDevice');
+        stream.emit('data', Buffer.from('Token"}'));
+        stream.emit('end');
+      });
+
+      assert.deepEqual(result, {
+        response: { body: '{"reason":"BadDeviceToken"}', status: 400 },
+      });
+    });
+
+    it('accepts a body of exactly 64 KiB', async (t) => {
+      const { result } = await settle(t, (stream) => {
+        stream.emit('response', { ':status': 400 });
+        stream.emit('data', Buffer.alloc(64 * 1024, 'a'));
+        stream.emit('end');
+      });
+
+      assert.deepEqual(result, {
+        response: { body: 'a'.repeat(64 * 1024), status: 400 },
+      });
+    });
+
+    it('ignores an APNs ID that is not a UUID', async (t) => {
+      const { result } = await settle(t, (stream) => {
+        stream.emit('response', { ':status': 200, 'apns-id': 'not-a-uuid' });
+        stream.emit('end');
+      });
+
+      assert.deepEqual(result, { response: { body: '', status: 200 } });
+    });
+
+    for (const [name, headers] of [
+      ['a status that is not a whole number', { ':status': 200.5 }],
+      ['a status that is text', { ':status': '200' }],
+      ['no status', {}],
+    ] as const) {
+      it(`rejects a response with ${name}`, async (t) => {
+        const { result, streamClosed, timerClears } = await settle(
+          t,
+          (stream) => {
+            stream.emit('response', headers);
+            stream.emit('end');
+          },
+        );
+
+        assert.deepEqual(result, {
+          error: new Error('APNs response status unavailable'),
+        });
+        assert.equal(streamClosed, 1);
+        assert.equal(timerClears, 1);
+      });
+    }
+
+    it('rejects a stream that ends without a response', async (t) => {
+      const { result } = await settle(t, (stream) => {
+        stream.emit('end');
+      });
+
+      assert.deepEqual(result, {
+        error: new Error('APNs response status unavailable'),
+      });
     });
   });
 

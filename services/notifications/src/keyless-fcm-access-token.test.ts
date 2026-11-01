@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 
 import {
   createKeylessFcmAccessTokenProvider,
   type KeylessFcmFetch,
   type KeylessFcmLogEvent,
+  type ManagedIdentityAssertion,
 } from './keyless-fcm-access-token.ts';
 
 const now = new Date('2026-07-28T01:00:00.000Z');
@@ -15,6 +16,12 @@ const workloadIdentityProvider =
   '//iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/portable-pool/providers/azure-runtime';
 const serviceAccountEmail =
   'portable-fcm-sender@portable-project.iam.gserviceaccount.com';
+const configuration = {
+  entraAssertionAudience: 'api://portable-google-federation',
+  managedIdentityClientId: '11111111-2222-4333-8444-555555555555',
+  serviceAccountEmail,
+  workloadIdentityProvider,
+};
 
 interface RecordedRequest {
   readonly body: string | undefined;
@@ -49,15 +56,19 @@ function harness(
   responses: readonly ReturnType<typeof response>[],
   options: {
     readonly assertionExpiresOnTimestamp?: number;
+    readonly getToken?: () => Promise<ManagedIdentityAssertion | null>;
+    readonly timeoutMs?: number;
     readonly transportFailureAt?: number;
   } = {},
 ) {
   const events: KeylessFcmLogEvent[] = [];
   const requests: RecordedRequest[] = [];
+  const signals: AbortSignal[] = [];
   const audiences: string[] = [];
   let responseIndex = 0;
   const fetch: KeylessFcmFetch = async (input, init) => {
     const currentRequest = responseIndex;
+    signals.push(init.signal);
     requests.push({
       body: init.body,
       headers: init.headers,
@@ -84,21 +95,26 @@ function harness(
     {
       clock: () => now,
       createCredential: () => ({
-        getToken: async (audience) => {
-          audiences.push(audience);
-          return {
-            expiresOnTimestamp:
-              options.assertionExpiresOnTimestamp ??
-              now.getTime() + 30 * 60 * 1000,
-            token: entraAssertion,
-          };
-        },
+        getToken:
+          options.getToken ??
+          (async (audience) => {
+            audiences.push(audience);
+            return {
+              expiresOnTimestamp:
+                options.assertionExpiresOnTimestamp ??
+                now.getTime() + 30 * 60 * 1000,
+              token: entraAssertion,
+            };
+          }),
       }),
       fetch,
       logger: { write: (event) => events.push(event) },
+      ...(options.timeoutMs === undefined
+        ? {}
+        : { timeoutMs: options.timeoutMs }),
     },
   );
-  return { audiences, events, provider, requests };
+  return { audiences, events, provider, requests, signals };
 }
 
 function successfulResponses() {
@@ -114,6 +130,35 @@ function successfulResponses() {
       expireTime: '2026-07-28T01:30:00.000Z',
     }),
   ] as const;
+}
+
+function stsBody(overrides: Record<string, unknown> = {}) {
+  return {
+    access_token: federatedToken,
+    expires_in: 1800,
+    issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+    token_type: 'Bearer',
+    ...overrides,
+  };
+}
+
+function impersonationBody(overrides: Record<string, unknown> = {}) {
+  return {
+    accessToken: fcmToken,
+    expireTime: '2026-07-28T01:30:00.000Z',
+    ...overrides,
+  };
+}
+
+function providerWithTimeout(timeoutMs: number) {
+  return createKeylessFcmAccessTokenProvider(configuration, {
+    createCredential: () => ({ getToken: async () => null }),
+    fetch: async () => {
+      throw new Error('request made');
+    },
+    logger: { write: () => undefined },
+    timeoutMs,
+  });
 }
 
 describe('keyless FCM access-token provider', () => {
@@ -388,5 +433,376 @@ describe('keyless FCM access-token provider', () => {
 
     assert.deepEqual(events, ['fcm-credential-timeout']);
     assert.doesNotMatch(JSON.stringify(events), /sensitive-/);
+  });
+
+  it('accepts an Entra assertion audience of exactly 512 characters', () => {
+    const entraAssertionAudience = `api://${'a'.repeat(506)}`;
+    assert.equal(entraAssertionAudience.length, 512);
+
+    assert.doesNotThrow(() =>
+      createKeylessFcmAccessTokenProvider(
+        { ...configuration, entraAssertionAudience },
+        {
+          createCredential: () => ({ getToken: async () => null }),
+          fetch: async () => {
+            throw new Error('request made');
+          },
+          logger: { write: () => undefined },
+        },
+      ),
+    );
+  });
+
+  for (const timeoutMs of [0, -1, 1.5, Number.NaN, 60_001]) {
+    it(`rejects a credential timeout of ${timeoutMs}`, () => {
+      assert.throws(() => providerWithTimeout(timeoutMs), {
+        message: 'Invalid FCM credential timeout',
+      });
+    });
+  }
+
+  for (const timeoutMs of [1, 60_000]) {
+    it(`accepts a credential timeout of ${timeoutMs}`, () => {
+      assert.doesNotThrow(() => providerWithTimeout(timeoutMs));
+    });
+  }
+
+  it('rejects a missing assertion as malformed', async () => {
+    const test = harness(successfulResponses(), { getToken: async () => null });
+
+    await assert.rejects(() => test.provider.getAccessToken(), {
+      kind: 'entra-malformed',
+    });
+
+    assert.deepEqual(test.events, ['fcm-credential-entra-malformed']);
+    assert.deepEqual(test.requests, []);
+  });
+
+  for (const [name, token] of [
+    ['an empty token', ''],
+    ['a token with a space', 'has space'],
+    ['a token with a control character', 'has\ttab'],
+    ['a token with a DEL character', 'has\x7fdel'],
+    ['a token with a non-ASCII character', 'tok\u00e9n'],
+    ['a token longer than 16 KiB', 'a'.repeat(16 * 1024 + 1)],
+    // The type says text. A list has a length, as text does, so a check that
+    // only looked at the length would let it through.
+    ['a token that is not text', 12345],
+    ['a token that is a list', ['abc']],
+    ['a missing token', undefined],
+  ] as const) {
+    it(`rejects ${name} as a malformed Entra assertion`, async () => {
+      const test = harness(successfulResponses(), {
+        getToken: async () =>
+          ({ expiresOnTimestamp: now.getTime() + 60_000, token }) as never,
+      });
+
+      await assert.rejects(() => test.provider.getAccessToken(), {
+        kind: 'entra-malformed',
+      });
+
+      assert.deepEqual(test.events, ['fcm-credential-entra-malformed']);
+      assert.deepEqual(test.requests, []);
+    });
+  }
+
+  it('accepts an Entra assertion of 16 KiB using the widest allowed characters', async () => {
+    const token = `!~${'a'.repeat(16 * 1024 - 2)}`;
+    const test = harness(successfulResponses(), {
+      getToken: async () => ({
+        expiresOnTimestamp: now.getTime() + 60_000,
+        token,
+      }),
+    });
+
+    await test.provider.getAccessToken();
+
+    assert.equal(
+      new URLSearchParams(test.requests[0]?.body).get('subject_token'),
+      token,
+    );
+  });
+
+  for (const [name, expiresOnTimestamp] of [
+    ['already expired', now.getTime() - 1],
+    ['not a number', Number.NaN],
+    ['not a whole number of milliseconds', now.getTime() + 0.5],
+    ['not finite', Number.POSITIVE_INFINITY],
+  ] as const) {
+    it(`rejects an Entra assertion that is ${name}`, async () => {
+      const test = harness(successfulResponses(), {
+        assertionExpiresOnTimestamp: expiresOnTimestamp,
+      });
+
+      await assert.rejects(() => test.provider.getAccessToken(), {
+        kind: 'entra-expired',
+      });
+
+      assert.deepEqual(test.events, ['fcm-credential-entra-expired']);
+      assert.deepEqual(test.requests, []);
+    });
+  }
+
+  it('accepts an Entra assertion that expires a millisecond from now', async () => {
+    const test = harness(successfulResponses(), {
+      assertionExpiresOnTimestamp: now.getTime() + 1,
+    });
+
+    await test.provider.getAccessToken();
+
+    assert.deepEqual(test.events, ['fcm-credential-ready']);
+  });
+
+  it('reports a failed credential as denied without calling Google', async () => {
+    const test = harness(successfulResponses(), {
+      getToken: async () => {
+        throw new Error(`sensitive ${entraAssertion}`);
+      },
+    });
+
+    await assert.rejects(() => test.provider.getAccessToken(), {
+      kind: 'entra-denied',
+    });
+
+    assert.deepEqual(test.events, ['fcm-credential-entra-denied']);
+    assert.deepEqual(test.requests, []);
+  });
+
+  it('reports a credential that never answers as a timeout', async () => {
+    const test = harness(successfulResponses(), {
+      getToken: () => new Promise<never>(() => undefined),
+      timeoutMs: 1,
+    });
+
+    await assert.rejects(() => settled(test.provider.getAccessToken()), {
+      kind: 'timeout',
+    });
+
+    assert.deepEqual(test.events, ['fcm-credential-timeout']);
+    assert.deepEqual(test.requests, []);
+  });
+
+  for (const [name, body] of [
+    ['an unexpected field', stsBody({ unexpected: true })],
+    ['a missing access token', stsBody({ access_token: undefined })],
+    ['an empty access token', stsBody({ access_token: '' })],
+    ['an access token with a space', stsBody({ access_token: 'has space' })],
+    ['another issued token type', stsBody({ issued_token_type: 'jwt' })],
+    ['a missing issued token type', stsBody({ issued_token_type: undefined })],
+    ['another token type', stsBody({ token_type: 'bearer' })],
+    ['a missing token type', stsBody({ token_type: undefined })],
+    [
+      'another scope',
+      stsBody({ scope: 'https://www.googleapis.com/auth/firebase.messaging' }),
+    ],
+    ['a fractional lifetime', stsBody({ expires_in: 1800.5 })],
+    ['a lifetime in text', stsBody({ expires_in: '1800' })],
+    ['a missing lifetime', stsBody({ expires_in: undefined })],
+    ['null', 'null'],
+    ['a list', '[]'],
+    ['text', '"text"'],
+    ['a number', '42'],
+    ['an empty body', ''],
+    ['a body that is not JSON', 'not json'],
+  ] as const) {
+    it(`rejects an STS response with ${name} as malformed`, async () => {
+      const test = harness([response(200, body)]);
+
+      await assert.rejects(() => test.provider.getAccessToken(), {
+        kind: 'sts-malformed',
+      });
+
+      assert.deepEqual(test.events, ['fcm-credential-sts-malformed']);
+      assert.equal(test.requests.length, 1);
+    });
+  }
+
+  it('accepts an STS response that names the requested scope', async () => {
+    const test = harness([
+      response(
+        200,
+        stsBody({ scope: 'https://www.googleapis.com/auth/cloud-platform' }),
+      ),
+      successfulResponses()[1],
+    ]);
+
+    await test.provider.getAccessToken();
+
+    assert.deepEqual(test.events, ['fcm-credential-ready']);
+  });
+
+  it('accepts a federated token that lasts one hour', async () => {
+    const test = harness([
+      response(200, stsBody({ expires_in: 3600 })),
+      successfulResponses()[1],
+    ]);
+
+    await test.provider.getAccessToken();
+
+    assert.deepEqual(test.events, ['fcm-credential-ready']);
+  });
+
+  for (const expiresIn of [3601, -1]) {
+    it(`rejects a federated token that lasts ${expiresIn} seconds`, async () => {
+      const test = harness([response(200, stsBody({ expires_in: expiresIn }))]);
+
+      await assert.rejects(() => test.provider.getAccessToken(), {
+        kind: 'sts-expired',
+      });
+
+      assert.deepEqual(test.events, ['fcm-credential-sts-expired']);
+      assert.equal(test.requests.length, 1);
+    });
+  }
+
+  it('reads an exchange response of 64 KiB but not one character more', async () => {
+    // JSON allows trailing whitespace, so padding keeps the body valid.
+    const sts = JSON.stringify(stsBody());
+    const atLimit = harness([
+      response(200, sts.padEnd(64 * 1024)),
+      successfulResponses()[1],
+    ]);
+
+    await atLimit.provider.getAccessToken();
+
+    assert.deepEqual(atLimit.events, ['fcm-credential-ready']);
+
+    const overLimit = harness([response(200, sts.padEnd(64 * 1024 + 1))]);
+
+    await assert.rejects(() => overLimit.provider.getAccessToken(), {
+      kind: 'sts-malformed',
+    });
+
+    assert.deepEqual(overLimit.events, ['fcm-credential-sts-malformed']);
+  });
+
+  for (const status of [401, 403, 500, 201]) {
+    it(`reports an impersonation response with status ${status} as denied`, async () => {
+      const test = harness([
+        successfulResponses()[0],
+        response(status, impersonationBody()),
+      ]);
+
+      await assert.rejects(() => test.provider.getAccessToken(), {
+        kind: 'impersonation-denied',
+      });
+
+      assert.deepEqual(test.events, ['fcm-credential-impersonation-denied']);
+    });
+  }
+
+  for (const [name, body] of [
+    ['an unexpected field', impersonationBody({ unexpected: true })],
+    ['a missing access token', impersonationBody({ accessToken: undefined })],
+    ['an empty access token', impersonationBody({ accessToken: '' })],
+    [
+      'an access token with a space',
+      impersonationBody({ accessToken: 'has space' }),
+    ],
+    ['an expiry that is not text', impersonationBody({ expireTime: 1800 })],
+    ['a missing expiry', impersonationBody({ expireTime: undefined })],
+    ['null', 'null'],
+    ['a list', '[]'],
+    ['text', '"text"'],
+    ['an empty body', ''],
+    ['a body that is not JSON', 'not json'],
+  ] as const) {
+    it(`rejects an impersonation response with ${name} as malformed`, async () => {
+      const test = harness([successfulResponses()[0], response(200, body)]);
+
+      await assert.rejects(() => test.provider.getAccessToken(), {
+        kind: 'impersonation-malformed',
+      });
+
+      assert.deepEqual(test.events, ['fcm-credential-impersonation-malformed']);
+    });
+  }
+
+  for (const [name, expireTime] of [
+    ['now', '2026-07-28T01:00:00.000Z'],
+    ['in the past', '2026-07-28T00:00:00.000Z'],
+    ['not a date', 'not-a-date'],
+  ] as const) {
+    it(`rejects an impersonated token whose expiry is ${name}`, async () => {
+      const test = harness([
+        successfulResponses()[0],
+        response(200, impersonationBody({ expireTime })),
+      ]);
+
+      await assert.rejects(() => test.provider.getAccessToken(), {
+        kind: 'impersonation-expired',
+      });
+
+      assert.deepEqual(test.events, ['fcm-credential-impersonation-expired']);
+    });
+  }
+
+  it('accepts an impersonated token that lasts exactly one hour', async () => {
+    const test = harness([
+      successfulResponses()[0],
+      response(
+        200,
+        impersonationBody({ expireTime: '2026-07-28T02:00:00.000Z' }),
+      ),
+    ]);
+
+    assert.deepEqual(await test.provider.getAccessToken(), {
+      expiresAt: new Date('2026-07-28T02:00:00.000Z'),
+      value: fcmToken,
+    });
+  });
+
+  it('aborts a request that outlasts its deadline', async () => {
+    let signal: AbortSignal | undefined;
+    const provider = createKeylessFcmAccessTokenProvider(configuration, {
+      clock: () => now,
+      createCredential: () => ({
+        getToken: async () => ({
+          expiresOnTimestamp: now.getTime() + 30 * 60 * 1000,
+          token: entraAssertion,
+        }),
+      }),
+      // Ignores the abort, like a stalled connection, so only the deadline
+      // ends the wait.
+      fetch: (_input, init) => {
+        signal = init.signal;
+        return new Promise<never>(() => undefined);
+      },
+      logger: { write: () => undefined },
+      timeoutMs: 1,
+    });
+
+    await assert.rejects(() => settled(provider.getAccessToken()), {
+      kind: 'timeout',
+    });
+
+    assert.equal(signal?.aborted, true);
+  });
+
+  it('stops the deadline of each request once it has completed', async () => {
+    // A deadline left running would later abort a request that already
+    // finished.
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      const test = harness(successfulResponses());
+      const outcome = { settled: false };
+      void test.provider
+        .getAccessToken()
+        .catch(() => undefined)
+        .finally(() => {
+          outcome.settled = true;
+        });
+
+      await new Promise(setImmediate);
+      assert.equal(outcome.settled, true);
+      mock.timers.tick(10_000);
+
+      assert.deepEqual(
+        test.signals.map((signal) => signal.aborted),
+        [false, false],
+      );
+    } finally {
+      mock.timers.reset();
+    }
   });
 });

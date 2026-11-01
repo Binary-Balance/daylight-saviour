@@ -8,6 +8,8 @@ import {
   controlledReminderSmokeOptions,
   createControlledReminderSmokeHandler,
   createControlledReminderSmokeRuntime,
+  invocationLogger,
+  required,
   type ControlledReminderSmokeBoundaries,
 } from './controlled-reminder-smoke.ts';
 import type {
@@ -31,14 +33,13 @@ const facts = {
   timing: 'one-week',
 } as const;
 
-function request(
-  body: unknown,
+function rawRequest(
+  bytes: Uint8Array,
   options: {
     readonly contentLength?: string;
     readonly contentType?: string;
   } = {},
 ) {
-  const bytes = new TextEncoder().encode(JSON.stringify(body));
   const headers = new Headers({
     'content-type': options.contentType ?? 'application/json',
   });
@@ -56,10 +57,30 @@ function request(
   } as never;
 }
 
+function streamRequest(body: ReadableStream<Uint8Array>) {
+  return {
+    body,
+    headers: new Headers({ 'content-type': 'application/json' }),
+  } as never;
+}
+
+function request(
+  body: unknown,
+  options: {
+    readonly contentLength?: string;
+    readonly contentType?: string;
+  } = {},
+) {
+  return rawRequest(new TextEncoder().encode(JSON.stringify(body)), options);
+}
+
 const entraAssertion = 'sensitive-entra-assertion';
 const federatedToken = 'sensitive-federated-token';
 const fcmAccessToken = 'sensitive-fcm-access-token';
 const providerDetail = 'sensitive provider detail';
+const apnsPrivateKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
+  .privateKey.export({ format: 'pem', type: 'pkcs8' })
+  .toString();
 const fcmEnvironment = {
   FCM_ENTRA_ASSERTION_AUDIENCE: 'api://portable-fcm-audience',
   FCM_PROJECT_ID: 'portable-project',
@@ -291,7 +312,27 @@ describe('controlled Change Reminder smoke handler', () => {
       {},
     ],
     ['invalid event instant', { ...facts, changeEventAt: 'not-a-date' }, {}],
+    [
+      'event instant without milliseconds',
+      { ...facts, changeEventAt: '2026-10-04T16:00:00Z' },
+      {},
+    ],
+    [
+      'event instant with an offset',
+      { ...facts, changeEventAt: '2026-10-04T16:00:00.000+00:00' },
+      {},
+    ],
+    ['unknown change direction', { ...facts, changeDirection: 'sideways' }, {}],
+    ['unknown timing', { ...facts, timing: 'one-month' }, {}],
+    [
+      'time zone outside Australia',
+      { ...facts, homeTimeZone: 'Europe/London' },
+      {},
+    ],
     ['oversized declared body', facts, { contentLength: '1025' }],
+    ['negative declared body length', facts, { contentLength: '-1' }],
+    ['fractional declared body length', facts, { contentLength: '1.5' }],
+    ['non-numeric declared body length', facts, { contentLength: 'abc' }],
   ] as const) {
     it(`rejects ${name} without dispatch`, async () => {
       let sends = 0;
@@ -714,4 +755,308 @@ describe('controlled Change Reminder smoke handler', () => {
       'fcm-change-reminder-accepted',
     ]);
   });
+
+  // The declared length is only range-checked. The bytes read have their own
+  // limit, below.
+  for (const contentLength of ['0', '1024']) {
+    it(`accepts a declared body length of ${contentLength}`, async () => {
+      const result = await createControlledReminderSmokeHandler(runtime())(
+        request(facts, { contentLength }),
+        context(),
+      );
+
+      assert.equal(result.status, 202);
+    });
+  }
+
+  it('accepts a body of exactly 1 KiB', async () => {
+    // JSON allows trailing whitespace, so padding keeps the body valid.
+    const bytes = new TextEncoder().encode(JSON.stringify(facts).padEnd(1024));
+    assert.equal(bytes.byteLength, 1024);
+
+    const result = await createControlledReminderSmokeHandler(runtime())(
+      rawRequest(bytes),
+      context(),
+    );
+
+    assert.equal(result.status, 202);
+  });
+
+  it('cancels and releases the stream of a body over 1 KiB', async () => {
+    let cancelled = false;
+    // Never closes, so a body that went unchecked would wait for more data.
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(1025));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    const result = await settled(
+      createControlledReminderSmokeHandler(runtime())(
+        streamRequest(body),
+        context(),
+      ),
+    );
+
+    assert.equal(result.status, 400);
+    assert.equal(cancelled, true);
+    assert.equal(body.locked, false);
+  });
+
+  it('reads a body that arrives in several chunks', async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify(facts));
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, 40));
+        controller.enqueue(bytes.slice(40, 90));
+        controller.enqueue(bytes.slice(90));
+        controller.close();
+      },
+    });
+    let sent: unknown;
+
+    const result = await createControlledReminderSmokeHandler(
+      runtime({
+        send: async (_subscription, reviewedFacts) => {
+          sent = reviewedFacts;
+          return { kind: 'accepted' };
+        },
+      }),
+    )(streamRequest(body), context());
+
+    assert.equal(result.status, 202);
+    assert.deepEqual(sent, {
+      changeDirection: 'forward',
+      changeEventAt: new Date('2026-10-04T16:00:00.000Z'),
+      homeTimeZone: 'Australia/Sydney',
+      timing: 'one-week',
+    });
+  });
+
+  it('rejects a body that is not valid UTF-8', async () => {
+    // JSON keeps the last of two duplicate keys. Lossy decoding would swap the
+    // bad byte for a replacement character and still read a valid request, so
+    // only strict decoding rejects this one.
+    const bytes = Buffer.concat([
+      Buffer.from('{"installationId":"'),
+      Buffer.from([0xff]),
+      Buffer.from(`",${JSON.stringify(facts).slice(1)}`),
+    ]);
+    let sends = 0;
+
+    const result = await createControlledReminderSmokeHandler(
+      runtime({
+        send: async () => {
+          sends += 1;
+          return { kind: 'accepted' };
+        },
+      }),
+    )(rawRequest(bytes), context());
+
+    assert.equal(result.status, 400);
+    assert.equal(sends, 0);
+  });
+
+  for (const [name, change] of [
+    ['a backward change', { changeDirection: 'backward' }],
+    ['one-day timing', { timing: 'one-day' }],
+  ] as const) {
+    it(`sends the reviewed facts for ${name}`, async () => {
+      let sent: unknown;
+      const result = await createControlledReminderSmokeHandler(
+        runtime({
+          send: async (_subscription, reviewedFacts) => {
+            sent = reviewedFacts;
+            return { kind: 'accepted' };
+          },
+        }),
+      )(request({ ...facts, ...change }), context());
+
+      assert.equal(result.status, 202);
+      assert.deepEqual(sent, {
+        changeDirection: 'forward',
+        changeEventAt: new Date('2026-10-04T16:00:00.000Z'),
+        homeTimeZone: 'Australia/Sydney',
+        timing: 'one-week',
+        ...change,
+      });
+    });
+  }
+
+  it('does not send to Android when only the APNs runtime is enabled', async () => {
+    let sends = 0;
+    const result = await createControlledReminderSmokeHandler(
+      runtime({
+        apnsRuntimeEnabled: true,
+        apnsSend: async () => ({ kind: 'accepted' }),
+        runtimeEnabled: false,
+        send: async () => {
+          sends += 1;
+          return { kind: 'accepted' };
+        },
+      }),
+    )(request(facts), context());
+
+    assert.equal(result.status, 503);
+    assert.equal(sends, 0);
+  });
+
+  it('does not send to iOS when only the FCM runtime is enabled', async () => {
+    let sends = 0;
+    const result = await createControlledReminderSmokeHandler(
+      runtime({
+        apnsSend: async () => {
+          sends += 1;
+          return { kind: 'accepted' };
+        },
+        getSubscription: async () => ({
+          deviceToken: 'b'.repeat(64),
+          installationId,
+          platform: 'ios',
+        }),
+      }),
+    )(request(facts), context());
+
+    assert.equal(result.status, 503);
+    assert.equal(sends, 0);
+  });
+
+  it('reports a failed iOS send as unavailable', async () => {
+    const result = await createControlledReminderSmokeHandler(
+      runtime({
+        apnsRuntimeEnabled: true,
+        apnsSend: async () => {
+          throw new Error('Stored token unusable');
+        },
+        getSubscription: async () => ({
+          deviceToken: 'b'.repeat(64),
+          installationId,
+          platform: 'ios',
+        }),
+      }),
+    )(request(facts), context());
+
+    assert.equal(result.status, 503);
+  });
+
+  it('refuses an iOS registration when no APNs sender was composed', async () => {
+    const result = await createControlledReminderSmokeHandler(
+      runtime({
+        apnsRuntimeEnabled: true,
+        getSubscription: async () => ({
+          deviceToken: 'b'.repeat(64),
+          installationId,
+          platform: 'ios',
+        }),
+      }),
+    )(request(facts), context());
+
+    assert.equal(result.status, 503);
+  });
+
+  describe('APNs environment', () => {
+    function apnsSettings(environment: string) {
+      return {
+        APNS_ENVIRONMENT: environment,
+        APNS_KEY_ID: 'ABCDE12345',
+        APNS_PRIVATE_KEY: apnsPrivateKey,
+        APNS_RUNTIME_ENABLED: 'true',
+        APNS_TEAM_ID: 'ZYXWV98765',
+        APNS_TOPIC: 'com.example.app',
+        FCM_TEST_SEND_ENABLED: 'true',
+      };
+    }
+
+    function iosBoundaries(
+      origins: string[],
+    ): ControlledReminderSmokeBoundaries {
+      return {
+        ...boundaries({ platform: 'ios' }),
+        createApnsTransport: () => ({
+          post: async (apnsRequest) => {
+            origins.push(apnsRequest.endpoint.origin);
+            return { body: '', status: 200 };
+          },
+        }),
+      };
+    }
+
+    for (const [environment, origin] of [
+      ['production', 'https://api.push.apple.com'],
+      ['sandbox', 'https://api.sandbox.push.apple.com'],
+    ] as const) {
+      it(`sends to the ${environment} APNs host`, async () => {
+        const origins: string[] = [];
+
+        const result = await createControlledReminderSmokeHandler(() =>
+          createControlledReminderSmokeRuntime(
+            apnsSettings(environment),
+            iosBoundaries(origins),
+          ),
+        )(request(facts), context());
+
+        assert.equal(result.status, 202);
+        assert.deepEqual(origins, [origin]);
+      });
+    }
+
+    it('refuses an unknown environment without sending', async () => {
+      const origins: string[] = [];
+
+      const result = await createControlledReminderSmokeHandler(() =>
+        createControlledReminderSmokeRuntime(
+          apnsSettings('staging'),
+          iosBoundaries(origins),
+        ),
+      )(request(facts), context());
+
+      assert.equal(result.status, 503);
+      assert.deepEqual(origins, []);
+    });
+  });
+
+  it('creates no store while a platform lacks the test-send gate', () => {
+    let stores = 0;
+
+    const smokeRuntime = createControlledReminderSmokeRuntime(
+      { APNS_RUNTIME_ENABLED: 'true', FCM_RUNTIME_ENABLED: 'true' },
+      {
+        ...boundaries(),
+        createStore: () => {
+          stores += 1;
+          throw new Error('store created');
+        },
+      },
+    );
+
+    assert.deepEqual(smokeRuntime, {
+      apnsRuntimeEnabled: true,
+      runtimeEnabled: true,
+      testSendEnabled: false,
+    });
+    assert.equal(stores, 0);
+  });
+
+  it('drops a log event written outside an invocation', () => {
+    assert.doesNotThrow(() => invocationLogger.write('fcm-credential-ready'));
+  });
+
+  it('trims a required setting', () => {
+    assert.equal(required({ SETTING: '  value ' }, 'SETTING'), 'value');
+  });
+
+  for (const [name, environment] of [
+    ['missing', {}],
+    ['empty', { SETTING: '' }],
+    ['blank', { SETTING: '   ' }],
+  ] as const) {
+    it(`rejects a ${name} required setting`, () => {
+      assert.throws(() => required(environment, 'SETTING'), {
+        message: 'Missing configuration',
+      });
+    });
+  }
 });
