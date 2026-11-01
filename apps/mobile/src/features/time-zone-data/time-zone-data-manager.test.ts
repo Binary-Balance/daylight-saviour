@@ -14,14 +14,17 @@ const trustedKeys = {
   'test-only-2026-a': 'A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=',
 };
 
-function newerPack() {
+function releasePack(version: string, generatedAt: string) {
   const pack = structuredClone(bundledAustralianDataPack);
-  pack.generatedAt = '2026-07-20T00:00:00.000Z';
-  pack.packVersion = '2026d-australian-v1';
-  pack.source.version = '2026d';
-  pack.source.versionUrl =
-    'https://data.iana.org/time-zones/releases/tzdata2026d.tar.gz';
+  pack.generatedAt = generatedAt;
+  pack.packVersion = `${version}-australian-v1`;
+  pack.source.version = version;
+  pack.source.versionUrl = `https://data.iana.org/time-zones/releases/tzdata${version}.tar.gz`;
   return pack;
+}
+
+function newerPack() {
+  return releasePack('2026d', '2026-07-20T00:00:00.000Z');
 }
 
 // JSON ignores trailing whitespace, so padding lets a valid manifest or signed
@@ -129,6 +132,20 @@ function memoryStorage(
   };
 }
 
+// A saved cache record that holds validators and no pack. Overrides replace
+// its fields.
+function cacheRecord(overrides: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    artifact: null,
+    cacheVersion: 1,
+    etag: '"saved"',
+    lastCheckedAt: '2026-07-19T01:00:00.000Z',
+    lastModified: 'Sun, 19 Jul 2026 00:00:00 GMT',
+    manifestPackVersion: null,
+    ...overrides,
+  });
+}
+
 function managerWith({
   now = new Date('2026-07-20T01:00:00.000Z'),
   request,
@@ -169,13 +186,22 @@ describe('Time-Zone Data Pack manager', () => {
 
     expect(manager.getSnapshot()).toMatchObject({
       freshness: 'current',
+      lastCheckedAt: '2026-07-20T01:00:00.000Z',
+      lastError: null,
       pack: { packVersion: '2026d-australian-v1' },
+      remoteEnabled: true,
       source: 'remote',
     });
     expect(request.mock.calls[1]?.[0]).toBe(
       'https://data.example.test/time-zone/packs/2026d-australian-v1.pack.json',
     );
     expect(storage.value).toContain('2026d-australian-v1');
+    expect(JSON.parse(storage.value ?? 'null')).toMatchObject({
+      etag: '"manifest-v2"',
+      lastCheckedAt: '2026-07-20T01:00:00.000Z',
+      lastModified: 'Mon, 20 Jul 2026 00:00:00 GMT',
+      manifestPackVersion: '2026d-australian-v1',
+    });
   });
 
   it('restores a cached verified pack before making its cold-launch check', async () => {
@@ -441,6 +467,497 @@ describe('Time-Zone Data Pack manager', () => {
       pack: { packVersion: bundledAustralianDataPack.packVersion },
     });
   });
+});
+
+describe('Time-Zone Data Pack subscribers', () => {
+  it('notifies subscribers after each snapshot change until they unsubscribe', async () => {
+    const manager = managerWith({
+      request: jest.fn().mockResolvedValue(response(500)),
+    });
+    const seen: string[] = [];
+    const unsubscribe = manager.subscribe(() => {
+      seen.push(manager.getSnapshot().freshness);
+    });
+
+    await manager.initialize();
+    expect(seen).toEqual(['checking', 'retry-failed']);
+
+    unsubscribe();
+    await manager.refresh('manual');
+    expect(seen).toEqual(['checking', 'retry-failed']);
+  });
+});
+
+describe('Time-Zone Data Pack Validity Horizon', () => {
+  it.each([
+    ['at', 'offline-valid', 0],
+    ['1 ms after', 'expired', 1],
+  ])('reports data %s the horizon as %s', async (_when, freshness, offset) => {
+    const horizon = Date.parse(bundledAustralianDataPack.coverage.validUntil);
+    const manager = managerWith({
+      now: new Date(horizon + offset),
+      request: jest.fn().mockRejectedValue(new Error('offline')),
+    });
+
+    await manager.initialize();
+
+    expect(manager.getSnapshot().freshness).toBe(freshness);
+  });
+});
+
+describe('Time-Zone Data Pack manifest check', () => {
+  const checkedAt = '2026-07-20T01:00:00.000Z';
+  const afterHorizon = '2031-01-01T00:00:00.000Z';
+
+  it('sends no validators before it has saved any', async () => {
+    const request = jest.fn().mockResolvedValue(response(500));
+
+    await managerWith({ request }).initialize();
+
+    expect(request.mock.calls[0][1].headers).toEqual({
+      Accept: 'application/json',
+    });
+  });
+
+  it.each<[string, Record<string, unknown>, Record<string, string>]>([
+    ['an ETag', { lastModified: null }, { 'If-None-Match': '"saved"' }],
+    [
+      'a Last-Modified',
+      { etag: null },
+      { 'If-Modified-Since': 'Sun, 19 Jul 2026 00:00:00 GMT' },
+    ],
+    [
+      'both',
+      {},
+      {
+        'If-Modified-Since': 'Sun, 19 Jul 2026 00:00:00 GMT',
+        'If-None-Match': '"saved"',
+      },
+    ],
+  ])(
+    'sends only the validators it saved: %s',
+    async (_name, saved, validators) => {
+      const request = jest.fn().mockResolvedValue(response(500));
+
+      await managerWith({
+        request,
+        storage: memoryStorage(cacheRecord(saved)),
+      }).initialize();
+
+      expect(request.mock.calls[0][1].headers).toEqual({
+        Accept: 'application/json',
+        ...validators,
+      });
+    },
+  );
+
+  it.each<[string, string]>([
+    ['text that is not JSON', 'not json'],
+    ['a value that is not an object', JSON.stringify(['saved'])],
+    ['an unknown cache version', cacheRecord({ cacheVersion: 2 })],
+    ['an ETag that is not text', cacheRecord({ etag: 7 })],
+    ['a check time that is not text', cacheRecord({ lastCheckedAt: 7 })],
+    ['a Last-Modified that is not text', cacheRecord({ lastModified: 7 })],
+    [
+      'a manifest version that is not text',
+      cacheRecord({ manifestPackVersion: 7 }),
+    ],
+    [
+      'a check time that is not canonical',
+      cacheRecord({ lastCheckedAt: '2026-07-19T01:00:00Z' }),
+    ],
+  ])('ignores a saved record with %s', async (_name, saved) => {
+    const request = jest.fn().mockResolvedValue(response(500));
+
+    await managerWith({
+      request,
+      storage: memoryStorage(saved),
+    }).initialize();
+
+    expect(request.mock.calls[0][1].headers).toEqual({
+      Accept: 'application/json',
+    });
+  });
+
+  it('never activates a manifest that is not valid', async () => {
+    const request = jest.fn().mockResolvedValue(response(200, 'not json'));
+    const manager = managerWith({ request });
+
+    await manager.initialize();
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'retry-failed',
+      lastError: 'refresh-failed',
+      source: 'bundled',
+    });
+  });
+
+  it.each([
+    ['inside', checkedAt, 'current'],
+    ['past', afterHorizon, 'expired'],
+  ])(
+    'records a 304 as a successful check %s the Validity Horizon',
+    async (_where, at, freshness) => {
+      const storage = memoryStorage(cacheRecord());
+      const request = jest.fn().mockResolvedValue(response(304));
+      const manager = managerWith({ now: new Date(at), request, storage });
+
+      await manager.initialize();
+
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(manager.getSnapshot()).toMatchObject({
+        freshness,
+        lastCheckedAt: at,
+        lastError: null,
+        source: 'bundled',
+      });
+      expect(JSON.parse(storage.value ?? 'null')).toMatchObject({
+        etag: '"saved"',
+        lastCheckedAt: at,
+      });
+    },
+  );
+
+  it('rejects a 304 when it sent no validator', async () => {
+    const manager = managerWith({
+      request: jest.fn().mockResolvedValue(response(304)),
+      storage: memoryStorage(cacheRecord({ etag: null, lastModified: null })),
+    });
+
+    await manager.initialize();
+
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'retry-failed',
+      lastCheckedAt: checkedAt,
+      lastError: 'refresh-failed',
+    });
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['an ETag', { lastModified: null }],
+    ['a Last-Modified', { etag: null }],
+  ])('accepts a 304 when it sent only %s', async (_name, saved) => {
+    const manager = managerWith({
+      request: jest.fn().mockResolvedValue(response(304)),
+      storage: memoryStorage(cacheRecord(saved)),
+    });
+
+    await manager.initialize();
+
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'current',
+      lastCheckedAt: checkedAt,
+      lastError: null,
+    });
+  });
+
+  describe('when the manifest names the active pack', () => {
+    function manifestRequest(headers: Record<string, string> = {}) {
+      const active = signedArtifacts(
+        structuredClone(bundledAustralianDataPack),
+      );
+      return jest
+        .fn()
+        .mockResolvedValue(
+          response(200, JSON.stringify(active.manifest), headers),
+        );
+    }
+
+    it.each([
+      ['inside', checkedAt, 'current'],
+      ['past', afterHorizon, 'expired'],
+    ])(
+      'keeps the active pack without downloading one %s the Validity Horizon',
+      async (_where, at, freshness) => {
+        const storage = memoryStorage();
+        const request = manifestRequest({
+          etag: '"manifest-v1"',
+          'last-modified': 'Sun, 19 Jul 2026 08:38:40 GMT',
+        });
+        const manager = managerWith({ now: new Date(at), request, storage });
+
+        await manager.initialize();
+
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(manager.getSnapshot()).toMatchObject({
+          freshness,
+          lastCheckedAt: at,
+          lastError: null,
+          source: 'bundled',
+        });
+        expect(JSON.parse(storage.value ?? 'null')).toMatchObject({
+          artifact: null,
+          etag: '"manifest-v1"',
+          lastCheckedAt: at,
+          lastModified: 'Sun, 19 Jul 2026 08:38:40 GMT',
+          manifestPackVersion: bundledAustralianDataPack.packVersion,
+        });
+      },
+    );
+
+    it.each<
+      [string, Record<string, string>, { etag: string; lastModified: string }]
+    >([
+      [
+        'takes the validators of the response',
+        { etag: '"new"', 'last-modified': 'Mon, 20 Jul 2026 00:00:00 GMT' },
+        { etag: '"new"', lastModified: 'Mon, 20 Jul 2026 00:00:00 GMT' },
+      ],
+      [
+        'keeps the saved ones when the response has none',
+        {},
+        { etag: '"saved"', lastModified: 'Sun, 19 Jul 2026 00:00:00 GMT' },
+      ],
+      [
+        'takes empty ones as sent',
+        { etag: '', 'last-modified': '' },
+        { etag: '', lastModified: '' },
+      ],
+    ])('saves validators: %s', async (_name, headers, saved) => {
+      const storage = memoryStorage(cacheRecord());
+      const manager = managerWith({
+        request: manifestRequest(headers),
+        storage,
+      });
+
+      await manager.initialize();
+
+      expect(JSON.parse(storage.value ?? 'null')).toMatchObject(saved);
+    });
+  });
+});
+
+describe('Time-Zone Data Pack download and activation', () => {
+  it('keeps the active pack when the pack request returns an error status', async () => {
+    const artifacts = signedArtifacts();
+    const storage = memoryStorage();
+    const request = jest
+      .fn()
+      .mockResolvedValueOnce(response(200, JSON.stringify(artifacts.manifest)))
+      .mockResolvedValueOnce(response(404));
+    const manager = managerWith({ request, storage });
+
+    await manager.initialize();
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'retry-failed',
+      lastError: 'refresh-failed',
+      pack: { packVersion: bundledAustralianDataPack.packVersion },
+      source: 'bundled',
+    });
+    expect(storage.value).not.toContain('2026d');
+  });
+
+  it('sends the saved validators with the manifest request only', async () => {
+    const artifacts = signedArtifacts();
+    const request = jest
+      .fn()
+      .mockResolvedValueOnce(response(200, JSON.stringify(artifacts.manifest)))
+      .mockResolvedValueOnce(response(200, artifacts.bytes));
+    const manager = managerWith({
+      request,
+      storage: memoryStorage(cacheRecord()),
+    });
+
+    await manager.initialize();
+
+    expect(request.mock.calls[0][1].headers).toEqual({
+      Accept: 'application/json',
+      'If-Modified-Since': 'Sun, 19 Jul 2026 00:00:00 GMT',
+      'If-None-Match': '"saved"',
+    });
+    expect(request.mock.calls[1][1].headers).toEqual({
+      Accept: 'application/json',
+    });
+  });
+
+  it.each(['manifest', 'pack'] as const)(
+    'treats a %s request that throws at once as a transport loss',
+    async (target) => {
+      const artifacts = signedArtifacts();
+      const throwing = () => {
+        throw new Error('offline');
+      };
+      const request = jest
+        .fn()
+        .mockImplementationOnce(
+          target === 'manifest'
+            ? throwing
+            : () =>
+                Promise.resolve(
+                  response(200, JSON.stringify(artifacts.manifest)),
+                ),
+        )
+        .mockImplementationOnce(throwing);
+      const manager = managerWith({ request });
+
+      await manager.initialize();
+
+      expect(manager.getSnapshot()).toMatchObject({
+        freshness: 'offline-valid',
+        lastError: 'refresh-failed',
+        source: 'bundled',
+      });
+    },
+  );
+
+  it('does not activate a pack it cannot save', async () => {
+    const artifacts = signedArtifacts();
+    const storage = {
+      ...memoryStorage(),
+      async save() {
+        throw new Error('disk full');
+      },
+    };
+    const request = jest
+      .fn()
+      .mockResolvedValueOnce(response(200, JSON.stringify(artifacts.manifest)))
+      .mockResolvedValueOnce(response(200, artifacts.bytes));
+    const manager = managerWith({ request, storage });
+
+    await manager.initialize();
+
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'retry-failed',
+      pack: { packVersion: bundledAustralianDataPack.packVersion },
+      source: 'bundled',
+    });
+  });
+
+  it('still reports a failed check when it cannot save the check time', async () => {
+    const storage = {
+      ...memoryStorage(),
+      async save() {
+        throw new Error('disk full');
+      },
+    };
+    const manager = managerWith({
+      request: jest.fn().mockRejectedValue(new Error('offline')),
+      storage,
+    });
+
+    await manager.initialize();
+
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'offline-valid',
+      lastCheckedAt: '2026-07-20T01:00:00.000Z',
+      lastError: 'refresh-failed',
+    });
+  });
+
+  it('reports a newer pack as expired when it is past its Validity Horizon', async () => {
+    const artifacts = signedArtifacts();
+    const request = jest
+      .fn()
+      .mockResolvedValueOnce(response(200, JSON.stringify(artifacts.manifest)))
+      .mockResolvedValueOnce(response(200, artifacts.bytes));
+    const manager = managerWith({
+      now: new Date('2031-01-01T00:00:00.000Z'),
+      request,
+    });
+
+    await manager.initialize();
+
+    expect(manager.getSnapshot()).toMatchObject({
+      freshness: 'expired',
+      pack: { packVersion: '2026d-australian-v1' },
+      source: 'remote',
+    });
+  });
+
+  it.each([
+    ['a newer release generated earlier', '2026d', '2026-01-01', 'remote'],
+    ['an older release generated later', '2026b', '2026-12-01', 'bundled'],
+  ])(
+    'orders packs by tzdata release before generation time: %s',
+    async (_name, version, generated, source) => {
+      const artifacts = signedArtifacts(
+        releasePack(version, `${generated}T00:00:00.000Z`),
+      );
+      const request = jest
+        .fn()
+        .mockResolvedValueOnce(
+          response(200, JSON.stringify(artifacts.manifest)),
+        )
+        .mockResolvedValueOnce(response(200, artifacts.bytes));
+      const manager = managerWith({ request });
+
+      await manager.initialize();
+
+      expect(manager.getSnapshot().source).toBe(source);
+    },
+  );
+});
+
+describe('Time-Zone Data Pack cache', () => {
+  // The length modulo 3 decides how base64 pads its last group, so these three
+  // lengths cover every padding case.
+  it.each([30_000, 30_001, 30_002])(
+    'restores a cached pack of %i bytes',
+    async (length) => {
+      const artifacts = signedArtifacts(newerPack(), length);
+      const storage = memoryStorage();
+      await managerWith({
+        request: jest
+          .fn()
+          .mockResolvedValueOnce(
+            response(200, JSON.stringify(artifacts.manifest)),
+          )
+          .mockResolvedValueOnce(response(200, artifacts.bytes)),
+        storage,
+      }).initialize();
+      const restored = managerWith({
+        request: jest.fn().mockResolvedValue(response(500)),
+        storage,
+      });
+
+      await restored.initialize();
+
+      expect(artifacts.bytes.byteLength).toBe(length);
+      expect(restored.getSnapshot()).toMatchObject({
+        pack: { packVersion: '2026d-australian-v1' },
+        source: 'cached',
+      });
+    },
+  );
+
+  const day = 24 * 60 * 60 * 1_000;
+  it.each([
+    ['a full day', 'stale-valid', day],
+    ['just under a day', 'current', day - 1],
+  ])(
+    'restores a cached pack last checked %s ago as %s',
+    async (_label, freshness, age) => {
+      const artifacts = signedArtifacts();
+      const now = new Date('2026-07-20T01:00:00.000Z');
+      const storage = memoryStorage(
+        cacheRecord({
+          artifact: {
+            manifest: artifacts.manifest,
+            packBase64: base64(artifacts.bytes),
+          },
+          lastCheckedAt: new Date(now.getTime() - age).toISOString(),
+          manifestPackVersion: artifacts.manifest.pack.packVersion,
+        }),
+      );
+      const manager = managerWith({
+        now,
+        request: jest.fn().mockResolvedValue(response(500)),
+        storage,
+      });
+      const seen: string[] = [];
+      manager.subscribe(() => {
+        seen.push(manager.getSnapshot().freshness);
+      });
+
+      await manager.initialize();
+
+      // The restore is the first change, before the cold-launch check starts.
+      expect(seen[0]).toBe(freshness);
+    },
+  );
 });
 
 describe('Time-Zone Data Pack download bounds', () => {
