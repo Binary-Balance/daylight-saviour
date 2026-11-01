@@ -781,9 +781,11 @@ export function createProductionChangeReminderAdapters({
         const registrationEndpoint =
           parseReminderRegistrationEndpoint(endpoint);
         const latest = await loadStoredState();
+        // Another restore or update cleared it while this one was queued.
+        if (latest === null) return { kind: 'unregistered' };
         if (
           registrationEndpoint === null ||
-          latest?.state !== 'registered' ||
+          latest.state !== 'registered' ||
           latest.version !== 4 ||
           !checkInDue(latest.lastContactAt, now())
         ) {
@@ -868,9 +870,8 @@ export function createProductionChangeReminderAdapters({
     if (canonicalZoneId === null) return { kind: 'failed' };
     try {
       const saved = await loadStoredState();
-      if (saved === null || saved.state === 'pending-delete') {
-        return { kind: 'failed' };
-      }
+      if (saved === null) return { kind: 'unregistered' };
+      if (saved.state === 'pending-delete') return { kind: 'failed' };
       const deviceToken =
         'deviceToken' in saved ? saved.deviceToken : await devicePushToken();
       if (!validDeviceToken(deviceToken)) return { kind: 'failed' };

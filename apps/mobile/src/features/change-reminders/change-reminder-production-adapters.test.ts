@@ -2905,6 +2905,54 @@ describe('Change Reminder check-in', () => {
       );
     });
 
+    it('sends one request when two restores overlap', async () => {
+      const test = harness({
+        fetchImplementation: accepted,
+        storage: seeded(),
+      });
+
+      await Promise.all([test.adapters.restore(), test.adapters.restore()]);
+
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('holds an update until the check-in has recorded contact', async () => {
+      let checkInStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        checkInStarted = resolve;
+      });
+      let releaseCheckIn!: () => void;
+      const held = new Promise<void>((resolve) => {
+        releaseCheckIn = resolve;
+      });
+      const fetchImplementation = jest.fn(async (input: unknown) => {
+        if (input === checkInUrl) {
+          checkInStarted();
+          await held;
+        }
+        return new Response(null, { status: 204 });
+      }) as jest.MockedFunction<typeof fetch>;
+      const test = harness({ fetchImplementation, storage: seeded() });
+
+      const restoring = test.adapters.restore();
+      await settled(started, 'check-in');
+      const updating = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
+      await new Promise((resolve) => setImmediate(resolve));
+      // Without the queue, the update would go out now, and the check-in's
+      // save would then undo it.
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+      releaseCheckIn();
+
+      await settled(restoring, 'restore');
+      await expect(settled(updating, 'update')).resolves.toMatchObject({
+        kind: 'enabled',
+      });
+      expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+        homeTimeZone: 'Australia/Brisbane',
+        lastContactAt: contactTime.toISOString(),
+      });
+    });
+
     it('records contact on the latest saved registration, not the one it first read', async () => {
       let release!: () => void;
       const held = new Promise<void>((resolve) => {
@@ -3129,6 +3177,22 @@ describe('Change Reminder check-in', () => {
         kind: 'unregistered',
       });
       expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports it gone to a restore that overlapped, and to a later update', async () => {
+      const test = harness({
+        fetchImplementation: serviceGone,
+        storage: seeded(),
+      });
+
+      await expect(
+        Promise.all([test.adapters.restore(), test.adapters.restore()]),
+      ).resolves.toEqual([{ kind: 'unregistered' }, { kind: 'unregistered' }]);
+
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+      await expect(
+        test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+      ).resolves.toEqual({ kind: 'unregistered' });
     });
 
     it('lets the user enable reminders again with a fresh registration', async () => {
