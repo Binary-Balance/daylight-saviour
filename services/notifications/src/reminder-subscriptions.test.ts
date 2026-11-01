@@ -2280,6 +2280,126 @@ describe('generation-ordered subscription persistence', () => {
     );
   });
 
+  it('purges a marker only once it is more than thirty days old', async () => {
+    const subscriptions = concurrentSubscriptionTable();
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptions,
+      unusedThrottleTable(),
+    );
+    const cutoff = Date.parse('2026-08-08T02:00:00.000Z');
+    for (const [rowKey, retiredAt] of [
+      ['older', cutoff - 1],
+      ['exactly-thirty-days', cutoff],
+      ['newer', cutoff + 1],
+    ] as const) {
+      await subscriptions.create({
+        attemptGeneration: 1,
+        partitionKey: 'subscriptions-v1',
+        retiredAt: new Date(retiredAt),
+        rowKey,
+        state: 'retired',
+      });
+    }
+
+    await registrationStore.purgeExpiredRetiredSubscriptions(
+      new Date('2026-09-07T02:00:00.000Z'),
+    );
+
+    assert.deepEqual(
+      [...subscriptions.rows.keys()],
+      ['subscriptions-v1/exactly-thirty-days', 'subscriptions-v1/newer'],
+    );
+  });
+
+  it('asks for markers retired before exactly thirty days ago', async () => {
+    let cutoff: Date | undefined;
+    const registrationStore = createTableReminderSubscriptionStore(
+      subscriptionTable({
+        listRetiredExpired: (at) => {
+          cutoff = at;
+          return (async function* () {
+            // No markers.
+          })();
+        },
+      }),
+      unusedThrottleTable(),
+    );
+
+    await registrationStore.purgeExpiredRetiredSubscriptions(
+      new Date('2026-09-07T02:00:00.123Z'),
+    );
+
+    assert.deepEqual(cutoff, new Date('2026-08-08T02:00:00.123Z'));
+  });
+
+  describe('when a marker cannot be deleted', () => {
+    // The second of three markers fails to delete with `failure`.
+    function purgeWith(failure: unknown) {
+      const deletions: (readonly string[])[] = [];
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptionTable({
+          delete: async (partitionKey, rowKey, etag) => {
+            deletions.push([partitionKey, rowKey, etag]);
+            if (rowKey === 'second') throw failure;
+          },
+          listRetiredExpired: () =>
+            (async function* () {
+              for (const rowKey of ['first', 'second', 'third']) {
+                yield {
+                  attemptGeneration: 1,
+                  etag: `etag-${rowKey}`,
+                  partitionKey: 'subscriptions-v1',
+                  retiredAt: new Date('2026-08-01T00:00:00.000Z'),
+                  rowKey,
+                  state: 'retired' as const,
+                };
+              }
+            })(),
+        }),
+        unusedThrottleTable(),
+      );
+      return {
+        deletions,
+        purge: () =>
+          registrationStore.purgeExpiredRetiredSubscriptions(
+            new Date('2026-09-07T02:00:00.000Z'),
+          ),
+      };
+    }
+
+    // Gone, changed or no longer matching since it was listed: the next
+    // run or another worker has dealt with it.
+    for (const status of [404, 409, 412]) {
+      it(`goes on to the next marker after a ${status}`, async () => {
+        const { deletions, purge } = purgeWith(azureError(status));
+
+        await purge();
+
+        assert.deepEqual(deletions, [
+          ['subscriptions-v1', 'first', 'etag-first'],
+          ['subscriptions-v1', 'second', 'etag-second'],
+          ['subscriptions-v1', 'third', 'etag-third'],
+        ]);
+      });
+    }
+
+    for (const [name, failure] of [
+      ['a server error', azureError(500)],
+      ['an error with no status', new Error('unreachable')],
+    ] as const) {
+      it(`stops at ${name}`, async () => {
+        const { deletions, purge } = purgeWith(failure);
+
+        await assert.rejects(purge, (error) => error === failure);
+
+        assert.deepEqual(
+          deletions.map(([, rowKey]) => rowKey),
+          ['first', 'second'],
+        );
+      });
+    }
+  });
+
   it('recovers an active legacy row but never creates an absent legacy row', async () => {
     const legacyRequestId = 'c'.repeat(64);
     const subscriptions = concurrentSubscriptionTable();
@@ -2310,38 +2430,63 @@ describe('generation-ordered subscription persistence', () => {
     );
   });
 
-  it('bounds absent-row creation to the versioned request clock window', async () => {
-    const now = new Date('2026-09-07T02:00:00.000Z');
-    const registrationStore = createTableReminderSubscriptionStore(
-      concurrentSubscriptionTable(),
-      unusedThrottleTable(),
-      () => now,
-    );
-    const freshRequestId = `v2.${String(now.getTime()).padStart(13, '0')}.${'d'.repeat(64)}`;
-    const expiredRequestId = `v2.${String(now.getTime() - 86_400_001).padStart(13, '0')}.${'e'.repeat(64)}`;
-    const futureRequestId = `v2.${String(now.getTime() + 5 * 60_001).padStart(13, '0')}.${'f'.repeat(64)}`;
-    assert.equal(
-      await registrationStore.createSubscription(
-        record(1, 'credential-fresh', freshRequestId),
-        freshRequestId,
-      ),
-      'accepted',
-    );
-    assert.equal(
-      await registrationStore.createSubscription(
-        record(1, 'credential-expired', expiredRequestId),
-        expiredRequestId,
-      ),
-      'expired',
-    );
-    assert.equal(
-      await registrationStore.createSubscription(
-        record(1, 'credential-future', futureRequestId),
-        futureRequestId,
-      ),
-      'expired',
-    );
-  });
+  // A versioned request ID carries its issue time. An absent row is created
+  // only for an ID issued within the last day, or up to five minutes ahead of
+  // this clock to allow for skew.
+  const requestClock = new Date('2026-09-07T02:00:00.000Z');
+  for (const [name, age, outcome] of [
+    ['issued five minutes and a millisecond ahead', -300_001, 'expired'],
+    ['issued exactly five minutes ahead', -300_000, 'accepted'],
+    ['issued just now', 0, 'accepted'],
+    ['issued an hour ago', 3_600_000, 'accepted'],
+    ['issued exactly a day ago', 86_400_000, 'accepted'],
+    ['issued a day and a millisecond ago', 86_400_001, 'expired'],
+  ] as const) {
+    it(`${outcome === 'accepted' ? 'creates a row for' : 'will not create a row for'} a request ${name}`, async () => {
+      const requestId = `v2.${String(requestClock.getTime() - age).padStart(13, '0')}.${'d'.repeat(64)}`;
+      const subscriptions = concurrentSubscriptionTable();
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptions,
+        unusedThrottleTable(),
+        () => requestClock,
+      );
+
+      assert.equal(
+        await registrationStore.createSubscription(
+          record(1, 'credential-1', requestId),
+          requestId,
+        ),
+        outcome,
+      );
+      assert.equal(subscriptions.rows.size, outcome === 'accepted' ? 1 : 0);
+    });
+  }
+
+  // A missing issue time must not be read as zero, which a clock at the epoch
+  // would make look fresh.
+  for (const [name, at] of [
+    ['now', requestClock],
+    ['the epoch', new Date(0)],
+  ] as const) {
+    it(`will not create a row for an unversioned request at ${name}`, async () => {
+      const requestId = 'c'.repeat(64);
+      const subscriptions = concurrentSubscriptionTable();
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptions,
+        unusedThrottleTable(),
+        () => at,
+      );
+
+      assert.equal(
+        await registrationStore.createSubscription(
+          record(1, 'credential-1', requestId),
+          requestId,
+        ),
+        'expired',
+      );
+      assert.equal(subscriptions.rows.size, 0);
+    });
+  }
 
   it('stamps last contact when a subscription is registered, replayed and updated', async () => {
     const subscriptions = concurrentSubscriptionTable();
@@ -2983,6 +3128,139 @@ describe('durable throttle', () => {
     assert.equal(results.filter((allowed) => !allowed).length, 5);
   });
 
+  // The first five requests fill a window, from any moment in it to its first
+  // and last millisecond. The sixth waits for the next window. A row is kept
+  // for thirty days from when its window opened, however late in the window it
+  // was made.
+  it('counts each ten-minute window apart and expires its row thirty days after the window opens', async () => {
+    const throttles = createConcurrentTable();
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable(),
+      throttles,
+    );
+    const windowMs = 10 * 60 * 1000;
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    const windowStart = Date.parse('2026-07-24T05:00:00.000Z');
+
+    const allowed = [];
+    for (const offset of [
+      123_456,
+      0,
+      299_999,
+      599_998,
+      599_999,
+      599_999,
+      windowMs,
+    ]) {
+      allowed.push(
+        await tableStore.takeSourceAllowance(
+          'source-hash',
+          new Date(windowStart + offset),
+        ),
+      );
+    }
+
+    assert.deepEqual(allowed, [true, true, true, true, true, false, true]);
+    const subject = hashOpaqueValue(
+      'daylight-saviour:reminder-source:v1:source-hash',
+    );
+    const window = windowStart / windowMs;
+    assert.deepEqual(
+      [...throttles.rows].map(([key, { count, expiresAt }]) => [
+        key,
+        count,
+        expiresAt,
+      ]),
+      [
+        [`${subject}/${window}`, 5, new Date(windowStart + thirtyDaysMs)],
+        [
+          `${subject}/${window + 1}`,
+          1,
+          new Date(windowStart + windowMs + thirtyDaysMs),
+        ],
+      ],
+    );
+  });
+
+  it('counts a source and an installation apart even when their values match', async () => {
+    const throttles = createConcurrentTable();
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable(),
+      throttles,
+    );
+    const now = new Date('2026-07-24T05:00:00.000Z');
+
+    await tableStore.takeSourceAllowance('same-value', now);
+    await tableStore.takeInstallationAllowance('same-value', now);
+
+    const window = now.getTime() / (10 * 60 * 1000);
+    assert.deepEqual(
+      [...throttles.rows.keys()],
+      [
+        `${hashOpaqueValue('daylight-saviour:reminder-source:v1:same-value')}/${window}`,
+        `${hashOpaqueValue('daylight-saviour:reminder-installation:v1:same-value')}/${window}`,
+      ],
+    );
+  });
+
+  // Retries that lose their bound must fail these tests, not hang them.
+  it('gives up after twelve attempts to create a window that others create first', async () => {
+    let reads = 0;
+    const throttles = createConcurrentTable();
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable(),
+      {
+        ...throttles,
+        create: async () => {
+          throw azureError(409);
+        },
+        get: async (partitionKey, rowKey) => {
+          reads += 1;
+          if (reads > 20) throw new Error('retried without a bound');
+          return throttles.get(partitionKey, rowKey);
+        },
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        tableStore.takeSourceAllowance(
+          'source-hash',
+          new Date('2026-07-24T05:00:00.000Z'),
+        ),
+      /Throttle update contention exceeded retry limit/,
+    );
+    assert.equal(reads, 12);
+  });
+
+  it('gives up after twelve attempts to count a window that others count first', async () => {
+    const now = new Date('2026-07-24T05:00:00.000Z');
+    let reads = 0;
+    const throttles = createConcurrentTable();
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable(),
+      {
+        ...throttles,
+        get: async (partitionKey, rowKey) => {
+          reads += 1;
+          if (reads > 20) throw new Error('retried without a bound');
+          return throttles.get(partitionKey, rowKey);
+        },
+        replace: async () => {
+          throw azureError(412);
+        },
+      },
+    );
+    await tableStore.takeSourceAllowance('source-hash', now);
+    reads = 0;
+
+    await assert.rejects(
+      () => tableStore.takeSourceAllowance('source-hash', now),
+      /Throttle update contention exceeded retry limit/,
+    );
+    assert.equal(reads, 12);
+  });
+
   it('spends one installation allowance across updates and check-ins', async () => {
     const tableStore = createTableReminderSubscriptionStore(
       subscriptionTable(),
@@ -3119,5 +3397,53 @@ describe('durable throttle', () => {
     );
     await tableStore.purgeExpiredThrottleRecords(new Date());
     assert.deepEqual(deleted, ['source-a/expired', 'source-b/already-gone']);
+  });
+
+  it('purges the rows that expired before the given time', async () => {
+    let listedAt: Date | undefined;
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable(),
+      {
+        ...createConcurrentTable(),
+        listExpired: (at) => {
+          listedAt = at;
+          return (async function* () {
+            // No expired rows.
+          })();
+        },
+      },
+    );
+    const now = new Date('2026-09-07T02:00:00.123Z');
+
+    await tableStore.purgeExpiredThrottleRecords(now);
+
+    assert.equal(listedAt, now);
+  });
+
+  it('stops purging at a failure that is not an already-deleted row', async () => {
+    const attempted: string[] = [];
+    const failure = azureError(500);
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable(),
+      {
+        ...createConcurrentTable(),
+        delete: async (_partitionKey, rowKey) => {
+          attempted.push(rowKey);
+          if (rowKey === 'second') throw failure;
+        },
+        listExpired: () =>
+          (async function* () {
+            for (const rowKey of ['first', 'second', 'third']) {
+              yield { count: 1, etag: 'etag', partitionKey: 'source', rowKey };
+            }
+          })(),
+      },
+    );
+
+    await assert.rejects(
+      () => tableStore.purgeExpiredThrottleRecords(new Date()),
+      (error) => error === failure,
+    );
+    assert.deepEqual(attempted, ['first', 'second']);
   });
 });
