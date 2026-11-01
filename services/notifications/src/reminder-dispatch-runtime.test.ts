@@ -36,6 +36,9 @@ const windowOpen = new Date('2026-09-26T23:00:00.000Z');
 const during = new Date('2026-09-27T01:00:00.000Z');
 const windowEnd = new Date('2026-09-27T11:00:00.000Z');
 const afterWindow = new Date('2026-09-27T11:00:00.001Z');
+// Sydney's one-day window is 09:00 to 21:00 local the day before the event.
+const oneDayDuring = new Date('2026-10-03T01:00:00.000Z');
+const oneDayEnd = new Date('2026-10-03T11:00:00.000Z');
 const pageSize = 100;
 const sydney = 'zone=Australia/Sydney';
 const packFile = new URL(
@@ -432,6 +435,18 @@ describe('partitioned reminder dispatch', () => {
       test.sent.map((request) => request.subscription.installationId),
       [identity('oneweek').installationId],
     );
+  });
+
+  it('sends a one-day reminder in its own window', async () => {
+    const test = harness([subscriptionRow('sydney')], { now: oneDayDuring });
+
+    await test.run();
+
+    assert.deepEqual(
+      test.sent.map((request) => request.timing),
+      ['one-day'],
+    );
+    assert.deepEqual(statuses(test), ['accepted']);
   });
 
   it('bounds concurrent sends, and repeats no send in the next run', async () => {
@@ -988,10 +1003,10 @@ describe('partitioned reminder dispatch', () => {
     ];
     const hour = 60 * 60 * 1000;
     const checked = new Date(windowEnd.getTime() + 2 * hour);
-    const events = (event: string) =>
+    const events = (event: string, timing = 'one-week') =>
       swept.map(
         (zone) =>
-          `reminder-dispatch-window-${event} zone=${zone} timing=one-week count=1`,
+          `reminder-dispatch-window-${event} zone=${zone} timing=${timing} count=1`,
       );
 
     const windowLogs = (test: ReturnType<typeof harness>) =>
@@ -1017,6 +1032,16 @@ describe('partitioned reminder dispatch', () => {
       test.logs.length = 0;
       await test.run();
       assert.deepEqual(windowLogs(test), []);
+    });
+
+    it('reports a one-day window no run swept', async () => {
+      const test = harness([], {
+        now: new Date(oneDayEnd.getTime() + 2 * hour),
+      });
+
+      await test.run();
+
+      assert.deepEqual(windowLogs(test), events('not-swept', 'one-day'));
     });
 
     it('reports a window whose sweeps stopped at the page limit, once', async () => {
