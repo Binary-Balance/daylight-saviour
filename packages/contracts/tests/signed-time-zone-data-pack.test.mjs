@@ -12,6 +12,7 @@ import {
   activateSignedTimeZoneDataPackManifestBytes,
   activateSignedTimeZoneDataPackManifest,
   activateTimeZoneDataPack,
+  assertActivatedTimeZoneDataPack,
   maximumTimeZoneDataPackBytes,
   SignedTimeZoneDataPackValidationError,
   verifySignedTimeZoneDataPackBytes,
@@ -119,6 +120,9 @@ describe('signed Time-Zone Data Pack contract', () => {
 
     assert.equal(pack.packVersion, '2026c-test-v1');
     assert.equal(Object.isFrozen(pack), true);
+    // Domain code accepts only activated packs, so verification must brand
+    // the pack it returns the same way direct activation does.
+    assertActivatedTimeZoneDataPack(pack);
   });
 
   it('supports key rotation only when both build-configured keys are trusted', () => {
@@ -396,6 +400,25 @@ describe('signed Time-Zone Data Pack contract', () => {
           (value) => ({ ...activateTimeZoneDataPack(value), schemaVersion: 3 }),
         ),
       /\$\.pack\.schemaVersion: does not match signed pack/,
+    );
+  });
+
+  it('rejects a signature from another key than the one trusted under its key ID', () => {
+    const fixture = signedFixture(
+      rotatedTestOnlyPrivateKey,
+      'test-only-2026-a',
+    );
+
+    assert.throws(
+      () =>
+        verifySignedTimeZoneDataPackBytes(
+          activateSignedTimeZoneDataPackManifest(fixture.manifest),
+          fixture.bytes,
+          { 'test-only-2026-a': rawPublicKey(testOnlyPrivateKey) },
+        ),
+      (error) =>
+        error instanceof SignedTimeZoneDataPackValidationError &&
+        /signature mismatch/.test(error.message),
     );
   });
 

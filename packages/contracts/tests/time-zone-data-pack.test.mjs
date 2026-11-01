@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   activateTimeZoneDataPack,
+  assertActivatedTimeZoneDataPack,
   TimeZoneDataPackValidationError,
 } from '../src/index.ts';
 
@@ -312,4 +313,25 @@ describe('activateTimeZoneDataPack', () => {
       );
     });
   }
+});
+
+describe('assertActivatedTimeZoneDataPack', () => {
+  it('accepts a pack returned by activation', () => {
+    const pack = activateTimeZoneDataPack(clonePack());
+
+    assert.doesNotThrow(() => assertActivatedTimeZoneDataPack(pack));
+  });
+
+  it('rejects a typed but unactivated pack', () => {
+    const activated = activateTimeZoneDataPack(clonePack());
+
+    // A copy of an activated pack is as unactivated as a hand-built one.
+    for (const unactivated of [clonePack(), structuredClone(activated)]) {
+      assert.throws(
+        () => assertActivatedTimeZoneDataPack(unactivated),
+        (error) =>
+          error instanceof TypeError && /must be activated/.test(error.message),
+      );
+    }
+  });
 });
