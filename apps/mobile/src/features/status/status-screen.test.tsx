@@ -466,9 +466,9 @@ describe('StatusScreen facade', () => {
     first.unmount();
     render(
       <StatusScreen
-        acknowledgedEventAt="2026-10-03T16:00:00.000Z"
         now={new Date('2026-10-03T17:00:00.000Z')}
         onAcknowledgeAftermath={acknowledge}
+        openingAcknowledgedEventAt="2026-10-03T16:00:00.000Z"
         reducedMotion
       />,
     );

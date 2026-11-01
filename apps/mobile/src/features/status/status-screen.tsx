@@ -22,13 +22,15 @@ import type { TimeZoneDataPackSnapshot } from '../time-zone-data/time-zone-data-
 import type { ReviewedNotificationTap } from '../change-reminders/change-reminder-notification-runtime';
 
 interface StatusScreenProps {
-  readonly acknowledgedEventAt?: string | null;
   readonly dataPackSnapshot: TimeZoneDataPackSnapshot;
   readonly now?: Date;
   readonly notificationTap?: ReviewedNotificationTap | null;
   readonly onAcknowledgeAftermath?: (eventAt: string) => void;
   readonly onChooseZone?: () => void;
   readonly onRetryDataPack?: () => void | Promise<void>;
+  // The caller does not update this when an Aftermath is acknowledged, so the
+  // Aftermath stays on screen.
+  readonly openingAcknowledgedEventAt?: string | null;
   readonly reducedMotion?: boolean;
   readonly secondaryCopySeed: string;
   readonly uses24hourClock?: boolean;
@@ -79,13 +81,13 @@ function useReducedMotion(override: boolean | undefined) {
 }
 
 export default function StatusScreen({
-  acknowledgedEventAt = null,
   dataPackSnapshot,
   now,
   notificationTap = null,
   onAcknowledgeAftermath,
   onChooseZone,
   onRetryDataPack,
+  openingAcknowledgedEventAt = null,
   reducedMotion: reducedMotionOverride,
   secondaryCopySeed,
   uses24hourClock = false,
@@ -95,7 +97,6 @@ export default function StatusScreen({
   const palette = daylightSaviourPalettes[appearance];
   const currentInstant = useCurrentInstant(now);
   const reducedMotion = useReducedMotion(reducedMotionOverride);
-  const [openingAcknowledgedEventAt] = useState(acknowledgedEventAt);
   const acknowledgedDuringOpening = useRef<string | null>(null);
   const viewModel = createStatusViewModel(
     dataPackSnapshot.pack,
