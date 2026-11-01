@@ -252,6 +252,53 @@ describe('production Change Reminder adapters', () => {
     ).not.toHaveBeenCalled();
   });
 
+  describe('when the device token never arrives', () => {
+    const legacyRegistration = () => ({
+      value: JSON.stringify({
+        ...responseBody,
+        attemptGeneration: 3,
+        homeTimeZone: 'Australia/Sydney',
+        oneDayEnabled: true,
+        oneWeekEnabled: true,
+        registrationRequestId: 'a'.repeat(64),
+        state: 'registered',
+        version: 2,
+      }),
+    });
+    const withHungToken = (storage: { value: string | null }) => {
+      const test = harness({ storage, timeoutMs: 1 });
+      test.dependencies.notifications.getDevicePushTokenAsync.mockImplementation(
+        () => new Promise(() => undefined),
+      );
+      return test;
+    };
+
+    it('fails enabling instead of waiting forever', async () => {
+      const test = withHungToken({ value: null });
+
+      await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+        kind: 'failed',
+      });
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+    });
+
+    it('leaves a saved registration pending on restore', async () => {
+      const test = withHungToken(legacyRegistration());
+
+      await expect(test.adapters.restore()).resolves.toMatchObject({
+        kind: 'pending',
+      });
+    });
+
+    it('fails a Home Time Zone update instead of holding the queue', async () => {
+      const test = withHungToken(legacyRegistration());
+
+      await expect(
+        test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+      ).resolves.toEqual({ kind: 'failed' });
+    });
+  });
+
   it('uses returned OS-blocked status after a prompt', async () => {
     const test = harness({
       existingPermission: {

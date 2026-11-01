@@ -6,6 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import { AppState, StyleSheet } from 'react-native';
+import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import { contrastRatio } from '../../../test-support/contrast';
 import { daylightSaviourPalettes } from '../../theme';
@@ -247,10 +248,7 @@ it('keeps saving state bounded to pending adapter work', async () => {
     }),
   );
   fireEvent.press(screen.getByRole('button', { name: 'Enable reminders' }));
-  expect(screen.getByText('Registering reminders…')).toBeTruthy();
-  expect(
-    screen.getByText('Registering reminders…').props.accessibilityLiveRegion,
-  ).toBe('none');
+  expect(screen.getByText(copy.changeReminders.saving.body)).toBeTruthy();
   expect(screen.queryByRole('button')).toBeNull();
 
   await act(async () => resolve({ kind: 'failed' }));
@@ -635,7 +633,7 @@ it('retries initial OS-blocked enablement after settings return', async () => {
   );
   expect(openSettings).toHaveBeenCalledTimes(1);
   act(() => onAppStateChange?.('active'));
-  expect(screen.getByText('Registering reminders…')).toBeTruthy();
+  expect(screen.getByText(copy.changeReminders.saving.body)).toBeTruthy();
   await act(async () => resolveEnable({ kind: 'enabled' }));
   expect(
     await screen.findByText(

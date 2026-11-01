@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import {
+  AccessibilityInfo,
   AppState,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -15,6 +23,39 @@ import type {
   ChangeReminderPreferences,
 } from './change-reminder-adapters';
 import { createChangeReminderSession } from './change-reminder-session';
+
+// Announces registration starting and finishing, once each. Live regions do
+// not suit this: iOS ignores them, and on Android the enabled text would be read
+// on every launch and return to the app, because the card restores itself.
+function useRegistrationAnnouncements(
+  kind: string,
+  outcome: string | undefined,
+  outcomeReadByRegion: boolean,
+) {
+  const previousKind = useRef(kind);
+  const recheckingBlock = useRef(false);
+  useEffect(() => {
+    const previous = previousKind.current;
+    previousKind.current = kind;
+    if (kind === 'saving') {
+      // Every return to the app rechecks a blocked permission, usually with no
+      // change, so only a new outcome is worth saying.
+      recheckingBlock.current = previous === 'os-blocked';
+      if (!recheckingBlock.current) {
+        AccessibilityInfo.announceForAccessibility(
+          copy.changeReminders.saving.body,
+        );
+      }
+    } else if (
+      previous === 'saving' &&
+      outcome !== undefined &&
+      !outcomeReadByRegion &&
+      !(recheckingBlock.current && kind === 'os-blocked')
+    ) {
+      AccessibilityInfo.announceForAccessibility(outcome);
+    }
+  }, [kind, outcome, outcomeReadByRegion]);
+}
 
 function TimingControls({
   preferences,
@@ -173,18 +214,24 @@ export default function ChangeReminderSection({
     snapshot.kind === 'retry-pending' ||
     snapshot.kind === 'zone-mismatch' ||
     snapshot.kind === 'zone-failed';
-  const pending =
-    snapshot.kind === 'loading' ||
-    snapshot.kind === 'saving' ||
-    snapshot.kind === 'saving-preferences' ||
-    snapshot.kind === 'saving-zone' ||
-    snapshot.kind === 'disabling';
+  const pendingText =
+    snapshot.kind === 'loading'
+      ? copy.changeReminders.loading
+      : snapshot.kind === 'saving'
+        ? copy.changeReminders.saving.body
+        : snapshot.kind === 'disabling'
+          ? copy.changeReminders.disabling
+          : snapshot.kind === 'saving-zone'
+            ? copy.changeReminders.savingZone
+            : copy.changeReminders.savingPreferences;
+  useRegistrationAnnouncements(
+    snapshot.kind,
+    content?.body,
+    errorState && Platform.OS === 'android',
+  );
 
   return (
-    <View
-      accessibilityState={{ busy: pending }}
-      style={[styles.card, { borderColor: palette.rule }]}
-    >
+    <View style={[styles.card, { borderColor: palette.rule }]}>
       <Text
         accessibilityRole="header"
         style={[styles.metadata, { color: palette.secondaryInk }]}
@@ -192,20 +239,29 @@ export default function ChangeReminderSection({
         {copy.changeReminders.heading}
       </Text>
       {content === null ? (
-        <Text
-          accessibilityLiveRegion="none"
-          style={[styles.body, { color: palette.ink }]}
-        >
-          {snapshot.kind === 'loading'
-            ? copy.changeReminders.loading
-            : snapshot.kind === 'saving'
-              ? copy.changeReminders.saving
-              : snapshot.kind === 'disabling'
-                ? copy.changeReminders.disabling
-                : snapshot.kind === 'saving-zone'
-                  ? copy.changeReminders.savingZone
-                  : copy.changeReminders.savingPreferences}
-        </Text>
+        <>
+          {snapshot.kind === 'saving' ? (
+            <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
+              {copy.changeReminders.saving.heading}
+            </Text>
+          ) : null}
+          {/*
+            Text, not a spinner: nothing in this design loops, so reduced
+            motion keeps the same meaning. The label keeps Android from
+            reading only "busy". The key stops the message that follows
+            reusing this view, because Android keeps a reused view's busy
+            state and would read "busy" for that message.
+          */}
+          <Text
+            accessibilityLabel={pendingText}
+            accessibilityLiveRegion="none"
+            accessibilityState={{ busy: true }}
+            key="pending"
+            style={[styles.body, { color: palette.ink }]}
+          >
+            {pendingText}
+          </Text>
+        </>
       ) : (
         <>
           {'heading' in content ? (
