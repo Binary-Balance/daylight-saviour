@@ -614,7 +614,7 @@ describe('HomeTimeZoneScreen', () => {
         const motionReads = jest.mocked(AccessibilityInfo.isReduceMotionEnabled)
           .mock.calls.length;
 
-        // The device has also moved to London, which the saved zone ignores.
+        // The device has also moved to Perth, which the saved zone ignores.
         setAppState('background');
         changeDevice(adapters, to === '24-hour');
         setAppState('active');
