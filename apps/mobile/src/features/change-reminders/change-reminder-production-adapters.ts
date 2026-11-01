@@ -1049,9 +1049,10 @@ export function createProductionChangeReminderAdapters({
       }
       return enqueue(async () => {
         const saved = await loadStoredState();
+        // A check-in may have cleared it while this waited in the queue.
+        if (saved === null) return { kind: 'unregistered' };
         if (
-          (saved?.state !== 'registered' &&
-            saved?.state !== 'pending-update') ||
+          (saved.state !== 'registered' && saved.state !== 'pending-update') ||
           saved.version === 2
         )
           return { kind: 'failed' };
@@ -1073,11 +1074,13 @@ export function createProductionChangeReminderAdapters({
           const registrationEndpoint =
             parseReminderRegistrationEndpoint(endpoint);
           const saved = await loadStoredState();
+          // A check-in may have cleared it while this waited in the queue.
+          if (saved === null) return { kind: 'disabled' as const };
           if (
             registrationEndpoint === null ||
-            (saved?.state !== 'registered' &&
-              saved?.state !== 'pending-update' &&
-              saved?.state !== 'pending-delete')
+            (saved.state !== 'registered' &&
+              saved.state !== 'pending-update' &&
+              saved.state !== 'pending-delete')
           ) {
             return { kind: 'failed' as const };
           }

@@ -2937,7 +2937,7 @@ describe('Change Reminder check-in', () => {
       const restoring = test.adapters.restore();
       await settled(started, 'check-in');
       const updating = test.adapters.updateHomeTimeZone!('Australia/Brisbane');
-      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
       // Without the queue, the update would go out now, and the check-in's
       // save would then undo it.
       expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
@@ -3195,6 +3195,24 @@ describe('Change Reminder check-in', () => {
       ).resolves.toEqual({ kind: 'unregistered' });
     });
 
+    it('lets a queued timing change or disable find it gone', async () => {
+      const test = harness({
+        fetchImplementation: serviceGone,
+        storage: seeded(),
+      });
+      await test.adapters.restore();
+
+      await expect(
+        test.adapters.updatePreferences({
+          oneDayEnabled: true,
+          oneWeekEnabled: false,
+        }),
+      ).resolves.toEqual({ kind: 'unregistered' });
+      await expect(test.adapters.disable()).resolves.toEqual({
+        kind: 'disabled',
+      });
+    });
+
     it('lets the user enable reminders again with a fresh registration', async () => {
       const fetchImplementation = jest
         .fn()
@@ -3218,6 +3236,27 @@ describe('Change Reminder check-in', () => {
         state: 'registered',
       });
     });
+  });
+
+  it('does not let a zone update hide an unfinished delete', async () => {
+    const test = harness({
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 3,
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'pending-delete',
+          version: 4,
+        }),
+      },
+    });
+
+    await expect(
+      test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+    ).resolves.toEqual({ kind: 'failed' });
   });
 
   describe('when there is no registration to check in', () => {
