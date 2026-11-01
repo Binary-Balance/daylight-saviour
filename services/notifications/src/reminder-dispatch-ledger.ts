@@ -184,7 +184,11 @@ export interface ReminderDispatchLedgerStore {
     reachedLastPage: boolean,
     now: Date,
   ) => Promise<void>;
-  /** Says once, to one run, what stopped a closed window being fully swept. */
+  /**
+   * Says, to at most one run, what stopped a closed window being fully swept.
+   * The report is marked before the caller logs it, so a run killed between
+   * the two loses the event.
+   */
   readonly reportClosedWindow: (
     window: ReminderDispatchWindow,
     now: Date,

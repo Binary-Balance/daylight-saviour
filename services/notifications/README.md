@@ -134,25 +134,25 @@ after each page of settlement. That is at most one line for each event in each
 zone and settlement page, with no installation identifier, token, payload or
 provider detail:
 
-| Event                           | Meaning                                                                                                                                                   |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `accepted`                      | The provider accepted a send.                                                                                                                             |
-| `uncertain`                     | The provider may have accepted a send. It is not repeated.                                                                                                |
-| `transient-failure`             | A send failed safely, or final authorization refused it for time or its lease, and it retries in a later run, inside its window.                          |
-| `permanent-failure`             | The provider rejected a send for good.                                                                                                                    |
-| `invalid-token-cleanup-failed`  | A rejected token is still stored. A later run retries without sending.                                                                                    |
-| `expired`                       | **Eligible work was not delivered.** Alert on this event.                                                                                                 |
-| `window-not-swept`              | **No run finished this zone during this window, so its reminders were not sent.** Logged once for each window, with its zone and timing.                  |
-| `window-sweep-incomplete`       | **No sweep of this zone reached its last page during this window, so later rows got no reminder.** Logged once for each window, with its zone and timing. |
-| `stale`                         | Registration or plan changed before the send, so nothing was sent.                                                                                        |
-| `claimed`, `pending`, `not-due` | Another worker holds the record, or there was nothing to do yet.                                                                                          |
-| `already-recorded`              | An earlier run recorded this delivery. It is not counted twice.                                                                                           |
-| `no-event`                      | No zone has an open Delivery Window.                                                                                                                      |
-| `pack-unavailable`              | **The pack could not be read or verified, so nothing was planned.**                                                                                       |
-| `pack-horizon-invalid`          | **The run's time is outside the active pack's coverage or Validity Horizon, so nothing was planned.**                                                     |
-| `operation-failed`              | A storage call failed. The ledger keeps the delivery safe to retry.                                                                                       |
-| `page-limit-reached`            | **A query stopped at 50 pages, so later rows were not reached.**                                                                                          |
-| `ledger-row-invalid`            | **A ledger row could not be read, so settlement or the daily purge skipped it.** It repeats until the purge deletes it, 30 days after its last update.    |
+| Event                           | Meaning                                                                                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `accepted`                      | The provider accepted a send.                                                                                                                                     |
+| `uncertain`                     | The provider may have accepted a send. It is not repeated.                                                                                                        |
+| `transient-failure`             | A send failed safely, or final authorization refused it for time or its lease, and it retries in a later run, inside its window.                                  |
+| `permanent-failure`             | The provider rejected a send for good.                                                                                                                            |
+| `invalid-token-cleanup-failed`  | A rejected token is still stored. A later run retries without sending.                                                                                            |
+| `expired`                       | **Eligible work was not delivered.** Alert on this event.                                                                                                         |
+| `window-not-swept`              | **No run finished this zone during this window, so its reminders were not sent.** Logged at most once for each window, with its zone and timing.                  |
+| `window-sweep-incomplete`       | **No sweep of this zone reached its last page during this window, so later rows got no reminder.** Logged at most once for each window, with its zone and timing. |
+| `stale`                         | Registration or plan changed before the send, so nothing was sent.                                                                                                |
+| `claimed`, `pending`, `not-due` | Another worker holds the record, or there was nothing to do yet.                                                                                                  |
+| `already-recorded`              | An earlier run recorded this delivery. It is not counted twice.                                                                                                   |
+| `no-event`                      | No zone has an open Delivery Window.                                                                                                                              |
+| `pack-unavailable`              | **The pack could not be read or verified, so nothing was planned.**                                                                                               |
+| `pack-horizon-invalid`          | **The run's time is outside the active pack's coverage or Validity Horizon, so nothing was planned.**                                                             |
+| `operation-failed`              | A storage call failed. The ledger keeps the delivery safe to retry.                                                                                               |
+| `page-limit-reached`            | **A query stopped at 50 pages, so later rows were not reached.**                                                                                                  |
+| `ledger-row-invalid`            | **A ledger row could not be read, so settlement or the daily purge skipped it.** It repeats until the purge deletes it, 30 days after its last update.            |
 
 Senders still write their own fixed events, such as
 `fcm-credential-sts-denied`, to the same invocation log.
@@ -181,11 +181,12 @@ checked, which keeps this to a few reads a run.
 | No sweep finished it | `window-sweep-incomplete` |
 | A sweep finished it  | None                      |
 
-The check marks the window reported with a conditional write, so one run raises
-each event once, even when runs overlap. A window that closed while dispatch was
-suspended is reported by the first enabled run within the lookback, which is
-accurate. A pack promoted after a window closed can report a window that no
-earlier pack planned.
+The check marks the window reported with a conditional write, so at most one run
+raises each event, even when runs overlap. The mark is written before the log
+line, so a run killed between the two loses the event. A window that closed
+while dispatch was suspended is reported by the first enabled run within the
+lookback, which is accurate. A pack promoted after a window closed can report a
+window that no earlier pack planned.
 
 The check needs the pack. A run that cannot read it, or whose time is outside
 its coverage, skips the check and logs `pack-unavailable` or
