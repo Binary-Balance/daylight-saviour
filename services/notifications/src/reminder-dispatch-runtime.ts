@@ -60,6 +60,9 @@ const maxPagesPerQuery = 50;
 // last run has had an hour to finish. Every run in the following 12 hours
 // checks it, which outlasts a shorter pack or storage fault after it closes.
 const closedWindowLookbackMs = 13 * 60 * 60 * 1000;
+// ADR 0022 warns after 12 months without contact. A fixed 365 days keeps the
+// rule exact in milliseconds, with no calendar arithmetic.
+const warnAfterLastContactMs = 365 * 24 * 60 * 60 * 1000;
 const packReadTimeoutMs = 10_000;
 const maxManifestBytes = 64 * 1024;
 const everyTiming = { oneDayEnabled: true, oneWeekEnabled: true };
@@ -138,6 +141,19 @@ const dispatcherOwnsCleanup = {
   removeIfDeviceTokenMatches: async () => 'not-found' as const,
 };
 
+/**
+ * A row saved before last contact was recorded is judged on its registration
+ * time. A missing time, or a date that cannot be read (NaN compares false),
+ * gives no basis to warn.
+ */
+function isWarned(subscription: ReminderSubscriptionSnapshot, plannedAt: Date) {
+  const contactAt = subscription.lastContactAt ?? subscription.registeredAt;
+  return (
+    contactAt !== undefined &&
+    plannedAt.getTime() - contactAt.getTime() >= warnAfterLastContactMs
+  );
+}
+
 function contextsFor(
   pack: ActivatedTimeZoneDataPack,
   subscription: ReminderSubscriptionSnapshot,
@@ -158,6 +174,7 @@ function contextsFor(
     ).toISOString(),
     delivery,
     subscription,
+    warned: isWarned(subscription, plannedAt),
   }));
 }
 
@@ -440,6 +457,7 @@ export function createReminderDispatchProvider(senders: {
             changeEventAt: request.changeEventAt,
             homeTimeZone: request.homeTimeZone,
             timing: request.timing,
+            warned: request.warned,
           },
           { expiresAt: request.providerExpiresAt, kind: 'until' },
           {

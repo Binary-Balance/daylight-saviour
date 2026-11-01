@@ -10,6 +10,7 @@ import {
   type ApnsHttpResponse,
   type ApnsSubscriptionRemovalResult,
 } from './apns-change-reminder-sender.ts';
+import type { ReviewedChangeReminderFacts } from './fcm-change-reminder-sender.ts';
 
 const deviceToken = 'a'.repeat(64);
 const providerToken = 'header.payload.signature';
@@ -618,4 +619,63 @@ describe('APNs Change Reminder sender', () => {
       assert.deepEqual(test.logs, ['apns-change-reminder-not-authorized']);
     });
   });
+});
+
+describe('APNs Change Reminder warning', () => {
+  // The payload as it was sent before the warning existed. Comparing bytes,
+  // not objects, also catches a change in key order.
+  const unwarnedJson =
+    '{"aps":{"alert":{"body":"Your Home Time Zone changes soon.","title":"Change Reminder"},"sound":"default"},"body":{"changeDirection":"forward","changeEventAt":"2026-10-04T16:00:00.000Z","homeTimeZone":"Australia/Sydney","reminderKind":"change-reminder","reminderTiming":"one-week"}}';
+
+  async function sentPayload(reviewedFacts: ReviewedChangeReminderFacts) {
+    const test = sender();
+    await test.instance.send(subscription, reviewedFacts, immediate);
+    return test.requests[0]?.payload;
+  }
+
+  for (const [name, reviewedFacts] of [
+    ['no warning', facts],
+    ['a warning of false', { ...facts, warned: false }],
+  ] as const) {
+    it(`sends the bytes it sent before for ${name}`, async () => {
+      assert.equal(
+        JSON.stringify(await sentPayload(reviewedFacts)),
+        unwarnedJson,
+      );
+    });
+  }
+
+  it('sends the warned body and changes nothing else', async () => {
+    assert.deepEqual(await sentPayload({ ...facts, warned: true }), {
+      aps: {
+        alert: {
+          body: 'Your Home Time Zone changes soon. Tap to keep Change Reminders on.',
+          title: 'Change Reminder',
+        },
+        sound: 'default',
+      },
+      body: {
+        changeDirection: 'forward',
+        changeEventAt: '2026-10-04T16:00:00.000Z',
+        homeTimeZone: 'Australia/Sydney',
+        reminderKind: 'change-reminder',
+        reminderTiming: 'one-week',
+      },
+    });
+  });
+
+  // APNs allows a payload of 4096 bytes for an alert push. The longest zone
+  // and a backward change give the largest payload the sender can build.
+  for (const warned of [false, true]) {
+    it(`keeps ${warned ? 'a warned' : 'an unwarned'} payload within 4096 bytes`, async () => {
+      const payload = await sentPayload({
+        ...facts,
+        changeDirection: 'backward',
+        homeTimeZone: 'Australia/Broken_Hill',
+        warned,
+      });
+
+      assert.ok(Buffer.byteLength(JSON.stringify(payload)) <= 4096);
+    });
+  }
 });

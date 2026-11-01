@@ -317,7 +317,9 @@ function buildPayload(
   return {
     aps: {
       alert: {
-        body: changeReminderNotification.body,
+        body: facts.warned
+          ? changeReminderNotification.warnedBody
+          : changeReminderNotification.body,
         title: changeReminderNotification.title,
       },
       sound: 'default',

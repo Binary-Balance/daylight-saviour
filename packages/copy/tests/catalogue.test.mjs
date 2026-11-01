@@ -82,6 +82,8 @@ describe('Australian-English copy catalogue', () => {
     assert.deepEqual(changeReminderNotification, {
       body: 'Your Home Time Zone changes soon.',
       title: 'Change Reminder',
+      warnedBody:
+        'Your Home Time Zone changes soon. Tap to keep Change Reminders on.',
     });
   });
 

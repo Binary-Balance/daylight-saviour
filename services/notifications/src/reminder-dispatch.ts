@@ -35,6 +35,13 @@ export interface ReminderDispatchContext {
   readonly completeOperationDeadline: string;
   readonly delivery: ReminderDispatchDelivery;
   readonly subscription: ReminderSubscriptionSnapshot;
+  /**
+   * The reminder warns that tapping it keeps Change Reminders on (ADR 0022).
+   * It follows the subscription as last read, so contact made after the plan
+   * was read stops the warning. A change in it is not a change in the plan,
+   * and it is no part of the delivery's identity.
+   */
+  readonly warned: boolean;
 }
 
 export interface ReminderDispatchProviderRequest {
@@ -45,6 +52,7 @@ export interface ReminderDispatchProviderRequest {
   readonly providerExpiresAt: Date;
   readonly subscription: ReminderSubscriptionSnapshot;
   readonly timing: ReminderDispatchTiming;
+  readonly warned: boolean;
 }
 
 /**
@@ -686,6 +694,7 @@ export function createReminderDispatchOperation(
             providerExpiresAt,
             subscription: finalCurrent.subscription,
             timing: finalParsed.delivery.timing,
+            warned: finalCurrent.warned,
           },
           authorizeBeforeExternalSend,
         ),

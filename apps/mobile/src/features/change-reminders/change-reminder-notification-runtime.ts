@@ -70,13 +70,13 @@ export function parseChangeReminderTap(
   }
 }
 
-export function isReviewedChangeReminderReceipt(
-  content: ChangeReminderNotificationContent,
-) {
+// The service sends the warned body in place of the body once a subscription
+// has been silent for a year, so both are reviewed copy.
+function hasReviewedCopy(content: ChangeReminderNotificationContent) {
+  const { body, title, warnedBody } = copy.changeReminders.notification;
   return (
-    content.title === copy.changeReminders.notification.title &&
-    content.body === copy.changeReminders.notification.body &&
-    parseChangeReminderTap(content.data) !== null
+    content.title === title &&
+    (content.body === body || content.body === warnedBody)
   );
 }
 
@@ -84,11 +84,7 @@ function reviewedTap(
   content: ChangeReminderNotificationContent,
 ): ReviewedNotificationTap | null {
   const reminderTap = parseChangeReminderTap(content.data);
-  if (
-    reminderTap !== null &&
-    content.title === copy.changeReminders.notification.title &&
-    content.body === copy.changeReminders.notification.body
-  ) {
+  if (reminderTap !== null && hasReviewedCopy(content)) {
     return reminderTap;
   }
   return null;
