@@ -152,7 +152,7 @@ provider detail:
 | `pack-horizon-invalid`          | **The run's time is outside the active pack's coverage or Validity Horizon, so nothing was planned.**                                                             |
 | `operation-failed`              | A storage call failed. The ledger keeps the delivery safe to retry.                                                                                               |
 | `page-limit-reached`            | **A query stopped at 50 pages, so later rows were not reached.**                                                                                                  |
-| `ledger-row-invalid`            | **A ledger row could not be read, so settlement or the purge skipped it.** It repeats until the purge deletes it, which needs a readable last update.             |
+| `ledger-row-invalid`            | **A ledger row could not be read, so settlement or the purge skipped it.** It repeats until the purge deletes it. A row with no readable last update may never reach the purge, because the purge query compares that field, and that row raises no event.             |
 
 Senders still write their own fixed events, such as
 `fcm-credential-sts-denied`, to the same invocation log.
