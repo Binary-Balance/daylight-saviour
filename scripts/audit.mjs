@@ -21,12 +21,6 @@ export const exceptions = [
     dependents: ['node_modules/query-string'],
   },
   {
-    name: '@azure/msal-node',
-    url: 'https://github.com/advisories/GHSA-xcx6-jx8p-x3h5',
-    severity: 'high',
-    dependents: ['node_modules/@azure/identity'],
-  },
-  {
     name: 'zod',
     url: 'https://github.com/advisories/GHSA-mrhx-c7xc-m3w5',
     severity: 'high',

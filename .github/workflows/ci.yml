@@ -34,13 +34,18 @@ jobs:
           java-version: '17.0.19+10'
 
       - name: Set up Gradle cache
-        uses: gradle/actions/setup-gradle@v4
+        # Not v6: its default cache is proprietary and needs accepting Gradle's
+        # terms, and its open source cache fails here because it keys on Gradle
+        # files, which do not exist until the Android project is generated.
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
-          # The default 'tools' package no longer exists in current
-          # cmdline-tools; the pinned packages are installed below.
+          # The action's default moves between its releases. This matches the
+          # development guide.
+          cmdline-tools-version: '14742923'
+          # The pinned packages are installed below.
           packages: ''
 
       - name: Install dependencies

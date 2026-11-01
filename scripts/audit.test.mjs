@@ -17,15 +17,8 @@ const advisory = (name, url, severity) => ({
   url,
 });
 
-const leaf = (name, url, severity) => ({
-  severity,
-  via: [advisory(name, url, severity)],
-  effects: [],
-  nodes: [`node_modules/${name}`],
-});
-
 const audit = () => ({
-  metadata: { vulnerabilities: { high: 6, moderate: 2 } },
+  metadata: { vulnerabilities: { high: 5, moderate: 2 } },
   vulnerabilities: {
     zod: {
       severity: 'high',
@@ -64,11 +57,6 @@ const audit = () => ({
       effects: [],
       nodes: ['node_modules/expo-router'],
     },
-    '@azure/msal-node': leaf(
-      '@azure/msal-node',
-      'https://github.com/advisories/GHSA-xcx6-jx8p-x3h5',
-      'high',
-    ),
     glob: {
       severity: 'moderate',
       via: [

@@ -66,15 +66,6 @@ requires. Remove this exception when Router adopts a compatible patched parser.
 `expo-router` 58.0.28 no longer depends on `query-string`, so an Expo 58 upgrade
 would do this.
 
-The notification service depends on `@azure/msal-node` 5.4.2
-([GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5))
-through `@azure/identity` 4.13.1. Its authorization code flow can disclose
-request parameters to an attacker-controlled endpoint. Versions 7.1.0 and later
-are patched, but the latest `@azure/identity`, 4.14.0, still requires an earlier
-major version. The service creates only `ManagedIdentityCredential`, which never
-uses that flow. Remove this exception when `@azure/identity` accepts a patched
-release.
-
 Three more advisories have no compatible patched release. Each affects only
 build, test and lint tooling, and none of these packages appears in the exported
 web or Android bundle:
