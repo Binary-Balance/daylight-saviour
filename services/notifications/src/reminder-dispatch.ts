@@ -1,6 +1,7 @@
 import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-zone-runtime';
 
 import type {
+  ReminderDispatchClaim,
   ReminderDispatchCleanupStatus,
   ReminderDispatchCompletionOutcome,
   ReminderDispatchIdentity,
@@ -451,6 +452,22 @@ export function createReminderDispatchOperation(
     return cleanupInvalidToken(identity, record.attemptGeneration);
   }
 
+  /**
+   * Closes the record of a delivery whose plan changed, unless a newer
+   * registration will reuse it. Left pending, a deleted subscription would
+   * later log a false `expired`: no run revisits it, and settlement cannot
+   * tell why.
+   */
+  async function supersede(
+    claim: ReminderDispatchClaim,
+    observed: ReminderDispatchContext | null,
+    initial: ReminderDispatchContext,
+    now: Date,
+  ) {
+    if (newerSameIdentity(observed, initial)) return;
+    await dependencies.ledger.invalidate(claim, claim.attemptGeneration, now);
+  }
+
   async function dispatch(
     initial: ReminderDispatchContext,
   ): Promise<ReminderDispatchResult> {
@@ -525,13 +542,7 @@ export function createReminderDispatchOperation(
       current.subscription.attemptGeneration !== claim.attemptGeneration
     ) {
       await dependencies.ledger.release(claim, copyDate(clock(), 'clock'));
-      if (!newerSameIdentity(current, initial)) {
-        await dependencies.ledger.invalidate(
-          parsed.identity,
-          claim.attemptGeneration,
-          copyDate(clock(), 'clock'),
-        );
-      }
+      await supersede(claim, current, initial, copyDate(clock(), 'clock'));
       return { kind: 'stale' };
     }
 
@@ -593,13 +604,7 @@ export function createReminderDispatchOperation(
       finalCurrent.subscription.attemptGeneration !== claim.attemptGeneration
     ) {
       await dependencies.ledger.cancelBeforeProvider(claim, finalNow);
-      if (!newerSameIdentity(finalCurrent, initial)) {
-        await dependencies.ledger.invalidate(
-          parsed.identity,
-          claim.attemptGeneration,
-          finalNow,
-        );
-      }
+      await supersede(claim, finalCurrent, initial, finalNow);
       return { kind: 'stale' };
     }
     const finalParsed = parsedContext(finalCurrent);
@@ -734,15 +739,7 @@ export function createReminderDispatchOperation(
           claim,
           copyDate(clock(), 'clock'),
         );
-        // Left pending, a deleted subscription would later log a false
-        // `expired`: no run revisits it, and settlement cannot tell why.
-        if (!newerSameIdentity(refused, initial)) {
-          await dependencies.ledger.invalidate(
-            parsed.identity,
-            claim.attemptGeneration,
-            copyDate(clock(), 'clock'),
-          );
-        }
+        await supersede(claim, refused, initial, copyDate(clock(), 'clock'));
         return { kind: 'stale' };
       }
       // Nothing changed, so time or the lease refused it, and nothing was
