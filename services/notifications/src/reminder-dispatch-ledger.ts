@@ -170,9 +170,11 @@ export interface ReminderDispatchLedgerStore {
   ) => AsyncIterable<readonly ReminderDispatchLedgerRecord[]>;
   /**
    * Deletes, in one pass, records last updated more than 30 days ago whose
-   * Change Event has passed.
+   * Change Event has passed. A row whose last update it cannot read is left
+   * in place, and counted in the result. One that merely has no readable
+   * Change Event goes by its age alone.
    */
-  readonly purgeExpired: (now: Date) => Promise<void>;
+  readonly purgeExpired: (now: Date) => Promise<number>;
   /**
    * Records a finished sweep of a zone. One sweep that reached the last page
    * completes the window, whatever the other sweeps did.
@@ -575,6 +577,37 @@ function isUnsettled(record: ReminderDispatchLedgerRecord, now: Date) {
       record.status === 'transient-failure') &&
     record.deliveryWindowEndsAt.getTime() < now.getTime()
   );
+}
+
+function changeEventAhead(value: unknown, now: Date) {
+  try {
+    return instant(value, 'Change Event instant').getTime() > now.getTime();
+  } catch {
+    // Dispatch first writes a row at most about eight days before its event,
+    // so a row old enough to purge has passed it. With none to read, age
+    // alone decides.
+    return false;
+  }
+}
+
+/**
+ * The keys of a listed row due for deletion, or null to keep it. Throws for
+ * a row it cannot date or key.
+ */
+function expiredRowKeys(
+  entity: Record<string, unknown>,
+  now: Date,
+  cutoff: number,
+) {
+  if (dateValue(entity.updatedAt, 'updatedAt').getTime() >= cutoff) return null;
+  // A deleted record no longer fences its delivery identity. Keep it while
+  // its Change Event is ahead so a later dispatch cannot send it again.
+  if (changeEventAhead(entity.changeEventAt, now)) return null;
+  return {
+    etag: requiredString(entity.etag, 'ETag'),
+    partitionKey: requiredString(entity.partitionKey, 'partition key'),
+    rowKey: requiredString(entity.rowKey, 'row key'),
+  };
 }
 
 export function createTableReminderDispatchLedgerStore(
@@ -1208,8 +1241,9 @@ export function createTableReminderDispatchLedgerStore(
           const record = recordFromEntity(entity);
           return isUnsettled(record, now) ? [record] : [];
         } catch {
-          // A bad row stays listed until it is purged. Throwing here would
-          // cost every later row, every run, until then.
+          // A bad row stays listed until the daily purge deletes it, or for
+          // good if its last update is unreadable. Throwing here would cost
+          // every later row, every run, until then.
           onInvalidRow();
           return [];
         }
@@ -1271,31 +1305,26 @@ export function createTableReminderDispatchLedgerStore(
   async function purgeExpired(nowInput: Date) {
     const now = nowDate(nowInput);
     const cutoff = now.getTime() - operationalRetentionMs;
+    let unreadable = 0;
     for await (const entity of table.listUpdatedBefore(new Date(cutoff))) {
-      const updatedAt = dateValue(entity.updatedAt, 'updatedAt');
-      const changeEventAt = instant(
-        entity.changeEventAt,
-        'Change Event instant',
-      );
-      // A deleted record no longer fences its delivery identity. Keep it while
-      // its Change Event is ahead so a later dispatch cannot send it again.
-      if (
-        updatedAt.getTime() >= cutoff ||
-        changeEventAt.getTime() > now.getTime()
-      ) {
+      let keys: ReturnType<typeof expiredRowKeys>;
+      try {
+        keys = expiredRowKeys(entity, now, cutoff);
+      } catch {
+        // Throwing here would stop the purge at this row, every day, and
+        // leave every row listed after it.
+        unreadable += 1;
         continue;
       }
+      if (keys === null) continue;
       try {
-        await table.delete(
-          requiredString(entity.partitionKey, 'partition key'),
-          requiredString(entity.rowKey, 'row key'),
-          requiredString(entity.etag, 'ETag'),
-        );
+        await table.delete(keys.partitionKey, keys.rowKey, keys.etag);
       } catch (error) {
         // A newer write or an overlapping run wins; the next run reconsiders.
         if (statusCode(error) !== 404 && !conflict(error)) throw error;
       }
     }
+    return unreadable;
   }
 
   return {

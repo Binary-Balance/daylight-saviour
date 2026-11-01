@@ -710,6 +710,39 @@ describe('reminder dispatch ledger retention', () => {
     assert.equal(rows.size, 0);
   });
 
+  it('skips and counts a row it cannot date, then purges the rest', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    await ledger.prepare(installation('a'));
+    // Listed between the others, so a purge that stopped here would leave 'c'.
+    rows.set('zone/unreadable', {
+      etag: 'unreadable',
+      partitionKey: 'zone',
+      rowKey: 'unreadable',
+      updatedAt: 'not an instant',
+    });
+    await ledger.prepare(installation('c'));
+
+    assert.equal(await ledger.purgeExpired(purgedAt), 1);
+    assert.deepEqual([...rows.keys()], ['zone/unreadable']);
+  });
+
+  it('purges an old row whose Change Event it cannot read', async () => {
+    const { rows, table } = createTable();
+    const ledger = createTableReminderDispatchLedgerStore(table);
+    rows.set('zone/unreadable', {
+      changeEventAt: 'not an instant',
+      etag: 'unreadable',
+      partitionKey: 'zone',
+      rowKey: 'unreadable',
+      updatedAt,
+    });
+    await ledger.prepare(installation('c'));
+
+    assert.equal(await ledger.purgeExpired(purgedAt), 0);
+    assert.equal(rows.size, 0);
+  });
+
   it('lets overlapping runs finish without double deletion errors', async () => {
     const { rows, table } = createTable();
     const ledger = createTableReminderDispatchLedgerStore(table);

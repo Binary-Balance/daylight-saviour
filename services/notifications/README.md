@@ -152,7 +152,7 @@ provider detail:
 | `pack-horizon-invalid`          | **The run's time is outside the active pack's coverage or Validity Horizon, so nothing was planned.**                                                     |
 | `operation-failed`              | A storage call failed. The ledger keeps the delivery safe to retry.                                                                                       |
 | `page-limit-reached`            | **A query stopped at 50 pages, so later rows were not reached.**                                                                                          |
-| `ledger-row-invalid`            | **A ledger row could not be read, so settlement skipped it.** Repeats each run until the row is purged.                                                   |
+| `ledger-row-invalid`            | **A ledger row could not be read, so settlement or the daily purge skipped it.** It repeats until the purge deletes it, 30 days after its last update.    |
 
 Senders still write their own fixed events, such as
 `fcm-credential-sts-denied`, to the same invocation log.
@@ -258,11 +258,14 @@ safe.
 As a safeguard, the purge also keeps a ledger row until its Change Event has
 passed, because a deleted row no longer stops that reminder being sent again.
 Dispatch first writes a row when its delivery window opens, at most about
-eight days before the event, so this does not arise in practice.
+eight days before the event, so this does not arise in practice. A row with no
+readable Change Event has none to wait for, so its age alone decides.
 
 A storage error or function timeout ends the run, and the next day's run
-continues. A malformed ledger row fails every run at that row, so later rows
-wait until it is repaired.
+continues. A ledger row the purge cannot date or key does not: the purge skips
+it, logs `reminder-dispatch-ledger-row-invalid` with a count, and carries on.
+Such a row stays, and the count repeats each day, until someone repairs or
+deletes it.
 
 ## Deployment settings
 
