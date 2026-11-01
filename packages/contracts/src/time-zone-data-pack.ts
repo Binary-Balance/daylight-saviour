@@ -2,6 +2,7 @@ import {
   timeZoneDataPackSchemaVersion,
   type TimeZoneDataPackSchemaVersion,
 } from './time-zone-data-pack-version.ts';
+import { fieldChecks } from './validation.ts';
 
 export interface TimeZoneState {
   readonly abbreviation: string;
@@ -48,51 +49,15 @@ export class TimeZoneDataPackValidationError extends Error {
 
 const activatedPacks = new WeakSet<object>();
 
-type JsonObject = Record<string, unknown>;
-
 function fail(path: string, problem: string): never {
   throw new TimeZoneDataPackValidationError(path, problem);
 }
 
-function objectAt(value: unknown, path: string): JsonObject {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return fail(path, 'expected an object');
-  }
-
-  return value as JsonObject;
-}
-
-function exactKeys(object: JsonObject, path: string, expected: string[]) {
-  const actual = Object.keys(object).sort();
-  const sortedExpected = [...expected].sort();
-
-  if (
-    actual.length !== sortedExpected.length ||
-    actual.some((key, index) => key !== sortedExpected[index])
-  ) {
-    fail(path, `expected keys ${sortedExpected.join(', ')}`);
-  }
-}
-
-function stringAt(value: unknown, path: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    return fail(path, 'expected a non-empty string');
-  }
-
-  return value;
-}
+const { exactKeys, integerAt, objectAt, stringAt } = fieldChecks(fail);
 
 function booleanAt(value: unknown, path: string): boolean {
   if (typeof value !== 'boolean') {
     return fail(path, 'expected a boolean');
-  }
-
-  return value;
-}
-
-function integerAt(value: unknown, path: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
-    return fail(path, 'expected a safe integer');
   }
 
   return value;
