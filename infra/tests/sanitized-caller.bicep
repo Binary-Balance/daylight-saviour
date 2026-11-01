@@ -23,7 +23,7 @@ module platform '../modules/minimal-functions-platform.bicep' = {
       apnsTopic: 'example.invalid.app'
       apnsTeamId: 'SAMPLETEAM'
       apnsKeyId: 'SAMPLEKEY'
-      apnsPrivateKeyReference: '@Microsoft.KeyVault(SecretUri=https://sample-notify-vault.vault.azure.net/secrets/sample)'
+      apnsPrivateKeyReference: '@Microsoft.KeyVault(VaultName=sample-notify-vault;SecretName=application-secret)'
     }
   }
 }

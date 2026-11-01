@@ -28,7 +28,9 @@ Inputs:
   module owns the whole settings set. Enabled dispatch needs every field and the
   `fcm` values, because it composes FCM and APNs together. `fcm.enabled` does not
   gate dispatch. The private key field is a Key Vault reference, never the key,
-  and needs the secret access described below.
+  and needs the secret access described below. Grant that access before opting
+  in, or refresh the reference afterwards: a failed reference stops dispatch on
+  both platforms.
 
 The module returns one `platform` object containing resource IDs, runtime identity identifiers, Function App host name, Key Vault URI, and deployment-container URI.
 
