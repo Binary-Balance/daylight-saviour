@@ -26,6 +26,8 @@ const facts = {
   timing: 'one-week' as const,
 };
 
+const immediate = { kind: 'immediate' } as const;
+
 function response(
   status: number,
   reason: string,
@@ -43,6 +45,7 @@ function response(
 function sender(
   providerResponse: ApnsHttpResponse = { body: '', status: 200 },
   options: {
+    readonly clock?: () => Date;
     readonly getProviderToken?: () => Promise<string>;
     readonly logWrite?: (event: ApnsChangeReminderLogEvent) => void;
     readonly removeIfDeviceTokenMatches?: (
@@ -62,6 +65,7 @@ function sender(
     'sandbox',
     'com.example.app',
     {
+      ...(options.clock === undefined ? {} : { clock: options.clock }),
       logger: { write: options.logWrite ?? ((event) => logs.push(event)) },
       providerTokenProvider: {
         getProviderToken:
@@ -101,7 +105,7 @@ describe('APNs Change Reminder sender', () => {
   it('sends the reviewed copy and facts as an HTTP/2 APNs POST', async () => {
     const test = sender();
 
-    assert.deepEqual(await test.instance.send(subscription, facts), {
+    assert.deepEqual(await test.instance.send(subscription, facts, immediate), {
       kind: 'accepted',
     });
     assert.deepEqual(test.requests, [
@@ -176,9 +180,12 @@ describe('APNs Change Reminder sender', () => {
     it(`keeps the subscription after transient ${status}/${reason}`, async () => {
       const test = sender(response(status, reason));
 
-      assert.deepEqual(await test.instance.send(subscription, facts), {
-        kind: 'transient-rejection',
-      });
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, immediate),
+        {
+          kind: 'transient-rejection',
+        },
+      );
       assert.deepEqual(test.removalRequests, []);
     });
   }
@@ -190,11 +197,15 @@ describe('APNs Change Reminder sender', () => {
     it(`conditionally removes the exact subscription after ${status}/${reason}`, async () => {
       const test = sender(response(status, reason, invalidatedAt));
 
-      assert.deepEqual(await test.instance.send(subscription, facts), {
-        cleanupStatus: 'removed',
-        kind: 'permanent-invalid-token',
-        ...(invalidTokenReason === undefined ? {} : { invalidTokenReason }),
-      });
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, immediate),
+        {
+          cleanupStatus: 'removed',
+          invalidatedAt: new Date(invalidatedAt),
+          kind: 'permanent-invalid-token',
+          ...(invalidTokenReason === undefined ? {} : { invalidTokenReason }),
+        },
+      );
       assert.deepEqual(test.removalRequests, [
         { invalidatedAt: new Date(invalidatedAt), subscription },
       ]);
@@ -216,9 +227,12 @@ describe('APNs Change Reminder sender', () => {
       response(418, 'Unregistered'),
     ]) {
       const test = sender(providerResponse);
-      assert.deepEqual(await test.instance.send(subscription, facts), {
-        kind: 'malformed-response',
-      });
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, immediate),
+        {
+          kind: 'malformed-response',
+        },
+      );
       assert.deepEqual(test.removalRequests, []);
     }
   });
@@ -229,9 +243,12 @@ describe('APNs Change Reminder sender', () => {
       response(403, 'Forbidden'),
     ]) {
       const test = sender(providerResponse);
-      assert.deepEqual(await test.instance.send(subscription, facts), {
-        kind: 'permanent-rejection',
-      });
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, immediate),
+        {
+          kind: 'permanent-rejection',
+        },
+      );
       assert.deepEqual(test.removalRequests, []);
     }
   });
@@ -248,8 +265,9 @@ describe('APNs Change Reminder sender', () => {
       },
     });
 
-    assert.deepEqual(await test.instance.send(subscription, facts), {
+    assert.deepEqual(await test.instance.send(subscription, facts, immediate), {
       cleanupStatus: 'token-replaced',
+      invalidatedAt: new Date(invalidatedAt),
       kind: 'permanent-invalid-token',
       invalidTokenReason: 'unregistered',
     });
@@ -262,8 +280,9 @@ describe('APNs Change Reminder sender', () => {
       },
     });
 
-    assert.deepEqual(await test.instance.send(subscription, facts), {
+    assert.deepEqual(await test.instance.send(subscription, facts, immediate), {
       cleanupStatus: 'failed',
+      invalidatedAt: new Date(invalidatedAt),
       kind: 'permanent-invalid-token',
       invalidTokenReason: 'unregistered',
     });
@@ -287,8 +306,9 @@ describe('APNs Change Reminder sender', () => {
       },
     });
 
-    assert.deepEqual(await test.instance.send(subscription, facts), {
+    assert.deepEqual(await test.instance.send(subscription, facts, immediate), {
       cleanupStatus: 'failed',
+      invalidatedAt: new Date(invalidatedAt),
       kind: 'permanent-invalid-token',
       invalidTokenReason: 'unregistered',
     });
@@ -335,7 +355,11 @@ describe('APNs Change Reminder sender', () => {
       const test = sender();
 
       await assert.rejects(
-        test.instance.send(invalidSubscription as never, invalidFacts as never),
+        test.instance.send(
+          invalidSubscription as never,
+          invalidFacts as never,
+          immediate,
+        ),
         { message },
       );
       assert.deepEqual(test.requests, []);
@@ -349,7 +373,7 @@ describe('APNs Change Reminder sender', () => {
       },
     });
 
-    assert.deepEqual(await test.instance.send(subscription, facts), {
+    assert.deepEqual(await test.instance.send(subscription, facts, immediate), {
       kind: 'uncertain',
     });
     assert.deepEqual(test.removalRequests, []);
@@ -364,10 +388,117 @@ describe('APNs Change Reminder sender', () => {
       async () => 'not-a-jwt',
     ]) {
       const test = sender(undefined, { getProviderToken });
-      assert.deepEqual(await test.instance.send(subscription, facts), {
-        kind: 'transient-rejection',
-      });
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, immediate),
+        {
+          kind: 'transient-rejection',
+        },
+      );
       assert.deepEqual(test.requests, []);
     }
+  });
+
+  describe('a scheduled send', () => {
+    const now = new Date('2026-09-27T01:00:00.900Z');
+    const expiresAt = new Date('2026-09-27T11:00:00.500Z');
+    const until = { expiresAt, kind: 'until' } as const;
+    const authorized = {
+      authorizeBeforeExternalSend: async () => true,
+      completeOperationDeadline: new Date(now.getTime() + 2_500),
+    };
+
+    it('asks APNs to hold it until the expiry, in whole seconds', async () => {
+      const test = sender(undefined, { clock: () => now });
+
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, until, authorized),
+        { kind: 'accepted' },
+      );
+      assert.equal(
+        test.requests[0]?.headers['apns-expiration'],
+        String(Date.parse('2026-09-27T11:00:00.000Z') / 1000),
+      );
+      assert.equal(test.requests[0]?.timeoutMs, 2_500);
+    });
+
+    it('sends nothing when the expiry leaves less than a whole second', async () => {
+      const test = sender(undefined, {
+        clock: () => new Date(expiresAt.getTime() - 400),
+      });
+
+      assert.deepEqual(await test.instance.send(subscription, facts, until), {
+        kind: 'expired',
+      });
+      assert.deepEqual(test.requests, []);
+      assert.deepEqual(test.logs, ['apns-change-reminder-expired']);
+    });
+
+    it('sends nothing when the complete-operation deadline has passed', async () => {
+      const test = sender(undefined, { clock: () => now });
+
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, until, {
+          ...authorized,
+          completeOperationDeadline: now,
+        }),
+        { kind: 'expired' },
+      );
+      assert.deepEqual(test.requests, []);
+    });
+
+    it('authorizes after the provider token and before the request', async () => {
+      const steps: string[] = [];
+      const test = sender(undefined, {
+        clock: () => now,
+        getProviderToken: async () => {
+          steps.push('token');
+          return providerToken;
+        },
+        post: async () => {
+          steps.push('request');
+          return { body: '', status: 200 };
+        },
+      });
+
+      await test.instance.send(subscription, facts, until, {
+        ...authorized,
+        authorizeBeforeExternalSend: async () => {
+          steps.push('authorize');
+          return true;
+        },
+      });
+
+      assert.deepEqual(steps, ['token', 'authorize', 'request']);
+    });
+
+    it('takes the expiry from the clock after authorization', async () => {
+      let current = now;
+      const test = sender(undefined, { clock: () => current });
+
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, until, {
+          ...authorized,
+          authorizeBeforeExternalSend: async () => {
+            current = expiresAt;
+            return true;
+          },
+        }),
+        { kind: 'expired' },
+      );
+    });
+
+    it('reports a refused send without calling APNs', async () => {
+      const test = sender();
+
+      assert.deepEqual(
+        await test.instance.send(subscription, facts, until, {
+          ...authorized,
+          authorizeBeforeExternalSend: async () => false,
+        }),
+        { kind: 'not-authorized' },
+      );
+      assert.deepEqual(test.requests, []);
+      assert.deepEqual(test.logs, ['apns-change-reminder-not-authorized']);
+    });
   });
 });

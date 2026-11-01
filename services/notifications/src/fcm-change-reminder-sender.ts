@@ -51,11 +51,21 @@ export interface FcmAccessTokenProvider {
  * FCM keeps an undelivered message for four weeks unless the request sets a
  * TTL, so every send states its lifetime. `immediate` sends a zero TTL: FCM
  * delivers at once or drops the message. `until` lets FCM hold the message
- * no later than `expiresAt`.
+ * no later than `expiresAt`. The APNs sender gives both the same meaning.
  */
-export type FcmMessageLifetime =
+export type ChangeReminderLifetime =
   | { readonly kind: 'immediate' }
   | { readonly kind: 'until'; readonly expiresAt: Date };
+
+/**
+ * Bounds a scheduled send. A controlled smoke send has no delivery plan to
+ * recheck, so it omits this and has only the transport's own limit.
+ */
+export interface ChangeReminderSendGuard {
+  /** Runs once credentials are ready. `false` means nothing is sent. */
+  readonly authorizeBeforeExternalSend: () => Promise<boolean>;
+  readonly completeOperationDeadline: Date;
+}
 
 export interface FcmChangeReminderPayload {
   readonly message: {
@@ -80,6 +90,8 @@ export interface FcmHttpRequest {
   readonly accessToken: string;
   readonly endpoint: URL;
   readonly payload: FcmChangeReminderPayload;
+  /** Shortens, but never extends, the transport's own limit. */
+  readonly timeoutMs?: number;
 }
 
 export interface FcmHttpResponse {
@@ -115,6 +127,7 @@ export type FcmChangeReminderLogEvent =
   | 'fcm-change-reminder-expired'
   | 'fcm-change-reminder-invalid-token-cleanup-failed'
   | 'fcm-change-reminder-malformed-response'
+  | 'fcm-change-reminder-not-authorized'
   | 'fcm-change-reminder-permanent-invalid-token'
   | 'fcm-change-reminder-permanent-rejection'
   | 'fcm-change-reminder-transient-rejection'
@@ -129,6 +142,8 @@ export type FcmChangeReminderResult =
   /** The lifetime ended before the request could be made; nothing was sent. */
   | { readonly kind: 'expired' }
   | { readonly kind: 'malformed-response' }
+  /** Final authorization refused the send after credentials were ready. */
+  | { readonly kind: 'not-authorized' }
   | {
       readonly kind: 'permanent-invalid-token';
       /**
@@ -149,7 +164,8 @@ export interface FcmChangeReminderSender {
   readonly send: (
     subscription: FcmChangeReminderSubscription,
     facts: ReviewedChangeReminderFacts,
-    lifetime: FcmMessageLifetime,
+    lifetime: ChangeReminderLifetime,
+    guard?: ChangeReminderSendGuard,
   ) => Promise<FcmChangeReminderResult>;
 }
 
@@ -182,7 +198,7 @@ export type FcmFetch = (
   },
 ) => Promise<FcmFetchResponse>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -201,7 +217,7 @@ function hasAllowedKeys(
   return Object.keys(value).every((key) => keys.includes(key));
 }
 
-function parseJson(body: unknown): unknown | undefined {
+export function parseJson(body: unknown): unknown | undefined {
   if (
     typeof body !== 'string' ||
     body.length === 0 ||
@@ -307,7 +323,7 @@ function assertReviewedFacts(
   }
 }
 
-function assertLifetime(lifetime: FcmMessageLifetime, now: Date) {
+function assertLifetime(lifetime: ChangeReminderLifetime, now: Date) {
   if (lifetime.kind === 'immediate') return;
   if (lifetime.kind !== 'until' || !(lifetime.expiresAt instanceof Date))
     throw new Error('Invalid FCM message lifetime');
@@ -319,13 +335,38 @@ function assertLifetime(lifetime: FcmMessageLifetime, now: Date) {
 }
 
 function messageTtl(
-  lifetime: FcmMessageLifetime,
+  lifetime: ChangeReminderLifetime,
   now: Date,
 ): `${number}s` | undefined {
   if (lifetime.kind === 'immediate') return '0s';
   const remainingMs = lifetime.expiresAt.getTime() - now.getTime();
   // Round down so FCM never holds the message past its expiry.
   return remainingMs > 0 ? `${Math.floor(remainingMs / 1000)}s` : undefined;
+}
+
+/**
+ * The last check before a request leaves. Credential exchange and authorization
+ * take time, so the lifetime comes from the clock just before the request
+ * rather than from when the send was requested.
+ */
+export async function finalSendCheck<Lifetime>(
+  guard: ChangeReminderSendGuard | undefined,
+  clock: () => Date,
+  lifetimeAt: (now: Date) => Lifetime | undefined,
+) {
+  if (guard !== undefined && !(await guard.authorizeBeforeExternalSend())) {
+    return 'not-authorized' as const;
+  }
+  const now = clock();
+  const lifetime = lifetimeAt(now);
+  const deadline = guard?.completeOperationDeadline.getTime() ?? Infinity;
+  if (lifetime === undefined || deadline <= now.getTime()) {
+    return 'expired' as const;
+  }
+  return {
+    lifetime,
+    timeout: guard === undefined ? {} : { timeoutMs: deadline - now.getTime() },
+  };
 }
 
 function buildPayload(
@@ -381,6 +422,7 @@ function report(
     accepted: 'fcm-change-reminder-accepted',
     expired: 'fcm-change-reminder-expired',
     'malformed-response': 'fcm-change-reminder-malformed-response',
+    'not-authorized': 'fcm-change-reminder-not-authorized',
     'permanent-invalid-token': 'fcm-change-reminder-permanent-invalid-token',
     'permanent-rejection': 'fcm-change-reminder-permanent-rejection',
     'transient-rejection': 'fcm-change-reminder-transient-rejection',
@@ -428,10 +470,13 @@ export function createFetchFcmHttpTransport(fetch: FcmFetch): FcmHttpTransport {
         return { body: await response.text(), status: response.status };
       };
       const timeout = new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
-          controller.abort();
-          reject(new Error('FCM transport timeout'));
-        }, transportTimeoutMs);
+        timer = setTimeout(
+          () => {
+            controller.abort();
+            reject(new Error('FCM transport timeout'));
+          },
+          Math.min(transportTimeoutMs, request.timeoutMs ?? transportTimeoutMs),
+        );
       });
       try {
         return await Promise.race([operation(), timeout]);
@@ -452,7 +497,8 @@ export function createFcmChangeReminderSender(
   async function send(
     subscription: FcmChangeReminderSubscription,
     facts: ReviewedChangeReminderFacts,
-    lifetime: FcmMessageLifetime,
+    lifetime: ChangeReminderLifetime,
+    guard: ChangeReminderSendGuard | undefined,
   ): Promise<FcmChangeReminderResult> {
     let accessToken: FcmAccessToken;
     try {
@@ -462,15 +508,14 @@ export function createFcmChangeReminderSender(
     }
     // The token provider owns credential lifetime policy. After asynchronous
     // acquisition, the sender only rechecks current usability.
-    const now = clock();
-    if (!hasUsableAccessToken(accessToken, now)) {
+    if (!hasUsableAccessToken(accessToken, clock())) {
       return report(dependencies.logger, { kind: 'transient-rejection' });
     }
-    // Credential exchange takes time, so the TTL comes from the clock just
-    // before the request rather than from when the send was requested.
-    const ttl = messageTtl(lifetime, now);
-    if (ttl === undefined) {
-      return report(dependencies.logger, { kind: 'expired' });
+    const check = await finalSendCheck(guard, clock, (now) =>
+      messageTtl(lifetime, now),
+    );
+    if (typeof check === 'string') {
+      return report(dependencies.logger, { kind: check });
     }
 
     let response: FcmHttpResponse;
@@ -478,7 +523,8 @@ export function createFcmChangeReminderSender(
       response = await dependencies.transport.post({
         accessToken: accessToken.value,
         endpoint,
-        payload: buildPayload(subscription, facts, ttl),
+        payload: buildPayload(subscription, facts, check.lifetime),
+        ...check.timeout,
       });
     } catch {
       return report(dependencies.logger, { kind: 'uncertain' });
@@ -525,10 +571,10 @@ export function createFcmChangeReminderSender(
   }
 
   return {
-    async send(subscription, facts, lifetime) {
+    async send(subscription, facts, lifetime, guard) {
       assertReviewedFacts(subscription, facts);
       assertLifetime(lifetime, clock());
-      return send(subscription, facts, lifetime);
+      return send(subscription, facts, lifetime, guard);
     },
   };
 }

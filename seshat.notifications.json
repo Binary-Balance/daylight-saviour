@@ -20,6 +20,7 @@
       "runner": "node",
       "cwd": ".",
       "timeoutMs": 60000,
+      "mutantTimeoutMinMs": 60000,
       "typecheck": [
         "node",
         "node_modules/typescript/bin/tsc",
