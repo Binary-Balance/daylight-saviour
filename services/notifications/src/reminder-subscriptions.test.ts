@@ -795,7 +795,7 @@ describe('reminder subscription check-in', () => {
     });
   }
 
-  it('reports a wrong or retired credential as unauthorized, without secrets', async () => {
+  it('reports a wrong credential as unauthorized, without secrets', async () => {
     const result = await checkInReminderSubscription(
       request('', { authorization }),
       store({ checkInSubscription: async () => 'unauthorized' }),
@@ -2227,7 +2227,7 @@ describe('generation-ordered subscription persistence', () => {
     assert.equal(subscriptions.rows.size, 0);
   });
 
-  it('rejects a check-in for a retired installation and leaves its marker alone', async () => {
+  it('reports a retired installation as not found, leaving its marker alone', async () => {
     const subscriptions = concurrentSubscriptionTable();
     const registrationStore = createTableReminderSubscriptionStore(
       subscriptions,
@@ -2251,7 +2251,14 @@ describe('generation-ordered subscription persistence', () => {
         'credential-current',
         new Date('2026-09-01T00:00:00.000Z'),
       ),
-      'unauthorized',
+      'not-found',
+    );
+    assert.equal(
+      await registrationStore.updateSubscription(
+        record(2, 'credential-current'),
+        'credential-current',
+      ),
+      'not-found',
     );
     assert.deepEqual(onlyRow(subscriptions.rows), marker);
   });

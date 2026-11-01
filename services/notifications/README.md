@@ -26,14 +26,12 @@ request IDs, while active legacy rows remain recoverable during the rollout.
 Well-formed missing or mismatched credentials return the same empty `204` as a
 completed delete so idempotent retries do not reveal whether another
 installation exists; malformed requests and storage failures remain coarse
-errors. An update or check-in for an installation with no row answers `404`
-with `{"error":"Registration unavailable"}`, and the app clears its
-registration only on that response, never on a bare `404` from the platform,
-such as from a service that predates check-in. A retired installation's
-credential matches nothing, so it gets `401` until its marker is removed and
-`404` after. The mobile and service versions must be rolled out together: old
-backends reject new versioned IDs and new backends do not create absent legacy
-IDs.
+errors. An update or check-in for an installation with no row or a retired
+marker answers `404` with `{"error":"Registration unavailable"}`, and the app
+clears its registration only on that response, never on a bare `404` from the
+platform, such as from a service that predates check-in. The mobile and
+service versions must be rolled out together: old backends reject new versioned
+IDs and new backends do not create absent legacy IDs.
 
 ## Portable reminder dispatch
 

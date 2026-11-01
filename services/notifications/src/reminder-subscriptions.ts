@@ -742,9 +742,11 @@ async function removeStoredSubscription(
   throw new Error('Subscription removal contention exceeded retry limit');
 }
 
-// Updates and check-ins authenticate the same way. A retired marker keeps no
-// credential hash, so no credential matches it. A write that loses a race to
-// another writer reads the row again and tries again.
+// Updates and check-ins authenticate the same way. A retired marker answers
+// like an absent row, so the app learns its registration has gone during the
+// 30 days the marker lasts, and a caller learns nothing an absent row hides.
+// A write that loses a race to another writer reads the row again and tries
+// again.
 async function writeWithCredential<Result extends string>(
   subscriptions: SubscriptionTable,
   installationId: string,
@@ -762,6 +764,7 @@ async function writeWithCredential<Result extends string>(
       if (statusCode(error) === 404) return 'not-found' as const;
       throw error;
     }
+    if (existing.state === 'retired') return 'not-found' as const;
     if (
       existing.credentialHash === undefined ||
       !equalOpaqueValues(existing.credentialHash, credentialHash)
