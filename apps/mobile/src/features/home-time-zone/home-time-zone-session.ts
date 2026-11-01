@@ -93,6 +93,11 @@ type FlowState =
       readonly zoneId: string;
     };
 
+// The data pack manager reports its own outcome in its snapshot, and an
+// acknowledgement that is not saved only repeats one factual aftermath opening,
+// so neither failure needs handling.
+function ignoreFailure() {}
+
 export function createHomeTimeZoneSession({
   adapters,
   now = () => new Date(),
@@ -169,6 +174,30 @@ export function createHomeTimeZoneSession({
     return active && generation === expectedGeneration;
   }
 
+  // Shows the report for a saved zone, whether restored or newly selected.
+  async function openReport(
+    zoneId: string,
+    secondaryCopySeed: string,
+    expectedGeneration: number,
+  ) {
+    let acknowledgedEventAt: string | null = null;
+    try {
+      acknowledgedEventAt =
+        await adapters.aftermathAcknowledgements.load(zoneId);
+    } catch {
+      // Noncritical acknowledgement failure may repeat one factual aftermath
+      // opening but cannot block the report.
+    }
+    if (!current(expectedGeneration)) return;
+    setFlow({
+      acknowledgedEventAt,
+      kind: 'ready',
+      openingAcknowledgedEventAt: acknowledgedEventAt,
+      secondaryCopySeed,
+      zoneId,
+    });
+  }
+
   async function restore(expectedGeneration: number) {
     try {
       const saved = await adapters.storage.load();
@@ -181,24 +210,8 @@ export function createHomeTimeZoneSession({
       if (!current(expectedGeneration)) return;
 
       if (saved !== null) {
-        const canonical = normalizeAustralianZoneId(saved);
-        if (canonical === saved) {
-          let acknowledgedEventAt: string | null = null;
-          try {
-            acknowledgedEventAt =
-              await adapters.aftermathAcknowledgements.load(canonical);
-          } catch {
-            // Noncritical acknowledgement failure may repeat one factual
-            // aftermath opening but cannot block the report.
-          }
-          if (!current(expectedGeneration)) return;
-          setFlow({
-            acknowledgedEventAt,
-            kind: 'ready',
-            openingAcknowledgedEventAt: acknowledgedEventAt,
-            secondaryCopySeed,
-            zoneId: canonical,
-          });
+        if (normalizeAustralianZoneId(saved) === saved) {
+          await openReport(saved, secondaryCopySeed, expectedGeneration);
         } else {
           setFlow({
             kind: 'choose',
@@ -254,23 +267,11 @@ export function createHomeTimeZoneSession({
       try {
         await adapters.storage.save(zone.id);
         if (!current(expectedGeneration)) return;
-        let acknowledgedEventAt: string | null = null;
-        try {
-          acknowledgedEventAt = await adapters.aftermathAcknowledgements.load(
-            zone.id,
-          );
-        } catch {
-          // A successfully saved Home Time Zone remains usable when its
-          // acknowledgement cannot be restored.
-        }
-        if (!current(expectedGeneration)) return;
-        setFlow({
-          acknowledgedEventAt,
-          kind: 'ready',
-          openingAcknowledgedEventAt: acknowledgedEventAt,
-          secondaryCopySeed: selectionFlow.secondaryCopySeed,
-          zoneId: zone.id,
-        });
+        await openReport(
+          zone.id,
+          selectionFlow.secondaryCopySeed,
+          expectedGeneration,
+        );
       } catch {
         if (!current(expectedGeneration)) return;
         setFlow({ ...selectionFlow, saveError: 'save-failed', saving: false });
@@ -292,7 +293,7 @@ export function createHomeTimeZoneSession({
     if (zoneId !== null) {
       void adapters.aftermathAcknowledgements
         .save(zoneId, eventAt)
-        .catch(() => undefined);
+        .catch(ignoreFailure);
     }
   }
 
@@ -383,16 +384,14 @@ export function createHomeTimeZoneSession({
         acknowledgeAftermath(event.eventAt);
         return;
       case 'manual-refresh':
-        void adapters.timeZoneDataPacks
-          .refresh('manual')
-          .catch(() => undefined);
+        void adapters.timeZoneDataPacks.refresh('manual').catch(ignoreFailure);
         return;
       case 'foreground':
         startOpening();
         refreshHourCycle();
         void adapters.timeZoneDataPacks
           .refresh('foreground')
-          .catch(() => undefined);
+          .catch(ignoreFailure);
     }
   }
 
@@ -419,7 +418,7 @@ export function createHomeTimeZoneSession({
     dataPackSnapshot = adapters.timeZoneDataPacks.getSnapshot();
     stopDataPackSubscription =
       adapters.timeZoneDataPacks.subscribe(onDataPackChange);
-    void adapters.timeZoneDataPacks.initialize().catch(() => undefined);
+    void adapters.timeZoneDataPacks.initialize().catch(ignoreFailure);
     void restore(generation);
     return stop;
   }
