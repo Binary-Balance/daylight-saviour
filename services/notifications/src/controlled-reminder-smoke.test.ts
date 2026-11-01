@@ -17,7 +17,7 @@ import type {
 import type {
   FcmChangeReminderResult,
   FcmChangeReminderSubscription,
-  FcmMessageLifetime,
+  ChangeReminderLifetime,
   ReviewedChangeReminderFacts,
 } from './fcm-change-reminder-sender.ts';
 
@@ -186,7 +186,7 @@ function runtime(
     readonly send?: (
       subscription: FcmChangeReminderSubscription,
       facts: ReviewedChangeReminderFacts,
-      lifetime: FcmMessageLifetime,
+      lifetime: ChangeReminderLifetime,
     ) => Promise<FcmChangeReminderResult>;
   } = {},
 ) {
@@ -414,6 +414,7 @@ describe('controlled Change Reminder smoke handler', () => {
         apnsRuntimeEnabled: true,
         apnsSend: async () => ({
           cleanupStatus: 'removed',
+          invalidatedAt: new Date(0),
           invalidTokenReason: 'unregistered',
           kind: 'permanent-invalid-token',
         }),
@@ -436,16 +437,19 @@ describe('controlled Change Reminder smoke handler', () => {
     for (const apnsResult of [
       {
         cleanupStatus: 'token-replaced' as const,
+        invalidatedAt: new Date(0),
         invalidTokenReason: 'unregistered' as const,
         kind: 'permanent-invalid-token' as const,
       },
       {
         cleanupStatus: 'failed' as const,
+        invalidatedAt: new Date(0),
         invalidTokenReason: 'unregistered' as const,
         kind: 'permanent-invalid-token' as const,
       },
       {
         cleanupStatus: 'removed' as const,
+        invalidatedAt: new Date(0),
         kind: 'permanent-invalid-token' as const,
       },
       { kind: 'transient-rejection' as const },
