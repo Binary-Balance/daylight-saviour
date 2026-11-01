@@ -774,15 +774,16 @@ async function removeStoredSubscription(
   throw new Error('Subscription removal contention exceeded retry limit');
 }
 
-// Updates and check-ins authenticate the same way. A retired marker answers
-// like an absent row, so the app learns its registration has gone during the
-// 30 days the marker lasts, and a caller learns nothing an absent row hides.
-// A write that loses a race to another writer reads the row again and tries
-// again.
+// Updates, check-ins and deletions authenticate the same way. A retired
+// marker answers like an absent row, so the app learns its registration has
+// gone during the 30 days the marker lasts, and a caller learns nothing an
+// absent row hides. A write that loses a race to another writer reads the row
+// again and tries again.
 async function writeWithCredential<Result extends string>(
   subscriptions: SubscriptionTable,
   installationId: string,
   credentialHash: string,
+  operation: 'update' | 'deletion',
   write: (existing: SubscriptionEntity) => Promise<Result>,
 ) {
   for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
@@ -803,7 +804,7 @@ async function writeWithCredential<Result extends string>(
       if (writeStatus !== 409 && writeStatus !== 412) throw error;
     }
   }
-  throw new Error('Subscription update contention exceeded retry limit');
+  throw new Error(`Subscription ${operation} contention exceeded retry limit`);
 }
 
 export function createTableReminderSubscriptionStore(
@@ -928,6 +929,7 @@ export function createTableReminderSubscriptionStore(
         subscriptions,
         record.installationId,
         credentialHash,
+        'update',
         async (existing) => {
           if (existing.attemptGeneration >= record.attemptGeneration)
             return 'stale' as const;
@@ -949,6 +951,7 @@ export function createTableReminderSubscriptionStore(
         subscriptions,
         installationId,
         credentialHash,
+        'update',
         async (existing) => {
           // A merge, so a row from before last contact existed, or with
           // columns this code does not model, is not disturbed.
@@ -964,48 +967,32 @@ export function createTableReminderSubscriptionStore(
         },
       );
     },
-    async deleteSubscription(
-      installationId,
-      credentialHash,
-      retiredAt = new Date(),
-    ) {
-      for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-        let existing: SubscriptionEntity;
-        try {
-          existing = await subscriptions.get(
-            subscriptionPartitionKey,
-            installationId,
-          );
-        } catch (error) {
-          if (statusCode(error) === 404) return 'not-found';
-          throw error;
-        }
-        if (existing.state === 'retired') return 'not-found';
-        if (
-          existing.credentialHash === undefined ||
-          !equalOpaqueValues(existing.credentialHash, credentialHash)
-        ) {
-          return 'unauthorized';
-        }
-        try {
-          await subscriptions.replace(
-            {
-              partitionKey: subscriptionPartitionKey,
-              rowKey: installationId,
-              state: 'retired',
-              attemptGeneration: existing.attemptGeneration,
-              retiredAt,
-            },
-            existing.etag,
-          );
-          return 'deleted';
-        } catch (error) {
-          const replaceStatus = statusCode(error);
-          if (replaceStatus === 404) return 'not-found';
-          if (replaceStatus !== 409 && replaceStatus !== 412) throw error;
-        }
-      }
-      throw new Error('Subscription deletion contention exceeded retry limit');
+    deleteSubscription(installationId, credentialHash, retiredAt = new Date()) {
+      return writeWithCredential(
+        subscriptions,
+        installationId,
+        credentialHash,
+        'deletion',
+        async (existing) => {
+          try {
+            await subscriptions.replace(
+              {
+                partitionKey: subscriptionPartitionKey,
+                rowKey: installationId,
+                state: 'retired',
+                attemptGeneration: existing.attemptGeneration,
+                retiredAt,
+              },
+              existing.etag,
+            );
+            return 'deleted' as const;
+          } catch (error) {
+            // The row went after it was read, which is what the caller wanted.
+            if (statusCode(error) === 404) return 'not-found' as const;
+            throw error;
+          }
+        },
+      );
     },
     async takeSourceAllowance(sourceHash, now) {
       return takeThrottleAllowance(
