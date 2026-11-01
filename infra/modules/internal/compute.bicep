@@ -1,5 +1,10 @@
 targetScope = 'resourceGroup'
 
+param apnsEnvironment string
+param apnsKeyId string
+param apnsPrivateKeyReference string
+param apnsTeamId string
+param apnsTopic string
 param applicationInsightsConnectionString string
 param buildVersion string
 param deploymentContainerUri string
@@ -16,12 +21,15 @@ param keyVaultUri string
 param location string
 param logAnalyticsWorkspaceId string
 param maximumInstanceCount int
+param reminderDispatchEnabled bool
 param runtimeIdentityClientId string
 param runtimeIdentityId string
 param runtimeName string
 param runtimeVersion string
 param storageAccountName string
 param tags object
+param timeZoneDataManifestUrl string
+param timeZoneDataTrustedKeysJson string
 
 resource functionPlan 'Microsoft.Web/serverfarms@2024-04-01' = {
   name: functionPlanName
@@ -86,6 +94,11 @@ resource appSettings 'Microsoft.Web/sites/config@2024-04-01' = {
   parent: functionApp
   name: 'appsettings'
   properties: {
+    APNS_ENVIRONMENT: apnsEnvironment
+    APNS_KEY_ID: apnsKeyId
+    APNS_PRIVATE_KEY: apnsPrivateKeyReference
+    APNS_TEAM_ID: apnsTeamId
+    APNS_TOPIC: apnsTopic
     APPLICATIONINSIGHTS_AUTHENTICATION_STRING: 'ClientId=${runtimeIdentityClientId};Authorization=AAD'
     APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsightsConnectionString
     AzureWebJobsStorage__accountName: storageAccountName
@@ -100,8 +113,11 @@ resource appSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     FCM_SERVICE_ACCOUNT_EMAIL: fcmServiceAccountEmail
     FCM_WORKLOAD_IDENTITY_PROVIDER: fcmWorkloadIdentityProvider
     KEY_VAULT_URI: keyVaultUri
+    REMINDER_DISPATCH_ENABLED: reminderDispatchEnabled ? 'true' : 'false'
     REMINDER_MANAGED_IDENTITY_CLIENT_ID: runtimeIdentityClientId
     REMINDER_STORAGE_ACCOUNT_NAME: storageAccountName
+    TIME_ZONE_DATA_MANIFEST_URL: timeZoneDataManifestUrl
+    TIME_ZONE_DATA_TRUSTED_KEYS_JSON: timeZoneDataTrustedKeysJson
   }
 }
 

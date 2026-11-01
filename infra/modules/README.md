@@ -19,6 +19,14 @@ Inputs:
   audience, Google workload identity provider resource, exact service-account
   email, FCM project ID, and the explicit `testSendEnabled` gate. Both FCM
   runtime and test sends are disabled by default; no Google key is accepted.
+- `reminderDispatch` — optional Change Reminder dispatch settings: the `enabled`
+  gate, the signed Time-Zone Data Pack manifest URL and trusted keys JSON, and
+  the APNs environment, topic, team ID, key ID and private key reference.
+  Dispatch stays suspended by default, and a value set by hand is replaced at the
+  next deployment, because the module owns the whole settings set. Enabled
+  dispatch needs every field, because it composes FCM and APNs together. The
+  private key field is a Key Vault reference, never the key, and needs the secret
+  access described below.
 
 The module returns one `platform` object containing resource IDs, runtime identity identifiers, Function App host name, Key Vault URI, and deployment-container URI.
 

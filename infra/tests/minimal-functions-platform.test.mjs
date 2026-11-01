@@ -51,6 +51,7 @@ describe('minimal Functions platform Bicep module', () => {
       'buildVersion',
       'fcm',
       'location',
+      'reminderDispatch',
       'resourceNames',
       'runtime',
       'scale',
@@ -79,6 +80,36 @@ describe('minimal Functions platform Bicep module', () => {
       compiledTemplate.definitions.ScaleSettings.properties.maximumInstanceCount
         .minValue,
       1,
+    );
+  });
+
+  it('leaves reminder dispatch suspended until a caller enables it', () => {
+    const settings =
+      compiledTemplate.definitions.ReminderDispatchSettings.properties;
+    const appSettings = oneResource('Microsoft.Web/sites/config').properties;
+    const defaults = compiledTemplate.parameters.reminderDispatch.defaultValue;
+
+    assert.deepEqual(Object.keys(settings).sort(), [
+      'apnsEnvironment',
+      'apnsKeyId',
+      'apnsPrivateKeyReference',
+      'apnsTeamId',
+      'apnsTopic',
+      'enabled',
+      'timeZoneDataManifestUrl',
+      'timeZoneDataTrustedKeysJson',
+    ]);
+    assert.equal(defaults.enabled, false);
+    for (const [name, value] of Object.entries(defaults)) {
+      if (name !== 'enabled') assert.equal(value, '', name);
+    }
+    assert.equal(
+      appSettings.REMINDER_DISPATCH_ENABLED,
+      "[if(parameters('reminderDispatchEnabled'), 'true', 'false')]",
+    );
+    assert.equal(
+      appSettings.APNS_PRIVATE_KEY,
+      "[parameters('apnsPrivateKeyReference')]",
     );
   });
 
