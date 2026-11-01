@@ -170,9 +170,8 @@ export interface ReminderDispatchLedgerStore {
   ) => AsyncIterable<readonly ReminderDispatchLedgerRecord[]>;
   /**
    * Deletes, in one pass, records last updated more than 30 days ago whose
-   * Change Event has passed. A row whose last update it cannot read is left
-   * in place, and counted in the result. One that merely has no readable
-   * Change Event goes by its age alone.
+   * Change Event has passed, or cannot be read. Returns how many rows it left
+   * because it could not date or key them.
    */
   readonly purgeExpired: (now: Date) => Promise<number>;
   /**
