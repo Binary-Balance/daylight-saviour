@@ -1075,6 +1075,42 @@ export function createTableReminderSubscriptionStore(
   };
 }
 
+// A count that is not there yet is an answer, not an error.
+async function findThrottle(
+  throttles: ThrottleTable,
+  subjectHash: string,
+  rowKey: string,
+) {
+  try {
+    return await throttles.get(subjectHash, rowKey);
+  } catch (error) {
+    if (statusCode(error) === 404) return null;
+    throw error;
+  }
+}
+
+// The first request in a window creates its count. False means another
+// request created it first, so the caller reads it again.
+async function startWindow(
+  throttles: ThrottleTable,
+  subjectHash: string,
+  rowKey: string,
+  expiresAt: Date,
+) {
+  try {
+    await throttles.create({
+      partitionKey: subjectHash,
+      rowKey,
+      count: 1,
+      expiresAt,
+    });
+    return true;
+  } catch (error) {
+    if (statusCode(error) !== 409) throw error;
+    return false;
+  }
+}
+
 async function takeThrottleAllowance(
   throttles: ThrottleTable,
   subjectHash: string,
@@ -1087,23 +1123,12 @@ async function takeThrottleAllowance(
   );
 
   for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-    let entity: ThrottleEntity;
-    try {
-      entity = await throttles.get(subjectHash, rowKey);
-    } catch (error) {
-      if (statusCode(error) !== 404) throw error;
-      try {
-        await throttles.create({
-          partitionKey: subjectHash,
-          rowKey,
-          count: 1,
-          expiresAt,
-        });
+    const entity = await findThrottle(throttles, subjectHash, rowKey);
+    if (entity === null) {
+      if (await startWindow(throttles, subjectHash, rowKey, expiresAt)) {
         return true;
-      } catch (createError) {
-        if (statusCode(createError) !== 409) throw createError;
-        continue;
       }
+      continue;
     }
 
     if (entity.count >= throttleLimit) return false;
