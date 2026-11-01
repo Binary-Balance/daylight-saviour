@@ -786,17 +786,10 @@ async function writeWithCredential<Result extends string>(
   write: (existing: SubscriptionEntity) => Promise<Result>,
 ) {
   for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-    let existing: SubscriptionEntity;
-    try {
-      existing = await subscriptions.get(
-        subscriptionPartitionKey,
-        installationId,
-      );
-    } catch (error) {
-      if (statusCode(error) === 404) return 'not-found' as const;
-      throw error;
+    const existing = await findSubscription(subscriptions, installationId);
+    if (existing === null || existing.state === 'retired') {
+      return 'not-found' as const;
     }
-    if (existing.state === 'retired') return 'not-found' as const;
     if (
       existing.credentialHash === undefined ||
       !equalOpaqueValues(existing.credentialHash, credentialHash)
