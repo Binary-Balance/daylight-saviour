@@ -2,7 +2,7 @@ import {
   timeZoneDataPackSchemaVersion,
   type TimeZoneDataPackSchemaVersion,
 } from './time-zone-data-pack-version.ts';
-import { fieldChecks } from './validation.ts';
+import * as field from './validation.ts';
 
 export interface TimeZoneState {
   readonly abbreviation: string;
@@ -53,7 +53,17 @@ function fail(path: string, problem: string): never {
   throw new TimeZoneDataPackValidationError(path, problem);
 }
 
-const { exactKeys, integerAt, objectAt, stringAt } = fieldChecks(fail);
+const objectAt = (value: unknown, path: string) =>
+  field.objectAt(value, path, fail);
+const exactKeys = (
+  object: field.JsonObject,
+  path: string,
+  expected: string[],
+) => field.exactKeys(object, path, expected, fail);
+const stringAt = (value: unknown, path: string) =>
+  field.stringAt(value, path, fail);
+const integerAt = (value: unknown, path: string) =>
+  field.integerAt(value, path, fail);
 
 function booleanAt(value: unknown, path: string): boolean {
   if (typeof value !== 'boolean') {

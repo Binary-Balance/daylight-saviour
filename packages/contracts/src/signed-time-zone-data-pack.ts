@@ -6,7 +6,7 @@ import {
   timeZoneDataPackSchemaVersion,
   type TimeZoneDataPackSchemaVersion,
 } from './time-zone-data-pack-version.ts';
-import { fieldChecks } from './validation.ts';
+import * as field from './validation.ts';
 
 export const signedTimeZoneDataPackManifestVersion = 1 as const;
 export const maximumTimeZoneDataPackBytes = 2 * 1024 * 1024;
@@ -42,12 +42,17 @@ function fail(path: string, problem: string): never {
   throw new SignedTimeZoneDataPackValidationError(path, problem);
 }
 
-const {
-  exactKeys,
-  integerAt: safeIntegerAt,
-  objectAt,
-  stringAt: nonEmptyStringAt,
-} = fieldChecks(fail);
+const objectAt = (value: unknown, path: string) =>
+  field.objectAt(value, path, fail);
+const exactKeys = (
+  object: field.JsonObject,
+  path: string,
+  expected: string[],
+) => field.exactKeys(object, path, expected, fail);
+const nonEmptyStringAt = (value: unknown, path: string) =>
+  field.stringAt(value, path, fail);
+const safeIntegerAt = (value: unknown, path: string) =>
+  field.integerAt(value, path, fail);
 
 const base64Digits =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
