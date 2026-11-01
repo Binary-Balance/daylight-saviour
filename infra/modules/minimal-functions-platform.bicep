@@ -77,6 +77,25 @@ type FcmSettings = {
   workloadIdentityProvider: string
 }
 
+@sealed()
+type ReminderDispatchSettings = {
+  enabled: bool
+
+  timeZoneDataManifestUrl: string
+
+  timeZoneDataTrustedKeysJson: string
+
+  apnsEnvironment: 'production' | 'sandbox'
+
+  apnsTopic: string
+
+  apnsTeamId: string
+
+  apnsKeyId: string
+
+  apnsPrivateKeyReference: string
+}
+
 @description('Azure region for every resource in this portable platform module.')
 @minLength(1)
 param location string = resourceGroup().location
@@ -114,6 +133,9 @@ param fcm FcmSettings = {
   serviceAccountEmail: ''
   workloadIdentityProvider: ''
 }
+
+@description('Optional caller-supplied Change Reminder dispatch settings. Dispatch stays suspended unless enabled is true. apnsPrivateKeyReference is a Key Vault reference, never the key.')
+param reminderDispatch ReminderDispatchSettings?
 
 @description('Build identifier returned by the notification-service health endpoint.')
 @minLength(1)
@@ -195,6 +217,7 @@ module compute './internal/compute.bicep' = {
     fcmProjectId: fcm.projectId
     fcmServiceAccountEmail: fcm.serviceAccountEmail
     fcmWorkloadIdentityProvider: fcm.workloadIdentityProvider
+    reminderDispatch: reminderDispatch
     instanceMemoryMB: scale.instanceMemoryMB
     keyVaultUri: vault.outputs.uri
     location: location
