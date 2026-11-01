@@ -705,6 +705,87 @@ function unsendableRecord(existing: ReminderDispatchLedgerRecord, now: Date) {
     : undefined;
 }
 
+// The statuses an outcome leaves in the record. After a failed write, finding
+// one of them shows that the write landed.
+const completedStatuses: Record<
+  ReminderDispatchCompletionOutcome['kind'],
+  readonly ReminderDispatchStatus[]
+> = {
+  accepted: ['accepted'],
+  'permanent-failure': ['permanent-failure'],
+  'transient-failure': ['transient-failure', 'expired'],
+  uncertain: ['uncertain'],
+};
+
+function completedStatus(
+  outcome: ReminderDispatchCompletionOutcome,
+  expiryReason: ReminderDispatchExpiryReason | undefined,
+): ReminderDispatchStatus {
+  if (outcome.kind !== 'transient-failure') return outcome.kind;
+  return expiryReason === undefined ? 'transient-failure' : 'expired';
+}
+
+/** A rejected token is queued for cleanup, with when it was invalidated. */
+function tokenCleanup(
+  outcome: ReminderDispatchCompletionOutcome,
+  invalidatedAt: Date | undefined,
+) {
+  if (outcome.kind !== 'permanent-failure' || !outcome.invalidToken) return {};
+  return {
+    cleanupStatus: 'pending' as const,
+    ...(invalidatedAt === undefined ? {} : { invalidatedAt }),
+  };
+}
+
+function completedRecord(
+  existing: ReminderDispatchLedgerRecord,
+  claim: ReminderDispatchClaim,
+  outcome: ReminderDispatchCompletionOutcome,
+  invalidatedAt: Date | undefined,
+  now: Date,
+): Omit<ReminderDispatchLedgerRecord, 'etag'> {
+  const expiryReason =
+    outcome.kind === 'transient-failure'
+      ? expiryReasonAt(existing, now.getTime())
+      : undefined;
+  const status = completedStatus(outcome, expiryReason);
+  return {
+    ...withoutClaim(existing),
+    ...(status === 'uncertain' ? { lastClaimId: claim.claimId } : {}),
+    ...tokenCleanup(outcome, invalidatedAt),
+    ...(expiryReason === undefined ? {} : { expiryReason }),
+    status,
+    updatedAt: now,
+  };
+}
+
+/**
+ * The record that completes `existing` with an outcome, or null when the
+ * claim has no say in it. A worker that was cut off may still learn what the
+ * provider said, so a definite answer settles the record that went uncertain
+ * under its own claim. Nothing else overwrites an uncertain record.
+ */
+function completionRecord(
+  existing: ReminderDispatchLedgerRecord,
+  claim: ReminderDispatchClaim,
+  outcome: ReminderDispatchCompletionOutcome,
+  invalidatedAt: Date | undefined,
+  now: Date,
+): Omit<ReminderDispatchLedgerRecord, 'etag'> | null {
+  if (holdsClaim(existing, claim)) {
+    return completedRecord(existing, claim, outcome, invalidatedAt, now);
+  }
+  const late =
+    existing.status === 'uncertain' && existing.lastClaimId === claim.claimId;
+  if (late && outcome.kind === 'accepted') {
+    return { ...withoutClaim(existing), status: 'accepted', updatedAt: now };
+  }
+  if (late && outcome.kind === 'permanent-failure') {
+    return completedRecord(existing, claim, outcome, invalidatedAt, now);
+  }
+  return null;
+}
+
 function isUnsettled(record: ReminderDispatchLedgerRecord, now: Date) {
   if (record.status === 'permanent-failure') {
     return (
@@ -1051,6 +1132,34 @@ export function createTableReminderDispatchLedgerStore(
     );
   }
 
+  /**
+   * Replaces `existing` and reads the record back. Undefined when another
+   * worker's write won, so the caller reads again. After any other failure
+   * the write may still have landed, which `landed` tells from the record.
+   */
+  async function replaceAndReconcile(
+    next: Omit<ReminderDispatchLedgerRecord, 'etag'>,
+    existing: ReminderDispatchLedgerRecord,
+    landed: (record: ReminderDispatchLedgerRecord) => boolean,
+  ) {
+    try {
+      await replace(next, existing.etag);
+      const updated = await get(existing);
+      if (updated !== null) {
+        return { kind: 'updated' as const, record: updated };
+      }
+    } catch (error) {
+      if (!conflict(error)) {
+        const reconciled = await get(existing);
+        if (reconciled !== null && landed(reconciled)) {
+          return { kind: 'updated' as const, record: reconciled };
+        }
+        throw error;
+      }
+    }
+    return undefined;
+  }
+
   async function complete(
     claim: ReminderDispatchClaim,
     outcome: ReminderDispatchCompletionOutcome,
@@ -1061,87 +1170,21 @@ export function createTableReminderDispatchLedgerStore(
       outcome.kind === 'permanent-failure'
         ? optionalDate(outcome.invalidatedAt, 'provider invalidation')
         : undefined;
+    const landed = (record: ReminderDispatchLedgerRecord) =>
+      completedStatuses[outcome.kind].includes(record.status);
     for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
       const existing = await get(claim);
       if (existing === null) return { kind: 'stale' };
-      const activeClaim =
-        existing.status === 'claimed' &&
-        existing.claimId === claim.claimId &&
-        existing.attemptGeneration === claim.attemptGeneration;
-      const lateAccepted =
-        outcome.kind === 'accepted' &&
-        existing.status === 'uncertain' &&
-        existing.lastClaimId === claim.claimId;
-      const latePermanentFailure =
-        outcome.kind === 'permanent-failure' &&
-        existing.status === 'uncertain' &&
-        existing.lastClaimId === claim.claimId;
-      if (!activeClaim && !lateAccepted && !latePermanentFailure) {
-        return { kind: 'stale', record: existing };
-      }
-
-      let next: Omit<ReminderDispatchLedgerRecord, 'etag'>;
-      if (lateAccepted) {
-        next = {
-          ...withoutClaim(existing),
-          status: 'accepted',
-          updatedAt: now,
-        };
-      } else {
-        const expiryReason =
-          outcome.kind === 'transient-failure'
-            ? expiryReasonAt(existing, now.getTime())
-            : undefined;
-        const status: ReminderDispatchStatus =
-          outcome.kind === 'accepted'
-            ? 'accepted'
-            : outcome.kind === 'uncertain'
-              ? 'uncertain'
-              : outcome.kind === 'permanent-failure'
-                ? 'permanent-failure'
-                : expiryReason === undefined
-                  ? 'transient-failure'
-                  : 'expired';
-        next = {
-          ...withoutClaim(existing),
-          ...(status === 'uncertain' ? { lastClaimId: claim.claimId } : {}),
-          ...(outcome.kind === 'permanent-failure' && outcome.invalidToken
-            ? { cleanupStatus: 'pending' as const }
-            : {}),
-          ...(outcome.kind === 'permanent-failure' &&
-          outcome.invalidToken &&
-          invalidatedAt !== undefined
-            ? { invalidatedAt }
-            : {}),
-          ...(expiryReason === undefined ? {} : { expiryReason }),
-          status,
-          updatedAt: now,
-        };
-      }
-      try {
-        await replace(next, existing.etag);
-        const updated = await get(claim);
-        if (updated !== null) return { kind: 'updated', record: updated };
-      } catch (error) {
-        if (!conflict(error)) {
-          const reconciled = await get(claim);
-          if (
-            reconciled !== null &&
-            ((outcome.kind === 'accepted' &&
-              reconciled.status === 'accepted') ||
-              (outcome.kind === 'uncertain' &&
-                reconciled.status === 'uncertain') ||
-              (outcome.kind === 'transient-failure' &&
-                (reconciled.status === 'transient-failure' ||
-                  reconciled.status === 'expired')) ||
-              (outcome.kind === 'permanent-failure' &&
-                reconciled.status === 'permanent-failure'))
-          ) {
-            return { kind: 'updated', record: reconciled };
-          }
-          throw error;
-        }
-      }
+      const next = completionRecord(
+        existing,
+        claim,
+        outcome,
+        invalidatedAt,
+        now,
+      );
+      if (next === null) return stale(existing);
+      const completed = await replaceAndReconcile(next, existing, landed);
+      if (completed !== undefined) return completed;
     }
     throw new Error(
       'Reminder dispatch completion contention exceeded retry limit',
