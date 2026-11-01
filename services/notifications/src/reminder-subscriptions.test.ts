@@ -1275,39 +1275,45 @@ describe('Azure Table mapping', () => {
     );
   });
 
-  it('fails before credential or Table client construction without an explicit UAMI', () => {
-    for (const managedIdentityClientId of [undefined, '', '   ']) {
-      let credentialConstructions = 0;
-      let tableClientConstructions = 0;
-      assert.throws(
-        () =>
-          createAzureReminderSubscriptionStore(
-            {
-              REMINDER_MANAGED_IDENTITY_CLIENT_ID: managedIdentityClientId,
-              REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
-            },
-            {
-              createCredential: () => {
-                credentialConstructions += 1;
-                return {
-                  getToken: async () => ({
-                    expiresOnTimestamp: 0,
-                    token: 'test-token',
-                  }),
-                };
+  for (const setting of [
+    'REMINDER_MANAGED_IDENTITY_CLIENT_ID',
+    'REMINDER_STORAGE_ACCOUNT_NAME',
+  ] as const) {
+    it(`fails before credential or Table client construction without ${setting}`, () => {
+      for (const value of [undefined, '', '   ']) {
+        let credentialConstructions = 0;
+        let tableClientConstructions = 0;
+        assert.throws(
+          () =>
+            createAzureReminderSubscriptionStore(
+              {
+                REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+                REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+                [setting]: value,
               },
-              createTableClient: () => {
-                tableClientConstructions += 1;
-                return {} as never;
+              {
+                createCredential: () => {
+                  credentialConstructions += 1;
+                  return {
+                    getToken: async () => ({
+                      expiresOnTimestamp: 0,
+                      token: 'test-token',
+                    }),
+                  };
+                },
+                createTableClient: () => {
+                  tableClientConstructions += 1;
+                  return {} as never;
+                },
               },
-            },
-          ),
-        /REMINDER_MANAGED_IDENTITY_CLIENT_ID is required/,
-      );
-      assert.equal(credentialConstructions, 0);
-      assert.equal(tableClientConstructions, 0);
-    }
-  });
+            ),
+          new RegExp(`${setting} is required`),
+        );
+        assert.equal(credentialConstructions, 0);
+        assert.equal(tableClientConstructions, 0);
+      }
+    });
+  }
 
   it('queries retired markers only after the 30-day operational retention window', async () => {
     let retiredFilter = '';
@@ -1657,6 +1663,11 @@ describe('Azure Table mapping', () => {
       'both timings disabled',
       { ...validSnapshotEntity, oneDayEnabled: false, oneWeekEnabled: false },
     ],
+    [
+      'a retired marker that kept its token',
+      { ...validSnapshotEntity, state: 'retired' as const },
+    ],
+    ['no token', { ...validSnapshotEntity, deviceToken: undefined }],
   ] as const) {
     it(`rejects a snapshot with ${name}`, async () => {
       const tableStore = createTableReminderSubscriptionStore(
@@ -1686,6 +1697,47 @@ describe('Azure Table mapping', () => {
       /Azure 500/,
     );
   });
+
+  it('preserves a non-404 snapshot read failure', async () => {
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable({
+        get: async () => {
+          throw azureError(500);
+        },
+      }),
+      unusedThrottleTable(),
+    );
+
+    await assert.rejects(
+      () => tableStore.getSubscriptionSnapshot('installation-id'),
+      /Azure 500/,
+    );
+  });
+
+  // Only an object with a numeric statusCode can be an Azure status. Any other
+  // rejection is passed on as it came, not mistaken for a missing row.
+  for (const [name, rejection] of [
+    ['null', null],
+    ['a string', 'unavailable'],
+    ['a number', 404],
+    ['an object whose status is a string', { statusCode: '404' }],
+  ] as const) {
+    it(`preserves a read failure that is ${name}`, async () => {
+      const tableStore = createTableReminderSubscriptionStore(
+        subscriptionTable({
+          get: async () => {
+            throw rejection;
+          },
+        }),
+        unusedThrottleTable(),
+      );
+
+      await assert.rejects(
+        () => tableStore.getSubscription('installation-id'),
+        (error) => error === rejection,
+      );
+    });
+  }
 
   it('uses Azure registeredAt to preserve a newer APNs registration', async () => {
     const deletions: {
@@ -1793,6 +1845,82 @@ describe('Azure Table mapping', () => {
         { etag: 'matching-etag' },
       ],
     ]);
+  });
+
+  describe('reading a stored subscription', () => {
+    function azureStoreReading(row: unknown) {
+      return createAzureReminderSubscriptionStore(
+        {
+          REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+          REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+        },
+        {
+          createCredential: () => ({
+            getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+          }),
+          createTableClient: (_endpoint, tableName) =>
+            tableName === 'ReminderSubscriptions'
+              ? ({ getEntity: async () => row } as never)
+              : ({} as never),
+        },
+      );
+    }
+    const stored = {
+      attemptGeneration: 1,
+      deviceToken: validRegistration.deviceToken,
+      etag: 'etag',
+    };
+
+    for (const [name, row, expected] of [
+      [
+        'an Android row',
+        { ...stored, platform: 'android' },
+        {
+          deviceToken: validRegistration.deviceToken,
+          installationId: 'installation-id',
+          platform: 'android',
+        },
+      ],
+      [
+        'an iOS row',
+        { ...stored, platform: 'ios' },
+        {
+          deviceToken: validRegistration.deviceToken,
+          installationId: 'installation-id',
+          platform: 'ios',
+        },
+      ],
+      ['a row with an unknown platform', { ...stored, platform: 'web' }, null],
+      ['a row with no platform', stored, null],
+      [
+        'a retired marker',
+        {
+          attemptGeneration: 1,
+          etag: 'etag',
+          retiredAt: new Date('2026-08-01T00:00:00.000Z'),
+          state: 'retired',
+        },
+        null,
+      ],
+    ] as const) {
+      it(`reads ${name}`, async () => {
+        assert.deepEqual(
+          await azureStoreReading(row).getSubscription('installation-id'),
+          expected,
+        );
+      });
+    }
+
+    it('rejects a row that is neither a marker nor holds a token', async () => {
+      await assert.rejects(
+        () =>
+          azureStoreReading({
+            attemptGeneration: 1,
+            etag: 'etag',
+          }).getSubscription('installation-id'),
+        /Stored subscription record is invalid/,
+      );
+    });
   });
 });
 
@@ -3053,6 +3181,472 @@ describe('generation-ordered subscription persistence', () => {
     );
     assert.equal(deleteAttempts, 12);
     assert.equal(onlyRow(subscriptions.rows).deviceToken, current.deviceToken);
+  });
+
+  describe('writes that race with another writer', () => {
+    type Store = ReturnType<typeof createTableReminderSubscriptionStore>;
+    type Current = ReturnType<typeof record>;
+
+    async function storeWithSubscription() {
+      const subscriptions = concurrentSubscriptionTable();
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptions,
+        unusedThrottleTable(),
+      );
+      const current = record(1, 'credential-current');
+      await registrationStore.createSubscription(
+        current,
+        validRegistration.registrationRequestId,
+      );
+      return { current, registrationStore, subscriptions };
+    }
+
+    // Each rewrites the stored subscription it reads. `vanished` is the
+    // answer when another writer deletes the row before the write lands; an
+    // operation without one fails with the table's 404.
+    const rewrites: readonly {
+      readonly name: string;
+      readonly run: (store: Store, current: Current) => Promise<string>;
+      readonly done: string;
+      readonly vanished?: string;
+    }[] = [
+      {
+        name: 'registration replay',
+        run: (registrationStore, current) =>
+          registrationStore.createSubscription(
+            { ...current, attemptGeneration: 2 },
+            validRegistration.registrationRequestId,
+          ),
+        done: 'accepted',
+      },
+      {
+        name: 'update',
+        run: (registrationStore) =>
+          updateSubscription(
+            registrationStore,
+            record(2, 'credential-current'),
+            'credential-current',
+          ),
+        done: 'accepted',
+      },
+      {
+        name: 'check-in',
+        run: (registrationStore, current) =>
+          registrationStore.checkInSubscription(
+            current.installationId,
+            'credential-current',
+            new Date('2026-09-01T00:00:00.000Z'),
+          ),
+        done: 'accepted',
+      },
+      {
+        name: 'deletion',
+        run: (registrationStore, current) =>
+          registrationStore.deleteSubscription(
+            current.installationId,
+            'credential-current',
+          ),
+        done: 'deleted',
+        vanished: 'not-found',
+      },
+      {
+        name: 'removal',
+        run: (registrationStore, current) =>
+          registrationStore.removeIfDeviceTokenMatches({
+            deviceToken: current.deviceToken,
+            installationId: current.installationId,
+          }),
+        done: 'removed',
+        vanished: 'not-found',
+      },
+    ];
+
+    for (const { name, run, done, vanished } of rewrites) {
+      // 409 and 412 mean another writer got there first: read the row again.
+      for (const status of [409, 412]) {
+        it(`retries ${name} after a ${status}`, async () => {
+          const { current, registrationStore, subscriptions } =
+            await storeWithSubscription();
+          let writes = 0;
+          subscriptions.setBeforeReplace(async () => {
+            writes += 1;
+            if (writes === 1) throw azureError(status);
+          });
+
+          assert.equal(await run(registrationStore, current), done);
+          assert.equal(writes, 2);
+        });
+      }
+
+      it(`passes on a failure during ${name} that is not a conflict`, async () => {
+        const { current, registrationStore, subscriptions } =
+          await storeWithSubscription();
+        const before = { ...onlyRow(subscriptions.rows) };
+        const failure = azureError(500);
+        let writes = 0;
+        subscriptions.setBeforeReplace(async () => {
+          writes += 1;
+          throw failure;
+        });
+
+        await assert.rejects(
+          () => run(registrationStore, current),
+          (error) => error === failure,
+        );
+        assert.equal(writes, 1);
+        assert.deepEqual(onlyRow(subscriptions.rows), before);
+      });
+
+      const onVanished =
+        vanished === undefined ? 'fails with the 404' : `reports ${vanished}`;
+      it(`${onVanished} on ${name} when the row was deleted meanwhile`, async () => {
+        const { current, registrationStore, subscriptions } =
+          await storeWithSubscription();
+        let writes = 0;
+        subscriptions.setBeforeReplace(async () => {
+          writes += 1;
+          subscriptions.rows.clear();
+        });
+
+        if (vanished === undefined) {
+          await assert.rejects(
+            () => run(registrationStore, current),
+            /Azure 404/,
+          );
+        } else {
+          assert.equal(await run(registrationStore, current), vanished);
+        }
+        assert.equal(writes, 1);
+        assert.equal(subscriptions.rows.size, 0);
+      });
+    }
+
+    // A conflict that never clears must end in an error, not a hang.
+    it('gives up replacing a registered row after twelve attempts', async () => {
+      const { current, registrationStore, subscriptions } =
+        await storeWithSubscription();
+      let writes = 0;
+      subscriptions.setBeforeReplace(async () => {
+        writes += 1;
+        if (writes > 20) throw new Error('retried without a bound');
+        throw azureError(412);
+      });
+
+      await assert.rejects(
+        () =>
+          registrationStore.createSubscription(
+            { ...current, attemptGeneration: 2 },
+            validRegistration.registrationRequestId,
+          ),
+        /Subscription creation contention exceeded retry limit/,
+      );
+      assert.equal(writes, 12);
+    });
+
+    it('gives up creating a row after twelve attempts', async () => {
+      const subscriptions = concurrentSubscriptionTable();
+      let reads = 0;
+      const registrationStore = createTableReminderSubscriptionStore(
+        {
+          ...subscriptions,
+          create: async () => {
+            throw azureError(409);
+          },
+          get: async (partitionKey, rowKey) => {
+            reads += 1;
+            if (reads > 20) throw new Error('retried without a bound');
+            return subscriptions.get(partitionKey, rowKey);
+          },
+        },
+        unusedThrottleTable(),
+      );
+
+      await assert.rejects(
+        () =>
+          registrationStore.createSubscription(
+            record(1),
+            validRegistration.registrationRequestId,
+          ),
+        /Subscription creation contention exceeded retry limit/,
+      );
+      assert.equal(reads, 12);
+    });
+
+    it('gives up deleting after twelve attempts', async () => {
+      const { current, registrationStore, subscriptions } =
+        await storeWithSubscription();
+      let writes = 0;
+      subscriptions.setBeforeReplace(async () => {
+        writes += 1;
+        if (writes > 20) throw new Error('retried without a bound');
+        throw azureError(412);
+      });
+
+      await assert.rejects(
+        () =>
+          registrationStore.deleteSubscription(
+            current.installationId,
+            'credential-current',
+          ),
+        /Subscription deletion contention exceeded retry limit/,
+      );
+      assert.equal(writes, 12);
+    });
+
+    it('accepts one of two registrations that race to create the row', async () => {
+      const subscriptions = concurrentSubscriptionTable();
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptions,
+        unusedThrottleTable(),
+      );
+
+      const results = await Promise.all([
+        registrationStore.createSubscription(
+          record(1, 'credential-left'),
+          validRegistration.registrationRequestId,
+        ),
+        registrationStore.createSubscription(
+          record(1, 'credential-right'),
+          validRegistration.registrationRequestId,
+        ),
+      ]);
+
+      assert.deepEqual(results.sort(), ['accepted', 'stale']);
+      assert.match(
+        String(onlyRow(subscriptions.rows).credentialHash),
+        /^credential-(left|right)$/,
+      );
+    });
+
+    it('passes on a failure to create the row without retrying', async () => {
+      const failure = azureError(500);
+      let creations = 0;
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptionTable({
+          create: async () => {
+            creations += 1;
+            throw failure;
+          },
+        }),
+        unusedThrottleTable(),
+      );
+
+      await assert.rejects(
+        () =>
+          registrationStore.createSubscription(
+            record(1),
+            validRegistration.registrationRequestId,
+          ),
+        (error) => error === failure,
+      );
+      assert.equal(creations, 1);
+    });
+
+    it('passes on a failure to read the row it would replace', async () => {
+      const failure = azureError(500);
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptionTable({
+          get: async () => {
+            throw failure;
+          },
+        }),
+        unusedThrottleTable(),
+      );
+
+      await assert.rejects(
+        () =>
+          registrationStore.createSubscription(
+            record(1),
+            validRegistration.registrationRequestId,
+          ),
+        (error) => error === failure,
+      );
+    });
+
+    it('refuses a registration of the generation already stored and leaves the row alone', async () => {
+      const { current, registrationStore, subscriptions } =
+        await storeWithSubscription();
+      const before = { ...onlyRow(subscriptions.rows) };
+
+      assert.equal(
+        await registrationStore.createSubscription(
+          { ...current, credentialHash: 'credential-replay' },
+          validRegistration.registrationRequestId,
+        ),
+        'stale',
+      );
+      assert.deepEqual(onlyRow(subscriptions.rows), before);
+    });
+  });
+
+  describe('deleting a subscription', () => {
+    it('reports an absent installation as not found, creating nothing', async () => {
+      const subscriptions = concurrentSubscriptionTable();
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptions,
+        unusedThrottleTable(),
+      );
+
+      assert.equal(
+        await registrationStore.deleteSubscription(
+          record(1).installationId,
+          'credential-1',
+        ),
+        'not-found',
+      );
+      assert.equal(subscriptions.rows.size, 0);
+    });
+
+    it('passes on a failure to read the row', async () => {
+      const failure = azureError(500);
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptionTable({
+          get: async () => {
+            throw failure;
+          },
+        }),
+        unusedThrottleTable(),
+      );
+
+      await assert.rejects(
+        () =>
+          registrationStore.deleteSubscription(
+            record(1).installationId,
+            'credential-1',
+          ),
+        (error) => error === failure,
+      );
+    });
+
+    it('reports a retired installation as not found, leaving its marker alone', async () => {
+      const subscriptions = concurrentSubscriptionTable();
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptions,
+        unusedThrottleTable(),
+      );
+      const current = record(1, 'credential-current');
+      await registrationStore.createSubscription(
+        current,
+        validRegistration.registrationRequestId,
+      );
+      await registrationStore.deleteSubscription(
+        current.installationId,
+        'credential-current',
+      );
+      const marker = { ...onlyRow(subscriptions.rows) };
+
+      assert.equal(
+        await registrationStore.deleteSubscription(
+          current.installationId,
+          'credential-current',
+        ),
+        'not-found',
+      );
+      assert.deepEqual(onlyRow(subscriptions.rows), marker);
+    });
+
+    it('refuses a row that has no credential, leaving it alone', async () => {
+      const subscriptions = concurrentSubscriptionTable();
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptions,
+        unusedThrottleTable(),
+      );
+      const { credentialHash: _absent, ...legacy } = record(1);
+      await subscriptions.create({
+        ...legacy,
+        partitionKey: 'subscriptions-v1',
+        rowKey: legacy.installationId,
+      });
+      const before = { ...onlyRow(subscriptions.rows) };
+
+      assert.equal(
+        await registrationStore.deleteSubscription(
+          legacy.installationId,
+          'credential-1',
+        ),
+        'unauthorized',
+      );
+      assert.deepEqual(onlyRow(subscriptions.rows), before);
+    });
+  });
+
+  describe('removing a subscription after a provider rejects its token', () => {
+    const registeredAt = new Date('2026-07-24T05:00:01.000Z');
+    const stored = {
+      attemptGeneration: 1,
+      deviceToken: validRegistration.deviceToken,
+      etag: 'etag',
+      partitionKey: 'subscriptions-v1',
+      rowKey: 'installation-id',
+    };
+    const { deviceToken: _absent, ...tokenless } = stored;
+
+    for (const [name, row, invalidatedAt, outcome] of [
+      [
+        'a marker that kept its token',
+        { ...stored, state: 'retired' as const },
+        undefined,
+        'not-found',
+      ],
+      ['a row with no token', tokenless, undefined, 'not-found'],
+      [
+        'a registration made at the instant of the invalidation',
+        { ...stored, registeredAt },
+        registeredAt,
+        'removed',
+      ],
+      [
+        'an invalidation with no usable time',
+        { ...stored, registeredAt },
+        new Date('invalid'),
+        'token-replaced',
+      ],
+    ] as const) {
+      it(`reports ${name} as ${outcome}`, async () => {
+        const writes: unknown[][] = [];
+        const registrationStore = createTableReminderSubscriptionStore(
+          subscriptionTable({
+            get: async () => row,
+            replace: async (...args) => {
+              writes.push(args);
+            },
+          }),
+          unusedThrottleTable(),
+        );
+
+        assert.equal(
+          await registrationStore.removeIfDeviceTokenMatches(
+            {
+              deviceToken: validRegistration.deviceToken,
+              installationId: 'installation-id',
+            },
+            invalidatedAt,
+          ),
+          outcome,
+        );
+
+        if (outcome !== 'removed') {
+          assert.deepEqual(writes, []);
+          return;
+        }
+        assert.equal(writes.length, 1);
+        const [marker, etag] = writes[0] as [Record<string, unknown>, string];
+        // The marker keeps only the keys and generation, and says when the
+        // subscription was removed.
+        assert.ok(marker.retiredAt instanceof Date);
+        assert.deepEqual(
+          { ...marker, retiredAt: undefined },
+          {
+            attemptGeneration: 1,
+            partitionKey: 'subscriptions-v1',
+            retiredAt: undefined,
+            rowKey: 'installation-id',
+            state: 'retired',
+          },
+        );
+        assert.equal(etag, 'etag');
+      });
+    }
   });
 });
 
