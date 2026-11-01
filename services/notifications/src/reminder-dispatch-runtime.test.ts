@@ -186,6 +186,9 @@ function harness(
           yield zone.slice(start, start + pageSize) as never;
         }
       },
+      merge: async () => {
+        // Dispatch never checks in.
+      },
       async replace(entity, expectedEtag) {
         if (state.failRemoval) throw azureError(503);
         const row = subscriptions.get(String(entity.rowKey));

@@ -45,6 +45,7 @@ interface ReminderSubscriptionRecord extends Omit<
 > {
   readonly credentialHash: string;
   readonly installationId: string;
+  readonly lastContactAt: Date;
   readonly registeredAt: Date;
 }
 
@@ -79,6 +80,11 @@ interface SubscriptionTable {
   readonly listZonePages: (
     homeTimeZone: string,
   ) => AsyncIterable<readonly SubscriptionEntity[]>;
+  /** Writes only the entity's columns; the row keeps the rest. */
+  readonly merge: (
+    entity: Record<string, unknown>,
+    etag: string,
+  ) => Promise<void>;
   readonly replace: (
     entity: Record<string, unknown>,
     etag: string,
@@ -165,6 +171,12 @@ export interface ReminderSubscriptionStore {
     record: Omit<ReminderSubscriptionRecord, 'credentialHash'>,
     credentialHash: string,
   ) => Promise<'accepted' | 'not-found' | 'stale' | 'unauthorized'>;
+  /** Sets last contact and changes nothing else on the subscription. */
+  readonly checkInSubscription: (
+    installationId: string,
+    credentialHash: string,
+    contactAt: Date,
+  ) => Promise<'accepted' | 'not-found' | 'unauthorized'>;
   readonly deleteSubscription: (
     installationId: string,
     credentialHash: string,
@@ -441,6 +453,7 @@ export async function registerReminderSubscription(
         deviceToken: registration.deviceToken,
         homeTimeZone: registration.homeTimeZone,
         installationId,
+        lastContactAt: now,
         oneDayEnabled: registration.oneDayEnabled,
         oneWeekEnabled: registration.oneWeekEnabled,
         platform: registration.platform,
@@ -470,6 +483,23 @@ export async function registerReminderSubscription(
   }
 }
 
+// Installation-scoped requests share one source and one installation
+// allowance. The source goes first, so a refused source does not use up the
+// installation's allowance. Returns the response to send when refused.
+async function throttleInstallationRequest(
+  request: HttpRequest,
+  store: ReminderSubscriptionStore,
+  installationId: string,
+  now: Date,
+) {
+  const allowed =
+    (await store.takeSourceAllowance(sourceAddressHash(request), now)) &&
+    (await store.takeInstallationAllowance(installationId, now));
+  return allowed
+    ? null
+    : response(429, 'Try again later', Math.ceil(throttleWindowMs / 1000));
+}
+
 export async function updateReminderSubscription(
   request: HttpRequest,
   store: ReminderSubscriptionStore,
@@ -481,26 +511,19 @@ export async function updateReminderSubscription(
     const target = readInstallationId(installationId);
     if (credential === null || target === null)
       return response(401, 'Unauthorized');
-    const sourceHash = sourceAddressHash(request);
-    if (!(await store.takeSourceAllowance(sourceHash, now))) {
-      return response(
-        429,
-        'Try again later',
-        Math.ceil(throttleWindowMs / 1000),
-      );
-    }
-    if (!(await store.takeInstallationAllowance(target, now))) {
-      return response(
-        429,
-        'Try again later',
-        Math.ceil(throttleWindowMs / 1000),
-      );
-    }
+    const throttled = await throttleInstallationRequest(
+      request,
+      store,
+      target,
+      now,
+    );
+    if (throttled !== null) return throttled;
     const update = await readUpdate(request);
     const result = await store.updateSubscription(
       {
         ...update,
         installationId: target,
+        lastContactAt: now,
         registeredAt: now,
       },
       hashOpaqueValue(credential),
@@ -530,27 +553,52 @@ export async function deleteReminderSubscription(
     if (credential === null || target === null)
       return response(401, 'Unauthorized');
     await readDeletion(request);
-    const sourceHash = sourceAddressHash(request);
-    if (!(await store.takeSourceAllowance(sourceHash, now))) {
-      return response(
-        429,
-        'Try again later',
-        Math.ceil(throttleWindowMs / 1000),
-      );
-    }
-    if (!(await store.takeInstallationAllowance(target, now))) {
-      return response(
-        429,
-        'Try again later',
-        Math.ceil(throttleWindowMs / 1000),
-      );
-    }
+    const throttled = await throttleInstallationRequest(
+      request,
+      store,
+      target,
+      now,
+    );
+    if (throttled !== null) return throttled;
     await store.deleteSubscription(target, hashOpaqueValue(credential), now);
     return { status: 204, headers: { 'Cache-Control': 'no-store' } };
   } catch (error) {
     if (error instanceof ReminderSubscriptionRequestError) {
       return response(error.status, error.message);
     }
+    return response(503, 'Registration unavailable');
+  }
+}
+
+export async function checkInReminderSubscription(
+  request: HttpRequest,
+  store: ReminderSubscriptionStore,
+  installationId: string | undefined,
+  now = new Date(),
+): Promise<HttpResponseInit> {
+  try {
+    const credential = readBearerCredential(request);
+    const target = readInstallationId(installationId);
+    if (credential === null || target === null)
+      return response(401, 'Unauthorized');
+    const throttled = await throttleInstallationRequest(
+      request,
+      store,
+      target,
+      now,
+    );
+    if (throttled !== null) return throttled;
+    // The body is never read: a check-in carries no fields to validate.
+    const result = await store.checkInSubscription(
+      target,
+      hashOpaqueValue(credential),
+      now,
+    );
+    if (result === 'not-found')
+      return response(404, 'Registration unavailable');
+    if (result === 'unauthorized') return response(401, 'Unauthorized');
+    return { status: 204, headers: { 'Cache-Control': 'no-store' } };
+  } catch {
     return response(503, 'Registration unavailable');
   }
 }
@@ -694,6 +742,42 @@ async function removeStoredSubscription(
   throw new Error('Subscription removal contention exceeded retry limit');
 }
 
+// Updates and check-ins authenticate the same way. A retired marker keeps no
+// credential hash, so no credential matches it. A write that loses a race to
+// another writer reads the row again and tries again.
+async function writeWithCredential<Result extends string>(
+  subscriptions: SubscriptionTable,
+  installationId: string,
+  credentialHash: string,
+  write: (existing: SubscriptionEntity) => Promise<Result>,
+) {
+  for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
+    let existing: SubscriptionEntity;
+    try {
+      existing = await subscriptions.get(
+        subscriptionPartitionKey,
+        installationId,
+      );
+    } catch (error) {
+      if (statusCode(error) === 404) return 'not-found' as const;
+      throw error;
+    }
+    if (
+      existing.credentialHash === undefined ||
+      !equalOpaqueValues(existing.credentialHash, credentialHash)
+    ) {
+      return 'unauthorized' as const;
+    }
+    try {
+      return await write(existing);
+    } catch (error) {
+      const writeStatus = statusCode(error);
+      if (writeStatus !== 409 && writeStatus !== 412) throw error;
+    }
+  }
+  throw new Error('Subscription update contention exceeded retry limit');
+}
+
 export function createTableReminderSubscriptionStore(
   subscriptions: SubscriptionTable,
   throttles: ThrottleTable,
@@ -761,6 +845,7 @@ export function createTableReminderSubscriptionStore(
         credentialHash: record.credentialHash,
         deviceToken: record.deviceToken,
         homeTimeZone: record.homeTimeZone,
+        lastContactAt: record.lastContactAt,
         oneDayEnabled: record.oneDayEnabled,
         oneWeekEnabled: record.oneWeekEnabled,
         platform: record.platform,
@@ -810,27 +895,14 @@ export function createTableReminderSubscriptionStore(
       }
       throw new Error('Subscription creation contention exceeded retry limit');
     },
-    async updateSubscription(record, credentialHash) {
-      for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-        let existing: SubscriptionEntity;
-        try {
-          existing = await subscriptions.get(
-            subscriptionPartitionKey,
-            record.installationId,
-          );
-        } catch (error) {
-          if (statusCode(error) === 404) return 'not-found';
-          throw error;
-        }
-        if (
-          existing.credentialHash === undefined ||
-          !equalOpaqueValues(existing.credentialHash, credentialHash)
-        ) {
-          return 'unauthorized';
-        }
-        if (existing.attemptGeneration >= record.attemptGeneration)
-          return 'stale';
-        try {
+    updateSubscription(record, credentialHash) {
+      return writeWithCredential(
+        subscriptions,
+        record.installationId,
+        credentialHash,
+        async (existing) => {
+          if (existing.attemptGeneration >= record.attemptGeneration)
+            return 'stale' as const;
           await subscriptions.replace(
             {
               partitionKey: subscriptionPartitionKey,
@@ -840,13 +912,29 @@ export function createTableReminderSubscriptionStore(
             },
             existing.etag,
           );
-          return 'accepted';
-        } catch (error) {
-          const updateStatus = statusCode(error);
-          if (updateStatus !== 409 && updateStatus !== 412) throw error;
-        }
-      }
-      throw new Error('Subscription update contention exceeded retry limit');
+          return 'accepted' as const;
+        },
+      );
+    },
+    checkInSubscription(installationId, credentialHash, contactAt) {
+      return writeWithCredential(
+        subscriptions,
+        installationId,
+        credentialHash,
+        async (existing) => {
+          // A merge, so a row from before last contact existed, or with
+          // columns this code does not model, is not disturbed.
+          await subscriptions.merge(
+            {
+              partitionKey: subscriptionPartitionKey,
+              rowKey: installationId,
+              lastContactAt: contactAt,
+            },
+            existing.etag,
+          );
+          return 'accepted' as const;
+        },
+      );
     },
     async deleteSubscription(
       installationId,
@@ -1123,6 +1211,9 @@ export function createAzureReminderSubscriptionStore(
           );
         }
       },
+      merge: async (entity, etag) => {
+        await subscriptions.updateEntity(entity as never, 'Merge', { etag });
+      },
       replace: async (entity, etag) => {
         await subscriptions.updateEntity(entity as never, 'Replace', { etag });
       },
@@ -1199,6 +1290,22 @@ export function createReminderSubscriptionDeleteHandler(
   };
 }
 
+export function createReminderSubscriptionCheckInHandler(
+  createStore: () => ReminderSubscriptionStore = createAzureReminderSubscriptionStore,
+) {
+  return async (request: HttpRequest): Promise<HttpResponseInit> => {
+    try {
+      return await checkInReminderSubscription(
+        request,
+        createStore(),
+        request.params.installationId,
+      );
+    } catch {
+      return response(503, 'Registration unavailable');
+    }
+  };
+}
+
 export const reminderSubscriptionOptions: HttpFunctionOptions = {
   authLevel: 'anonymous' as const,
   handler: createReminderSubscriptionHandler(),
@@ -1218,4 +1325,11 @@ export const reminderSubscriptionDeleteOptions: HttpFunctionOptions = {
   handler: createReminderSubscriptionDeleteHandler(),
   methods: ['DELETE'],
   route: 'reminder-subscriptions/{installationId}',
+};
+
+export const reminderSubscriptionCheckInOptions: HttpFunctionOptions = {
+  authLevel: 'anonymous' as const,
+  handler: createReminderSubscriptionCheckInHandler(),
+  methods: ['POST'],
+  route: 'reminder-subscriptions/{installationId}/check-in',
 };

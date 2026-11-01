@@ -6,6 +6,7 @@ import { createAzureReminderDispatchLedgerStore } from './reminder-dispatch-ledg
 import { reminderDispatchTimerOptions } from './reminder-dispatch-timer.ts';
 import {
   createAzureReminderSubscriptionStore,
+  reminderSubscriptionCheckInOptions,
   reminderSubscriptionDeleteOptions,
   reminderSubscriptionOptions,
   reminderSubscriptionUpdateOptions,
@@ -16,6 +17,7 @@ app.http('controlled-reminder-smoke', controlledReminderSmokeOptions);
 app.http('reminder-subscriptions', reminderSubscriptionOptions);
 app.http('reminder-subscription-update', reminderSubscriptionUpdateOptions);
 app.http('reminder-subscription-delete', reminderSubscriptionDeleteOptions);
+app.http('reminder-subscription-check-in', reminderSubscriptionCheckInOptions);
 app.timer('reminder-dispatch', reminderDispatchTimerOptions);
 // The name predates ledger retention; renaming would replace the deployed
 // function and its monitoring history.
