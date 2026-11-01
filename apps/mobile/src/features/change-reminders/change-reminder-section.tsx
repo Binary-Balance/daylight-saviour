@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import {
+  AccessibilityInfo,
   AppState,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -15,6 +23,32 @@ import type {
   ChangeReminderPreferences,
 } from './change-reminder-adapters';
 import { createChangeReminderSession } from './change-reminder-session';
+
+// Announces registration starting and finishing, once each. Live regions do
+// not suit this: iOS ignores them, and on Android the enabled text would be read
+// on every launch and return to the app, because the card restores itself.
+function useRegistrationAnnouncements(
+  kind: string,
+  outcome: string | undefined,
+  outcomeReadByRegion: boolean,
+) {
+  const previousKind = useRef(kind);
+  useEffect(() => {
+    const wasRegistering = previousKind.current === 'saving';
+    previousKind.current = kind;
+    if (kind === 'saving') {
+      AccessibilityInfo.announceForAccessibility(
+        copy.changeReminders.saving.body,
+      );
+    } else if (
+      wasRegistering &&
+      outcome !== undefined &&
+      !outcomeReadByRegion
+    ) {
+      AccessibilityInfo.announceForAccessibility(outcome);
+    }
+  }, [kind, outcome, outcomeReadByRegion]);
+}
 
 function TimingControls({
   preferences,
@@ -183,6 +217,11 @@ export default function ChangeReminderSection({
           : snapshot.kind === 'saving-zone'
             ? copy.changeReminders.savingZone
             : copy.changeReminders.savingPreferences;
+  useRegistrationAnnouncements(
+    snapshot.kind,
+    content?.body,
+    errorState && Platform.OS === 'android',
+  );
 
   return (
     <View style={[styles.card, { borderColor: palette.rule }]}>
@@ -201,16 +240,12 @@ export default function ChangeReminderSection({
           ) : null}
           {/*
             Text, not a spinner: nothing in this design loops, so reduced
-            motion keeps the same meaning. Registration is announced once,
-            as its pressed button disappears; the text is fixed while busy,
-            so it never repeats. The label keeps Android from reading only
-            "busy".
+            motion keeps the same meaning. The label keeps Android from
+            reading only "busy".
           */}
           <Text
             accessibilityLabel={pendingText}
-            accessibilityLiveRegion={
-              snapshot.kind === 'saving' ? 'polite' : 'none'
-            }
+            accessibilityLiveRegion="none"
             accessibilityState={{ busy: true }}
             style={[styles.body, { color: palette.ink }]}
           >
@@ -225,13 +260,7 @@ export default function ChangeReminderSection({
             </Text>
           ) : null}
           <Text
-            accessibilityLiveRegion={
-              errorState
-                ? 'assertive'
-                : snapshot.kind === 'enabled'
-                  ? 'polite'
-                  : 'none'
-            }
+            accessibilityLiveRegion={errorState ? 'assertive' : 'none'}
             accessibilityRole={errorState ? 'alert' : undefined}
             style={[styles.body, { color: palette.ink }]}
           >

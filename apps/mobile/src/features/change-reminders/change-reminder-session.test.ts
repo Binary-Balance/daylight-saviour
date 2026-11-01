@@ -132,6 +132,36 @@ describe('Change Reminder session', () => {
     stop();
   });
 
+  it('ignores an enable that finishes after the session stops', async () => {
+    let finish!: (result: ChangeReminderEnableResult) => void;
+    const boundary = adapters({
+      enable: jest.fn(
+        () =>
+          new Promise<ChangeReminderEnableResult>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    });
+    const session = createChangeReminderSession({
+      adapters: boundary,
+      homeTimeZone: 'Australia/Sydney',
+    });
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+    session.dispatch({ type: 'show-explainer' });
+    session.dispatch({ type: 'enable' });
+    stop();
+
+    const restart = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'untouched');
+    finish({ kind: 'failed' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(session.getSnapshot()).toEqual({ kind: 'untouched' });
+    restart();
+  });
+
   it('keeps pending registration retryable after Home Time Zone changes', async () => {
     const boundary = adapters({
       restore: jest.fn(async () => ({

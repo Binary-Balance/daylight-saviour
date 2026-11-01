@@ -5,7 +5,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react-native';
-import { AppState } from 'react-native';
+import { AccessibilityInfo, AppState, Platform } from 'react-native';
 import { PermissionStatus } from 'expo-notifications';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
@@ -39,8 +39,14 @@ const deadlineMs = 10_000;
 const maximumRequests = 5;
 
 let returnToApp: ((state: string) => void) | undefined;
+let announce: jest.SpiedFunction<
+  typeof AccessibilityInfo.announceForAccessibility
+>;
 
 beforeEach(() => {
+  // React Native's Jest setup already mocks this, so calls outlive each test.
+  announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+  announce.mockClear();
   // Response bodies settle on microtasks, which must keep running.
   jest.useFakeTimers({ doNotFake: ['nextTick', 'queueMicrotask'] });
   jest
@@ -71,14 +77,18 @@ function inOrder(...replies: readonly Promise<Response>[]) {
     replies[next++] ?? Promise.reject(new Error('Unexpected request'));
 }
 
+const deviceToken = { data: 'fcm-token:with_valid.characters-123' };
+
 function setup({
   beforeSave,
   fetchImplementation,
+  getDevicePushTokenAsync = async () => deviceToken,
   platform = 'android',
   prompt = async () => granted,
 }: {
   readonly beforeSave?: (value: string) => Promise<void>;
   readonly fetchImplementation: () => Promise<Response>;
+  readonly getDevicePushTokenAsync?: () => Promise<typeof deviceToken>;
   readonly platform?: string;
   readonly prompt?: () => Promise<Permission>;
 }) {
@@ -96,9 +106,7 @@ function setup({
     fetch: request,
     notifications: {
       addPushTokenListener: () => ({ remove: () => undefined }),
-      getDevicePushTokenAsync: async () => ({
-        data: 'fcm-token:with_valid.characters-123',
-      }),
+      getDevicePushTokenAsync,
       getPermissionsAsync: async () => permission,
       requestPermissionsAsync: async () => {
         permission = await prompt();
@@ -157,8 +165,6 @@ function expectRegistrationInProgress() {
   expect(screen.getByText(copy.changeReminders.saving.heading)).toBeTruthy();
   const busy = screen.getByText(copy.changeReminders.saving.body);
   expect(busy).toBeBusy();
-  // Announced once on entry; the text is fixed while busy, so it never repeats.
-  expect(busy.props.accessibilityLiveRegion).toBe('polite');
   expect(screen.queryByText(copy.changeReminders.enabled.heading)).toBeNull();
   expect(screen.queryByRole('button')).toBeNull();
 }
@@ -229,20 +235,78 @@ it.each(['android', 'ios'])(
   },
 );
 
-it('announces the enabled outcome once it is confirmed', async () => {
-  const test = setup({
-    fetchImplementation: inOrder(Promise.resolve(Response.json(registration))),
+describe('announcements', () => {
+  const enabledBody = copy.changeReminders.enabled.body({
+    oneDayEnabled: true,
+    oneWeekEnabled: true,
+  });
+  const spoken = () => announce.mock.calls.map(([message]) => message);
+
+  it('announces registration starting and its confirmed outcome once each', async () => {
+    const test = setup({
+      fetchImplementation: inOrder(
+        Promise.resolve(Response.json(registration)),
+      ),
+    });
+
+    await startRegistration(test.adapters);
+    await screen.findByText(enabledBody);
+
+    expect(spoken()).toEqual([copy.changeReminders.saving.body, enabledBody]);
+    expect(screen.getByText(enabledBody).props.accessibilityLiveRegion).toBe(
+      'none',
+    );
   });
 
-  await startRegistration(test.adapters);
+  it('stays silent when the card restores itself', async () => {
+    const test = setup({
+      fetchImplementation: inOrder(
+        Promise.resolve(Response.json(registration)),
+      ),
+    });
+    await startRegistration(test.adapters);
+    await screen.findByText(enabledBody);
+    announce.mockClear();
 
-  const outcome = await screen.findByText(
-    copy.changeReminders.enabled.body({
-      oneDayEnabled: true,
-      oneWeekEnabled: true,
-    }),
-  );
-  expect(outcome.props.accessibilityLiveRegion).toBe('polite');
+    // Each return to the app passes through a saving state and back.
+    act(() => returnToApp?.('active'));
+    await screen.findByText(enabledBody);
+    act(() => returnToApp?.('active'));
+    await screen.findByText(enabledBody);
+    expect(spoken()).toEqual([]);
+
+    screen.unmount();
+    render(
+      <ChangeReminderSection
+        adapters={test.adapters}
+        homeTimeZone="Australia/Sydney"
+        palette={daylightSaviourPalettes.light}
+      />,
+    );
+    await screen.findByText(enabledBody);
+    expect(spoken()).toEqual([]);
+  });
+
+  it.each<[string, readonly string[]]>([
+    // Android's assertive region reads failures, so a second reading is noise.
+    ['android', [copy.changeReminders.saving.body]],
+    [
+      'ios',
+      [copy.changeReminders.saving.body, copy.changeReminders.failed.body],
+    ],
+  ])('announces a failure once on %s', async (platform, expected) => {
+    jest.replaceProperty(Platform, 'OS', platform as typeof Platform.OS);
+    const test = setup({
+      fetchImplementation: inOrder(
+        Promise.resolve(Response.json({}, { status: 500 })),
+      ),
+    });
+
+    await startRegistration(test.adapters);
+    await screen.findByRole('alert');
+
+    expect(spoken()).toEqual(expected);
+  });
 });
 
 it.each<[string, () => Response]>([
@@ -266,6 +330,33 @@ it.each<[string, () => Response]>([
     await expectRetryThenEnabled(test, copy.changeReminders.failed.body);
   },
 );
+
+it('leaves the busy state at the deadline when the device token never arrives', async () => {
+  // iOS never settles this request without a network connection.
+  const tokens = [new Promise<typeof deviceToken>(() => undefined)];
+  const test = setup({
+    fetchImplementation: inOrder(Promise.resolve(Response.json(registration))),
+    getDevicePushTokenAsync: () =>
+      tokens.shift() ?? Promise.resolve(deviceToken),
+  });
+
+  await startRegistration(test.adapters);
+  expectRegistrationInProgress();
+  await passDeadline();
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    copy.changeReminders.failed.body,
+  );
+  expect(test.request).not.toHaveBeenCalled();
+
+  fireEvent.press(
+    screen.getByRole('button', { name: copy.changeReminders.failed.retry }),
+  );
+  expect(
+    await screen.findByText(copy.changeReminders.enabled.heading),
+  ).toBeTruthy();
+  expect(test.stored()).toMatchObject({ ...registration, state: 'registered' });
+});
 
 it('leaves the busy state at the deadline and lets a retry finish before a late first response', async () => {
   const first = deferred<Response>();
