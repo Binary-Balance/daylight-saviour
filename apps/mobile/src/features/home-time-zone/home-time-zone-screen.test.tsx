@@ -376,6 +376,51 @@ describe('HomeTimeZoneScreen', () => {
       });
     }
 
+    // Changes what the device reports, as the settings app would while this
+    // one is in the background.
+    function changeDevice(
+      adapters: HomeTimeZoneAdapters,
+      uses24hourClock: boolean | null,
+      timeZone = 'Europe/London',
+    ) {
+      jest
+        .mocked(adapters.localization.read)
+        .mockReturnValue({ timeZone, uses24hourClock });
+    }
+
+    // Sydney's report at `now`, with its clock, next event and data freshness.
+    const sydneyReport = {
+      '12-hour': {
+        clock: '10:00 am',
+        event: '2:00 am → 3:00 am',
+        freshness: /Valid through .* (am|pm) UTC$/,
+      },
+      '24-hour': {
+        clock: '10:00',
+        event: '02:00 → 03:00',
+        freshness: /Valid through .* \d{2}:\d{2}:\d{2} UTC$/,
+      },
+    } as const;
+
+    function expectSydneyReportIn(format: keyof typeof sydneyReport) {
+      const shown = sydneyReport[format];
+      const hidden = sydneyReport[format === '12-hour' ? '24-hour' : '12-hour'];
+      const clockLabel = (clock: string) =>
+        `Home Time Zone current time, ${clock}, AEST, UTC+10:00`;
+
+      expect(screen.getByLabelText(clockLabel(shown.clock))).toBeTruthy();
+      expect(screen.queryByLabelText(clockLabel(hidden.clock))).toBeNull();
+      expect(screen.getByText(shown.event)).toBeTruthy();
+      expect(screen.queryByText(hidden.event)).toBeNull();
+      expect(screen.getByText(shown.freshness)).toBeTruthy();
+      expect(screen.queryByText(hidden.freshness)).toBeNull();
+      expect(
+        screen.getByLabelText(
+          'Home Time Zone, Sydney, Canberra & most of NSW, Australia/Sydney',
+        ),
+      ).toBeTruthy();
+    }
+
     beforeEach(() => {
       jest
         .mocked(AppState.addEventListener)
@@ -441,17 +486,20 @@ describe('HomeTimeZoneScreen', () => {
       const refresh = jest.spyOn(adapters.timeZoneDataPacks, 'refresh');
       render(<HomeTimeZoneScreen adapters={adapters} now={duringAftermath} />);
       await screen.findByTestId('aftermath-civil-time-report');
+      const reads = jest.mocked(adapters.localization.read).mock.calls.length;
 
       setAppState('inactive', 'active', 'active');
 
       expect(screen.getByTestId('aftermath-civil-time-report')).toBeTruthy();
       expect(refresh).not.toHaveBeenCalled();
+      expect(adapters.localization.read).toHaveBeenCalledTimes(reads);
 
       setAppState('background', 'active', 'active');
 
       expect(screen.getByTestId('ordinary-civil-time-report')).toBeTruthy();
       expect(refresh).toHaveBeenCalledTimes(1);
       expect(refresh).toHaveBeenCalledWith('foreground');
+      expect(adapters.localization.read).toHaveBeenCalledTimes(reads + 1);
     });
 
     it('resumes the next-event report after a cold restart', async () => {
@@ -548,6 +596,136 @@ describe('HomeTimeZoneScreen', () => {
 
       expect(screen.getByTestId('aftermath-civil-time-report')).toBeTruthy();
       expect(adapters.aftermathAcknowledgements.save).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['12-hour', '24-hour'],
+      ['24-hour', '12-hour'],
+    ] as const)(
+      'switches the report from %s to %s time without a restart',
+      async (from, to) => {
+        const adapters = createAdapters({
+          savedZone: 'Australia/Sydney',
+          uses24hourClock: from === '24-hour',
+        });
+        render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+        await screen.findByTestId('ordinary-civil-time-report');
+        expectSydneyReportIn(from);
+        const motionReads = jest.mocked(AccessibilityInfo.isReduceMotionEnabled)
+          .mock.calls.length;
+
+        // The device has also moved to London, which the saved zone ignores.
+        setAppState('background');
+        changeDevice(adapters, to === '24-hour');
+        setAppState('active');
+
+        expectSydneyReportIn(to);
+        // A remounted report would read the motion preference again.
+        expect(AccessibilityInfo.isReduceMotionEnabled).toHaveBeenCalledTimes(
+          motionReads,
+        );
+      },
+    );
+
+    it.each([
+      ['unchanged', true],
+      ['unavailable', null],
+    ] as const)(
+      'keeps the 24-hour report when the device preference is %s',
+      async (_case, reported) => {
+        const adapters = createAdapters({
+          savedZone: 'Australia/Sydney',
+          uses24hourClock: true,
+        });
+        render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+        await screen.findByTestId('ordinary-civil-time-report');
+        const reads = jest.mocked(adapters.localization.read).mock.calls.length;
+
+        setAppState('background');
+        changeDevice(adapters, reported);
+        setAppState('active');
+
+        expect(adapters.localization.read).toHaveBeenCalledTimes(reads + 1);
+        expectSydneyReportIn('24-hour');
+      },
+    );
+
+    it('switches the suggested time while onboarding', async () => {
+      const adapters = createAdapters();
+      render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+      expect(await screen.findByLabelText('10:00 am AEST')).toBeTruthy();
+
+      setAppState('background');
+      changeDevice(adapters, true, 'Australia/Sydney');
+      setAppState('active');
+
+      expect(screen.getByLabelText('10:00 AEST')).toBeTruthy();
+      expect(screen.queryByLabelText('10:00 am AEST')).toBeNull();
+
+      fireEvent.press(
+        screen.getByRole('button', { name: 'Use this Home Time Zone' }),
+      );
+      await screen.findByTestId('ordinary-civil-time-report');
+      expectSydneyReportIn('24-hour');
+    });
+
+    it('keeps a preference change made while the chooser is open', async () => {
+      const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+      render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+      fireEvent.press(
+        await screen.findByRole('button', {
+          name: 'Home Time Zone, Sydney, Canberra & most of NSW, Australia/Sydney',
+        }),
+      );
+
+      setAppState('background');
+      changeDevice(adapters, true);
+      setAppState('active');
+
+      expect(
+        screen.getByRole('header', { name: 'Choose Home Time Zone' }),
+      ).toBeTruthy();
+      fireEvent.press(
+        screen.getByRole('button', { name: 'Cancel Home Time Zone selection' }),
+      );
+
+      await screen.findByTestId('ordinary-civil-time-report');
+      expectSydneyReportIn('24-hour');
+    });
+
+    it('uses a preference change made while the chooser is open for the zone picked', async () => {
+      const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+      render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+      fireEvent.press(
+        await screen.findByRole('button', {
+          name: 'Home Time Zone, Sydney, Canberra & most of NSW, Australia/Sydney',
+        }),
+      );
+
+      setAppState('background');
+      changeDevice(adapters, true);
+      setAppState('active');
+
+      fireEvent.changeText(
+        screen.getByLabelText('Search Australian Home Time Zones'),
+        'brisbane',
+      );
+      fireEvent.press(
+        screen.getByRole('button', {
+          name: 'Brisbane & most of Queensland, Australia/Brisbane',
+        }),
+      );
+
+      expect(
+        await screen.findByLabelText(
+          'Home Time Zone, Brisbane & most of Queensland, Australia/Brisbane',
+        ),
+      ).toBeTruthy();
+      expect(
+        screen.getByLabelText(
+          'Home Time Zone current time, 10:00, AEST, UTC+10:00',
+        ),
+      ).toBeTruthy();
     });
   });
 

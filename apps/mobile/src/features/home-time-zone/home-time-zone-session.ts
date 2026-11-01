@@ -71,7 +71,6 @@ type FlowState =
       readonly saveError: HomeTimeZoneErrorCode | null;
       readonly saving: boolean;
       readonly secondaryCopySeed: string;
-      readonly uses24hourClock: boolean;
       readonly zoneId: string;
     }
   | {
@@ -82,7 +81,6 @@ type FlowState =
       readonly saveError: HomeTimeZoneErrorCode | null;
       readonly saving: boolean;
       readonly secondaryCopySeed: string;
-      readonly uses24hourClock: boolean;
     }
   | {
       readonly acknowledgedEventAt: string | null;
@@ -92,7 +90,6 @@ type FlowState =
       // the background or the chooser closes, which is when Aftermath ends.
       readonly openingAcknowledgedEventAt: string | null;
       readonly secondaryCopySeed: string;
-      readonly uses24hourClock: boolean;
       readonly zoneId: string;
     };
 
@@ -104,6 +101,9 @@ export function createHomeTimeZoneSession({
   let generation = 0;
   let flow: FlowState = { kind: 'loading' };
   let dataPackSnapshot = adapters.timeZoneDataPacks.getSnapshot();
+  // Kept outside the flow so a change reaches whichever state is current when
+  // a pending restoration or save finishes, not the one that began it.
+  let uses24hourClock = false;
   let stopDataPackSubscription: (() => void) | null = null;
   const subscriptions = new Set<{ readonly listener: () => void }>();
 
@@ -117,7 +117,7 @@ export function createHomeTimeZoneSession({
         dataPackSnapshot.freshness,
         flow.zoneId,
         now(),
-        flow.uses24hourClock,
+        uses24hourClock,
         flow.secondaryCopySeed,
       );
       return {
@@ -148,7 +148,7 @@ export function createHomeTimeZoneSession({
       kind: 'ready',
       openingAcknowledgedEventAt: flow.openingAcknowledgedEventAt,
       secondaryCopySeed: flow.secondaryCopySeed,
-      uses24hourClock: flow.uses24hourClock,
+      uses24hourClock,
       zoneId: flow.zoneId,
     };
   }
@@ -174,6 +174,7 @@ export function createHomeTimeZoneSession({
       const saved = await adapters.storage.load();
       if (!current(expectedGeneration)) return;
       const localization = adapters.localization.read();
+      adoptHourCycle(localization.uses24hourClock);
       const secondaryCopySeed = await adapters.secondaryCopySeed
         .loadOrCreate()
         .catch(() => adapters.secondaryCopySeed.sessionFallback);
@@ -196,7 +197,6 @@ export function createHomeTimeZoneSession({
             kind: 'ready',
             openingAcknowledgedEventAt: acknowledgedEventAt,
             secondaryCopySeed,
-            uses24hourClock: localization.uses24hourClock,
             zoneId: canonical,
           });
         } else {
@@ -208,7 +208,6 @@ export function createHomeTimeZoneSession({
             saveError: null,
             saving: false,
             secondaryCopySeed,
-            uses24hourClock: localization.uses24hourClock,
           });
         }
         return;
@@ -226,7 +225,6 @@ export function createHomeTimeZoneSession({
           saveError: null,
           saving: false,
           secondaryCopySeed,
-          uses24hourClock: localization.uses24hourClock,
         });
       } else {
         setFlow({
@@ -234,7 +232,6 @@ export function createHomeTimeZoneSession({
           saveError: null,
           saving: false,
           secondaryCopySeed,
-          uses24hourClock: localization.uses24hourClock,
           zoneId: canonical,
         });
       }
@@ -272,7 +269,6 @@ export function createHomeTimeZoneSession({
           kind: 'ready',
           openingAcknowledgedEventAt: acknowledgedEventAt,
           secondaryCopySeed: selectionFlow.secondaryCopySeed,
-          uses24hourClock: selectionFlow.uses24hourClock,
           zoneId: zone.id,
         });
       } catch {
@@ -312,6 +308,19 @@ export function createHomeTimeZoneSession({
     }
   }
 
+  // A device that reports no preference keeps the last one known, which is
+  // 12-hour until the device says otherwise.
+  function adoptHourCycle(reported: boolean | null) {
+    uses24hourClock = reported ?? uses24hourClock;
+  }
+
+  // The device setting can change while the app is in the background.
+  function refreshHourCycle() {
+    const previous = uses24hourClock;
+    adoptHourCycle(adapters.localization.read().uses24hourClock);
+    if (uses24hourClock !== previous) publish();
+  }
+
   function dispatch(event: HomeTimeZoneSessionEvent) {
     if (!active) return;
 
@@ -331,7 +340,6 @@ export function createHomeTimeZoneSession({
             saveError: null,
             saving: false,
             secondaryCopySeed: flow.secondaryCopySeed,
-            uses24hourClock: flow.uses24hourClock,
           });
           return;
         }
@@ -344,7 +352,6 @@ export function createHomeTimeZoneSession({
             saveError: flow.saveError,
             saving: false,
             secondaryCopySeed: flow.secondaryCopySeed,
-            uses24hourClock: flow.uses24hourClock,
           });
         }
         return;
@@ -361,7 +368,6 @@ export function createHomeTimeZoneSession({
           kind: 'ready',
           openingAcknowledgedEventAt: flow.returnAcknowledgedEventAt,
           secondaryCopySeed: flow.secondaryCopySeed,
-          uses24hourClock: flow.uses24hourClock,
           zoneId: flow.returnZoneId,
         });
         return;
@@ -378,6 +384,7 @@ export function createHomeTimeZoneSession({
         return;
       case 'foreground':
         startOpening();
+        refreshHourCycle();
         void adapters.timeZoneDataPacks
           .refresh('foreground')
           .catch(() => undefined);

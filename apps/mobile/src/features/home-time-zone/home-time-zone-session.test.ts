@@ -1,6 +1,9 @@
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
-import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
+import type {
+  DeviceLocalization,
+  HomeTimeZoneAdapters,
+} from './home-time-zone-adapters';
 import {
   createHomeTimeZoneSession,
   type HomeTimeZoneSession,
@@ -63,6 +66,10 @@ function createHarness({
   readonly uses24hourClock?: boolean;
 } = {}) {
   let storedZone = savedZone;
+  let localization: DeviceLocalization = {
+    timeZone: deviceZone,
+    uses24hourClock,
+  };
   let packSnapshot = baselinePackSnapshot();
   const acknowledgements = new Map<string, string>();
   if (savedZone !== null && acknowledgedEventAt !== null) {
@@ -95,9 +102,7 @@ function createHarness({
         acknowledgements.set(canonicalZoneId, eventAt);
       }),
     },
-    localization: {
-      read: jest.fn(() => ({ timeZone: deviceZone, uses24hourClock })),
-    },
+    localization: { read: jest.fn(() => localization) },
     secondaryCopySeed: {
       loadOrCreate: jest.fn(async () => 'test-installation-seed'),
       sessionFallback: 'test-session-seed',
@@ -116,6 +121,11 @@ function createHarness({
     publishPack(next: TimeZoneDataPackSnapshot) {
       packSnapshot = next;
       for (const listener of [...packListeners]) listener();
+    },
+    // Changes what the device reports from the next read, as the settings app
+    // would while this one is in the background.
+    setLocalization(next: DeviceLocalization) {
+      localization = next;
     },
     stopPackSubscription,
     storedZone: () => storedZone,
@@ -447,6 +457,234 @@ describe('Home Time Zone session', () => {
     expect(session.getSnapshot()).toBe(reopened);
 
     stop();
+  });
+
+  it('follows a changed 12/24-hour preference when the app returns', async () => {
+    const harness = createHarness({ savedZone: 'Australia/Sydney' });
+    const session = createSession(harness.adapters);
+    const stop = session.start();
+    const ready = await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'ready',
+    );
+    const listener = jest.fn();
+    session.subscribe(listener);
+
+    // A device that has moved to another zone leaves the saved zone alone.
+    harness.setLocalization({
+      timeZone: 'Europe/London',
+      uses24hourClock: true,
+    });
+    session.dispatch({ type: 'foreground' });
+
+    expect(session.getSnapshot()).not.toBe(ready);
+    expect(session.getSnapshot()).toMatchObject({
+      kind: 'ready',
+      uses24hourClock: true,
+      zoneId: 'Australia/Sydney',
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    harness.setLocalization({
+      timeZone: 'Europe/London',
+      uses24hourClock: false,
+    });
+    session.dispatch({ type: 'foreground' });
+
+    expect(session.getSnapshot()).toMatchObject({ uses24hourClock: false });
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    stop();
+  });
+
+  it.each([
+    ['unchanged', true],
+    ['unavailable', null],
+  ] as const)(
+    'publishes nothing when the 12/24-hour preference is %s',
+    async (_case, reported) => {
+      const harness = createHarness({
+        savedZone: 'Australia/Sydney',
+        uses24hourClock: true,
+      });
+      const session = createSession(harness.adapters);
+      const stop = session.start();
+      const ready = await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'ready',
+      );
+      const listener = jest.fn();
+      session.subscribe(listener);
+
+      harness.setLocalization({
+        timeZone: 'Australia/Sydney',
+        uses24hourClock: reported,
+      });
+      session.dispatch({ type: 'foreground' });
+
+      // Once to restore and once for the return, so the read really happened.
+      expect(harness.adapters.localization.read).toHaveBeenCalledTimes(2);
+      expect(session.getSnapshot()).toBe(ready);
+      expect(listener).not.toHaveBeenCalled();
+
+      stop();
+    },
+  );
+
+  it('uses 12-hour time until the device reports a preference', async () => {
+    const harness = createHarness({ savedZone: 'Australia/Sydney' });
+    harness.setLocalization({ timeZone: null, uses24hourClock: null });
+    const session = createSession(harness.adapters);
+    const stop = session.start();
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'ready'),
+    ).toMatchObject({ uses24hourClock: false });
+
+    harness.setLocalization({ timeZone: null, uses24hourClock: true });
+    session.dispatch({ type: 'foreground' });
+    expect(session.getSnapshot()).toMatchObject({ uses24hourClock: true });
+
+    harness.setLocalization({ timeZone: null, uses24hourClock: null });
+    session.dispatch({ type: 'foreground' });
+    expect(session.getSnapshot()).toMatchObject({ uses24hourClock: true });
+
+    stop();
+  });
+
+  it('updates the suggested time while the zone is being confirmed', async () => {
+    const harness = createHarness();
+    const session = createSession(harness.adapters);
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'confirm');
+    expect(session.getSnapshot()).toMatchObject({
+      currentTime: { clock: '10:00 am' },
+    });
+
+    harness.setLocalization({
+      timeZone: 'Australia/Sydney',
+      uses24hourClock: true,
+    });
+    session.dispatch({ type: 'foreground' });
+    expect(session.getSnapshot()).toMatchObject({
+      currentTime: { clock: '10:00' },
+      kind: 'confirm',
+      zoneId: 'Australia/Sydney',
+    });
+
+    session.dispatch({ type: 'select-zone', zoneId: 'Australia/Sydney' });
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'ready'),
+    ).toMatchObject({ uses24hourClock: true });
+
+    stop();
+  });
+
+  it.each([
+    ['cancelled', { type: 'cancel-selection' }, 'Australia/Sydney'],
+    [
+      'used to pick another zone',
+      { type: 'select-zone', zoneId: 'Australia/Brisbane' },
+      'Australia/Brisbane',
+    ],
+  ] as const)(
+    'keeps a preference change made while the chooser is %s',
+    async (_case, close, zoneId) => {
+      const harness = createHarness({ savedZone: 'Australia/Sydney' });
+      const session = createSession(harness.adapters);
+      const stop = session.start();
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'ready');
+      session.dispatch({ type: 'choose-zone' });
+
+      harness.setLocalization({
+        timeZone: 'Australia/Sydney',
+        uses24hourClock: true,
+      });
+      session.dispatch({ type: 'foreground' });
+      expect(session.getSnapshot()).toMatchObject({ kind: 'choose' });
+      session.dispatch(close);
+
+      expect(
+        await waitForSnapshot(session, (snapshot) => snapshot.kind === 'ready'),
+      ).toMatchObject({ uses24hourClock: true, zoneId });
+
+      stop();
+    },
+  );
+
+  it('keeps a preference change that arrives while a zone is being saved', async () => {
+    const harness = createHarness({ savedZone: 'Australia/Sydney' });
+    const pendingSave = deferred<void>();
+    jest
+      .mocked(harness.adapters.storage.save)
+      .mockReturnValue(pendingSave.promise);
+    const session = createSession(harness.adapters);
+    const stop = session.start();
+    await waitForSnapshot(session, (snapshot) => snapshot.kind === 'ready');
+    session.dispatch({ type: 'choose-zone' });
+    session.dispatch({ type: 'select-zone', zoneId: 'Australia/Brisbane' });
+
+    harness.setLocalization({
+      timeZone: 'Australia/Sydney',
+      uses24hourClock: true,
+    });
+    session.dispatch({ type: 'foreground' });
+    pendingSave.resolve();
+
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'ready'),
+    ).toMatchObject({ uses24hourClock: true, zoneId: 'Australia/Brisbane' });
+
+    stop();
+  });
+
+  it('keeps a preference change that arrives while restoring', async () => {
+    const harness = createHarness({ savedZone: 'Australia/Sydney' });
+    const pendingSeed = deferred<string>();
+    jest
+      .mocked(harness.adapters.secondaryCopySeed.loadOrCreate)
+      .mockReturnValue(pendingSeed.promise);
+    const session = createSession(harness.adapters);
+    const stop = session.start();
+    // Restoration has read the preference by the time it asks for the seed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(harness.adapters.secondaryCopySeed.loadOrCreate).toHaveBeenCalled();
+
+    harness.setLocalization({
+      timeZone: 'Australia/Sydney',
+      uses24hourClock: true,
+    });
+    session.dispatch({ type: 'foreground' });
+    expect(session.getSnapshot()).toEqual({ kind: 'loading' });
+    pendingSeed.resolve('test-installation-seed');
+
+    expect(
+      await waitForSnapshot(session, (snapshot) => snapshot.kind === 'ready'),
+    ).toMatchObject({ uses24hourClock: true });
+
+    stop();
+  });
+
+  it('ignores a return to the foreground after stop', async () => {
+    const harness = createHarness({ savedZone: 'Australia/Sydney' });
+    const session = createSession(harness.adapters);
+    const stop = session.start();
+    const ready = await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'ready',
+    );
+    const listener = jest.fn();
+    session.subscribe(listener);
+    stop();
+
+    harness.setLocalization({
+      timeZone: 'Australia/Sydney',
+      uses24hourClock: true,
+    });
+    session.dispatch({ type: 'foreground' });
+
+    expect(harness.adapters.localization.read).toHaveBeenCalledTimes(1);
+    expect(session.getSnapshot()).toBe(ready);
+    expect(listener).not.toHaveBeenCalled();
   });
 
   it('owns pack initialization, refresh, and snapshot propagation', async () => {
