@@ -888,6 +888,27 @@ describe('reminder dispatch ledger claims', () => {
     ]);
   });
 
+  it('finds its own claim when the acknowledgement was lost', async () => {
+    const { fake, ledger } = setup();
+    await ledger.prepare(preparation());
+    fake.begin({ replace: loseAcknowledgement });
+
+    const claim = await ledger.claim(identity, later, 5_000);
+
+    assert.ok(claim);
+    assert.deepEqual(claim.claimExpiresAt, msAfter(5_000, later));
+    assert.deepEqual(
+      fake.stored(),
+      rowWith({
+        claimExpiresAt: msAfter(5_000, later),
+        claimId: claim.claimId,
+        status: 'claimed',
+        updatedAt: later,
+      }),
+    );
+    assert.equal(fake.writes.length, 1);
+  });
+
   it('claims a transient failure again', async () => {
     const { ledger } = setup();
     const { claim: first } = await stages.transient(ledger);
