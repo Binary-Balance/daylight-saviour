@@ -383,10 +383,10 @@ missed and warns for the other thresholds.
 
 The Code assurance workflow runs `check` for packages and `crap` for
 notifications and mobile on each change, and `check` for every area weekly. A
-notifications `check` takes about 85 minutes, too long for each change. A
-blocking area fails on any missed threshold, so a change can pass and the next
-weekly run still fail on its mutation score. The summary appears on the workflow
-run, and the JSON report is kept as an artifact.
+notifications `check` takes an hour or more, too long for each change, so a
+change there can pass and the next weekly run still fail on its mutation score.
+The summary appears on the workflow run, and the JSON report is kept as an
+artifact.
 
 Seshat must be able to resolve every mutant, so keep tests and modules in this
 shape:
