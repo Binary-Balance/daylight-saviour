@@ -134,25 +134,25 @@ after each page of settlement. That is at most one line for each event in each
 zone and settlement page, with no installation identifier, token, payload or
 provider detail:
 
-| Event                           | Meaning                                                                                                                                                           |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `accepted`                      | The provider accepted a send.                                                                                                                                     |
-| `uncertain`                     | The provider may have accepted a send. It is not repeated.                                                                                                        |
-| `transient-failure`             | A send failed safely, or final authorization refused it for time or its lease, and it retries in a later run, inside its window.                                  |
-| `permanent-failure`             | The provider rejected a send for good.                                                                                                                            |
-| `invalid-token-cleanup-failed`  | A rejected token is still stored. A later run retries without sending.                                                                                            |
-| `expired`                       | **Eligible work was not delivered.** Alert on this event.                                                                                                         |
-| `window-not-swept`              | **No run finished this zone during this window, so its reminders were not sent.** Logged at most once for each window, with its zone and timing.                  |
-| `window-sweep-incomplete`       | **No sweep of this zone reached its last page during this window, so later rows got no reminder.** Logged at most once for each window, with its zone and timing. |
-| `stale`                         | Registration or plan changed before the send, so nothing was sent.                                                                                                |
-| `claimed`, `pending`, `not-due` | Another worker holds the record, or there was nothing to do yet.                                                                                                  |
-| `already-recorded`              | An earlier run recorded this delivery. It is not counted twice.                                                                                                   |
-| `no-event`                      | No zone has an open Delivery Window.                                                                                                                              |
-| `pack-unavailable`              | **The pack could not be read or verified, so nothing was planned.**                                                                                               |
-| `pack-horizon-invalid`          | **The run's time is outside the active pack's coverage or Validity Horizon, so nothing was planned.**                                                             |
-| `operation-failed`              | A storage call failed. The ledger keeps the delivery safe to retry.                                                                                               |
-| `page-limit-reached`            | **A query stopped at 50 pages, so later rows were not reached.**                                                                                                  |
-| `ledger-row-invalid`            | **A ledger row could not be read, so settlement or the purge skipped it.** It repeats until the purge deletes it. A row with no readable last update may never reach the purge, because the purge query compares that field, and that row raises no event.             |
+| Event                           | Meaning                                                                                                                                                                                                                                                    |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `accepted`                      | The provider accepted a send.                                                                                                                                                                                                                              |
+| `uncertain`                     | The provider may have accepted a send. It is not repeated.                                                                                                                                                                                                 |
+| `transient-failure`             | A send failed safely, or final authorization refused it for time or its lease, and it retries in a later run, inside its window.                                                                                                                           |
+| `permanent-failure`             | The provider rejected a send for good.                                                                                                                                                                                                                     |
+| `invalid-token-cleanup-failed`  | A rejected token is still stored. A later run retries without sending.                                                                                                                                                                                     |
+| `expired`                       | **Eligible work was not delivered.** Alert on this event.                                                                                                                                                                                                  |
+| `window-not-swept`              | **No run finished this zone during this window, so its reminders were not sent.** Logged at most once for each window, with its zone and timing.                                                                                                           |
+| `window-sweep-incomplete`       | **No sweep of this zone reached its last page during this window, so later rows got no reminder.** Logged at most once for each window, with its zone and timing.                                                                                          |
+| `stale`                         | Registration or plan changed before the send, so nothing was sent.                                                                                                                                                                                         |
+| `claimed`, `pending`, `not-due` | Another worker holds the record, or there was nothing to do yet.                                                                                                                                                                                           |
+| `already-recorded`              | An earlier run recorded this delivery. It is not counted twice.                                                                                                                                                                                            |
+| `no-event`                      | No zone has an open Delivery Window.                                                                                                                                                                                                                       |
+| `pack-unavailable`              | **The pack could not be read or verified, so nothing was planned.**                                                                                                                                                                                        |
+| `pack-horizon-invalid`          | **The run's time is outside the active pack's coverage or Validity Horizon, so nothing was planned.**                                                                                                                                                      |
+| `operation-failed`              | A storage call failed. The ledger keeps the delivery safe to retry.                                                                                                                                                                                        |
+| `page-limit-reached`            | **A query stopped at 50 pages, so later rows were not reached.**                                                                                                                                                                                           |
+| `ledger-row-invalid`            | **A ledger row could not be read, so settlement or the purge skipped it.** It repeats until the purge deletes it. A row with no readable last update may never reach the purge, because the purge query compares that field, and that row raises no event. |
 
 Senders still write their own fixed events, such as
 `fcm-credential-sts-denied`, to the same invocation log.
@@ -266,7 +266,8 @@ A storage error or function timeout ends the run, and the next day's run
 continues. A ledger row the purge cannot date or key does not: the purge skips
 it, logs `reminder-dispatch-ledger-row-invalid` with a count, and carries on.
 Such a row stays, and the count repeats each day, until someone repairs or
-deletes it.
+deletes it. The query compares `updatedAt`, so a row without a readable date
+may never be listed, and then raises no event at all.
 
 ## Deployment settings
 
