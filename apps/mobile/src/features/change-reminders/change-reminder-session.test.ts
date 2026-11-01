@@ -1306,6 +1306,116 @@ describe('Change Reminder session', () => {
     stop();
   });
 
+  describe('when the service no longer holds the registration', () => {
+    const gone = { kind: 'unregistered' as const };
+
+    it('shows Change Reminders off when a foreground finds it gone', async () => {
+      const { session, stop } = await startEnabledSession({
+        restore: jest
+          .fn()
+          .mockResolvedValueOnce(registered)
+          .mockResolvedValueOnce(gone),
+      });
+
+      session.dispatch({ type: 'foreground' });
+
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'untouched',
+      );
+      stop();
+    });
+
+    it('shows Change Reminders off when the Home Time Zone update finds it gone', async () => {
+      const updateHomeTimeZone = jest.fn(async () => gone);
+      const { session } = createSession({
+        restore: jest.fn(async () => registered),
+        updateHomeTimeZone,
+      });
+
+      const stop = session.start();
+
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'untouched',
+      );
+      expect(updateHomeTimeZone).toHaveBeenCalledTimes(1);
+      stop();
+    });
+
+    it('shows Change Reminders off when a timing update finds it gone', async () => {
+      const { session, stop } = await startEnabledSession({
+        updatePreferences: jest.fn(async () => gone),
+      });
+
+      session.dispatch({
+        type: 'change-preferences',
+        preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+      });
+
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'untouched',
+      );
+      stop();
+    });
+
+    it('shows Change Reminders off when enabling finds it gone', async () => {
+      const { session } = createSession({ enable: jest.fn(async () => gone) });
+      const stop = session.start();
+      await waitForSnapshot(
+        session,
+        (snapshot) => snapshot.kind === 'untouched',
+      );
+      session.dispatch({ type: 'show-explainer' });
+      session.dispatch({ type: 'enable' });
+      expect(session.getSnapshot()).toEqual({ kind: 'saving' });
+
+      expect(
+        await waitForSnapshot(
+          session,
+          (snapshot) => snapshot.kind !== 'saving',
+        ),
+      ).toEqual({ kind: 'untouched' });
+      stop();
+    });
+
+    it('shows Change Reminders off when a token refresh finds it gone', async () => {
+      const { session, stop } = await startEnabledSession();
+
+      session.dispatch({ result: gone, type: 'token-refresh' });
+
+      expect(session.getSnapshot()).toEqual({ kind: 'untouched' });
+      stop();
+    });
+
+    it('does not carry the old timings into the next registration', async () => {
+      const { session, stop } = await startEnabledSession({
+        enable: jest.fn(async () => ({ kind: 'enabled' as const })),
+        restore: jest.fn(async () => ({
+          ...registered,
+          registration: { ...registration, oneDayEnabled: false },
+        })),
+      });
+      expect(session.getSnapshot()).toEqual({
+        kind: 'enabled',
+        preferences: { oneDayEnabled: false, oneWeekEnabled: true },
+      });
+      session.dispatch({ result: gone, type: 'token-refresh' });
+
+      session.dispatch({ type: 'show-explainer' });
+      session.dispatch({ type: 'enable' });
+
+      expect(
+        await waitForSnapshot(
+          session,
+          (snapshot) => snapshot.kind === 'enabled',
+        ),
+      ).toEqual({ kind: 'enabled', preferences: bothTimings });
+      stop();
+    });
+  });
+
   it('stops notifying a listener once it unsubscribes', async () => {
     const { session } = createSession();
     const listener = jest.fn();

@@ -11,6 +11,7 @@ import type {
   ChangeReminderAdapters,
   ChangeReminderEnableResult,
   ChangeReminderPreferences,
+  ChangeReminderRestoreResult,
   ChangeReminderTokenRefreshResult,
   StoredLegacyChangeReminderPending,
   StoredLegacyChangeReminderRegistration,
@@ -22,6 +23,7 @@ import type {
 
 const registrationKey = 'change-reminder-registration-v2';
 const requestTimeoutMs = 10_000;
+const checkInIntervalMs = 30 * 24 * 60 * 60 * 1_000;
 const notificationChannelId = 'change-reminders';
 const maximumAttemptGeneration = 2_147_483_647;
 
@@ -52,6 +54,7 @@ interface ProductionAdapterDependencies {
       },
     ) => Promise<unknown>;
   };
+  readonly now?: () => Date;
   readonly openSettings: () => Promise<void>;
   readonly platform: string;
   readonly secureStore: {
@@ -77,6 +80,9 @@ function validStoredBase(candidate: Record<string, unknown>) {
       (typeof candidate.confirmedHomeTimeZone === 'string' &&
         canonicalAustralianZoneId(candidate.confirmedHomeTimeZone) ===
           candidate.confirmedHomeTimeZone)) &&
+    (candidate.lastContactAt === undefined ||
+      (typeof candidate.lastContactAt === 'string' &&
+        Number.isFinite(Date.parse(candidate.lastContactAt)))) &&
     typeof candidate.oneDayEnabled === 'boolean' &&
     typeof candidate.oneWeekEnabled === 'boolean' &&
     (candidate.oneDayEnabled || candidate.oneWeekEnabled)
@@ -139,6 +145,7 @@ function parseStoredState(value: string): StoredChangeReminderState {
     typeof candidate.confirmedOneWeekEnabled === 'boolean';
   const hasConfirmedHomeTimeZone =
     typeof candidate.confirmedHomeTimeZone === 'string';
+  const hasLastContactAt = typeof candidate.lastContactAt === 'string';
   const expectedKeys =
     candidate.state === 'pending' && !isLegacy
       ? [
@@ -208,6 +215,7 @@ function parseStoredState(value: string): StoredChangeReminderState {
                 'deviceToken',
                 'homeTimeZone',
                 'installationId',
+                ...(hasLastContactAt ? ['lastContactAt'] : []),
                 'oneDayEnabled',
                 'oneWeekEnabled',
                 'registrationRequestId',
@@ -316,6 +324,9 @@ function parseStoredState(value: string): StoredChangeReminderState {
   return {
     ...base,
     ...response,
+    ...(hasLastContactAt
+      ? { lastContactAt: String(candidate.lastContactAt) }
+      : {}),
     state: 'registered',
   } as StoredChangeReminderState;
 }
@@ -330,10 +341,34 @@ async function createRegistrationRequestId() {
   )}`;
 }
 
-function updateEndpoint(registrationEndpoint: string, installationId: string) {
+function updateEndpoint(
+  registrationEndpoint: string,
+  installationId: string,
+  suffix = '',
+) {
   const url = new URL(registrationEndpoint);
-  url.pathname = `${url.pathname.replace(/\/$/, '')}/${encodeURIComponent(installationId)}`;
+  url.pathname = `${url.pathname.replace(/\/$/, '')}/${encodeURIComponent(installationId)}${suffix}`;
   return url.toString();
+}
+
+// Only the service's own answer says this registration is gone. A 404 from
+// the platform alone, such as for a route an older service has not deployed
+// yet, says nothing about it.
+function registrationGone(response: {
+  readonly body: string;
+  readonly status: number;
+}) {
+  return (
+    response.status === 404 &&
+    response.body.includes('Registration unavailable')
+  );
+}
+
+function checkInDue(lastContactAt: string | undefined, now: Date) {
+  if (lastContactAt === undefined) return true;
+  const sinceContact = now.getTime() - Date.parse(lastContactAt);
+  // A last contact in the future means the clock was set back.
+  return sinceContact < 0 || sinceContact >= checkInIntervalMs;
 }
 
 function validDeviceToken(value: unknown): value is string {
@@ -381,6 +416,7 @@ export function createProductionChangeReminderAdapters({
   endpoint,
   fetch: request,
   notifications,
+  now = () => new Date(),
   openSettings,
   platform,
   secureStore,
@@ -582,6 +618,10 @@ export function createProductionChangeReminderAdapters({
           // creates a new request identity instead of replaying an expired one.
           await secureStore.deleteItemAsync(registrationKey);
         }
+        if (registrationGone(response)) {
+          await secureStore.deleteItemAsync(registrationKey);
+          return { kind: 'unregistered' };
+        }
         return { kind: 'failed' };
       }
       const registration =
@@ -601,6 +641,7 @@ export function createProductionChangeReminderAdapters({
         oneWeekEnabled: pending.oneWeekEnabled,
         registrationRequestId: pending.registrationRequestId,
         ...registration,
+        lastContactAt: now().toISOString(),
         state: 'registered' as const,
         version: 4,
       });
@@ -670,17 +711,15 @@ export function createProductionChangeReminderAdapters({
       ) {
         return null;
       }
-      if (
-        (
-          await synchronize(currentHomeTimeZone, token, true, {
-            oneDayEnabled: saved.oneDayEnabled,
-            oneWeekEnabled: saved.oneWeekEnabled,
-          })
-        ).kind === 'enabled'
-      ) {
+      const result = await synchronize(currentHomeTimeZone, token, true, {
+        oneDayEnabled: saved.oneDayEnabled,
+        oneWeekEnabled: saved.oneWeekEnabled,
+      });
+      if (result.kind === 'enabled') {
         lastRefreshedToken = token;
         return { kind: 'succeeded' };
       }
+      if (result.kind === 'unregistered') return result;
     } catch {
       // A later token update or explicit retry uses the durable pending state.
     }
@@ -720,6 +759,61 @@ export function createProductionChangeReminderAdapters({
       () => undefined,
     );
     return next;
+  }
+
+  // Contact tells the service this registration is still in use, so it does
+  // not expire it. Only a success is recorded and nothing is shown for a
+  // failure, so the next foreground tries again. It runs queued, on the latest
+  // saved registration, so it cannot overwrite an update that finished first.
+  async function checkInWhenDue(
+    restored: Extract<ChangeReminderRestoreResult, { kind: 'registered' }>,
+  ): Promise<ChangeReminderRestoreResult> {
+    const { registration } = restored;
+    // Most foregrounds find nothing due and should cost nothing extra.
+    if (
+      registration.version !== 4 ||
+      !checkInDue(registration.lastContactAt, now())
+    ) {
+      return restored;
+    }
+    return enqueue(async () => {
+      try {
+        const registrationEndpoint =
+          parseReminderRegistrationEndpoint(endpoint);
+        const latest = await loadStoredState();
+        if (
+          registrationEndpoint === null ||
+          latest?.state !== 'registered' ||
+          latest.version !== 4 ||
+          !checkInDue(latest.lastContactAt, now())
+        ) {
+          return restored;
+        }
+        const response = await fetchWithTimeout(
+          request,
+          updateEndpoint(
+            registrationEndpoint,
+            latest.installationId,
+            '/check-in',
+          ),
+          {
+            headers: { authorization: `Bearer ${latest.credential}` },
+            method: 'POST',
+          },
+          timeoutMs,
+        );
+        if (registrationGone(response)) {
+          await secureStore.deleteItemAsync(registrationKey);
+          return { kind: 'unregistered' };
+        }
+        if (response.status !== 204) return restored;
+        const checkedIn = { ...latest, lastContactAt: now().toISOString() };
+        await saveStoredState(checkedIn);
+        return { ...restored, registration: checkedIn };
+      } catch {
+        return restored;
+      }
+    });
   }
 
   function queueTokenRefresh(
@@ -873,11 +967,11 @@ export function createProductionChangeReminderAdapters({
         };
       }
       if (!permission.granted) {
-        return {
+        return checkInWhenDue({
           kind: 'registered',
           notificationPermissionGranted: false,
           registration: saved,
-        };
+        });
       }
       let currentToken: string;
       try {
@@ -908,6 +1002,7 @@ export function createProductionChangeReminderAdapters({
             saved.installationId,
           );
         });
+        if (result.kind === 'unregistered') return result;
         if (result.kind !== 'enabled') {
           return { homeTimeZone: saved.homeTimeZone, kind: 'pending' };
         }
@@ -921,11 +1016,11 @@ export function createProductionChangeReminderAdapters({
           registration: refreshed,
         };
       }
-      return {
+      return checkInWhenDue({
         kind: 'registered',
         notificationPermissionGranted: permission.granted,
         registration: saved,
-      };
+      });
     },
     enable(homeTimeZone) {
       if (enableInFlight !== null) {

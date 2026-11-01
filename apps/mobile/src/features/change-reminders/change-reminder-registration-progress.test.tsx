@@ -472,3 +472,118 @@ it('leaves the busy state at the deadline when the response body stalls', async 
 
   await expectRetryThenEnabled(test, copy.changeReminders.failed.body);
 });
+
+describe('check-in on return to the app', () => {
+  const day = 24 * 60 * 60 * 1_000;
+  const enabledBody = copy.changeReminders.enabled.body({
+    oneDayEnabled: true,
+    oneWeekEnabled: true,
+  });
+
+  // Registers through the card, then sets the clock `elapsed` after the
+  // contact that recorded. Waiting moves the fake clock on a little, so the
+  // recorded time is read back rather than assumed. Replies after the first
+  // answer the check-ins that follow.
+  async function registeredThen(
+    checkIn: () => Promise<Response>,
+    elapsed = 30 * day,
+  ) {
+    jest.setSystemTime(new Date('2026-08-01T00:00:00.000Z'));
+    let requests = 0;
+    const test = setup({
+      fetchImplementation: async () =>
+        ++requests === 1 ? Response.json(registration) : checkIn(),
+    });
+    await startRegistration(test.adapters);
+    await screen.findByText(enabledBody);
+    const registeredAt = Date.parse(test.stored().lastContactAt);
+    jest.setSystemTime(registeredAt + elapsed);
+    return { registeredAt, test };
+  }
+
+  it('sends nothing before 30 days after the last contact', async () => {
+    const { test } = await registeredThen(
+      async () => new Response(null, { status: 204 }),
+      29 * day,
+    );
+
+    await act(async () => returnToApp?.('active'));
+
+    expect(await screen.findByText(enabledBody)).toBeTruthy();
+    expect(test.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('records the check-in without showing anything', async () => {
+    const { registeredAt, test } = await registeredThen(
+      async () => new Response(null, { status: 204 }),
+    );
+
+    await act(async () => returnToApp?.('active'));
+
+    await waitFor(() =>
+      expect(Date.parse(test.stored().lastContactAt)).toBeGreaterThanOrEqual(
+        registeredAt + 30 * day,
+      ),
+    );
+    expect(test.request).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(enabledBody)).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows nothing when a check-in fails, and tries again on the next return', async () => {
+    let attempts = 0;
+    const { registeredAt, test } = await registeredThen(async () => {
+      if (++attempts === 1) throw new TypeError('Network request failed');
+      return new Response(null, { status: 204 });
+    });
+
+    await act(async () => returnToApp?.('active'));
+    await waitFor(() => expect(test.request).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(enabledBody)).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(Date.parse(test.stored().lastContactAt)).toBe(registeredAt);
+
+    await act(async () => returnToApp?.('active'));
+    await waitFor(() =>
+      expect(Date.parse(test.stored().lastContactAt)).toBeGreaterThanOrEqual(
+        registeredAt + 30 * day,
+      ),
+    );
+    expect(test.request).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows Change Reminders off when the service no longer has the registration', async () => {
+    const { test } = await registeredThen(async () =>
+      Response.json({ error: 'Registration unavailable' }, { status: 404 }),
+    );
+
+    await act(async () => returnToApp?.('active'));
+
+    expect(
+      await screen.findByText(copy.changeReminders.untouched.body),
+    ).toBeTruthy();
+    expect(screen.queryByText(enabledBody)).toBeNull();
+    expect(
+      screen.getByRole('button', {
+        name: copy.changeReminders.untouched.action,
+      }),
+    ).toBeTruthy();
+    expect(test.stored()).toBeNull();
+  });
+
+  it('keeps showing reminders on when the platform answers 404 for a route it lacks', async () => {
+    const { registeredAt, test } = await registeredThen(
+      async () => new Response(null, { status: 404 }),
+    );
+
+    await act(async () => returnToApp?.('active'));
+
+    await waitFor(() => expect(test.request).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(enabledBody)).toBeTruthy();
+    expect(test.stored()).toMatchObject({
+      lastContactAt: new Date(registeredAt).toISOString(),
+      state: 'registered',
+    });
+  });
+});

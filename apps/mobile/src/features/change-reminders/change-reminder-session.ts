@@ -60,7 +60,10 @@ export type ChangeReminderSessionSnapshot =
       readonly preferences: ChangeReminderPreferences;
     }
   | EnabledSnapshot
-  | Exclude<ChangeReminderEnableResult, { readonly kind: 'enabled' }>;
+  | Exclude<
+      ChangeReminderEnableResult,
+      { readonly kind: 'enabled' } | { readonly kind: 'unregistered' }
+    >;
 
 export type ChangeReminderSessionEvent =
   | { readonly type: 'show-explainer' }
@@ -128,7 +131,10 @@ export function createChangeReminderSession({
 
   function publish(next: ChangeReminderSessionSnapshot) {
     if (next.kind === 'enabled') lastConfirmedPreferences = next.preferences;
-    if (next.kind === 'disabled') lastConfirmedPreferences = null;
+    // Neither leaves a registration whose timings a new one should inherit.
+    if (next.kind === 'disabled' || next.kind === 'untouched') {
+      lastConfirmedPreferences = null;
+    }
     snapshot = next;
     for (const listener of [...listeners]) listener();
   }
@@ -161,7 +167,9 @@ export function createChangeReminderSession({
             ? zonePermissionGranted
               ? enabledSnapshot(result, preferences)
               : { kind: 'permission-revoked' }
-            : { kind: 'zone-failed', preferences },
+            : result.kind === 'unregistered'
+              ? { kind: 'untouched' }
+              : { kind: 'zone-failed', preferences },
         );
       },
       () => {
@@ -283,7 +291,9 @@ export function createChangeReminderSession({
                   result,
                   lastConfirmedPreferences ?? defaultPreferences,
                 )
-              : result,
+              : result.kind === 'unregistered'
+                ? { kind: 'untouched' }
+                : result,
           );
       })
       .catch(() => {
@@ -320,11 +330,13 @@ export function createChangeReminderSession({
         publish(
           result.kind === 'enabled'
             ? enabledSnapshot(result, preferences)
-            : {
-                kind: 'preferences-failed',
-                preferences: confirmed,
-                proposedPreferences: preferences,
-              },
+            : result.kind === 'unregistered'
+              ? { kind: 'untouched' }
+              : {
+                  kind: 'preferences-failed',
+                  preferences: confirmed,
+                  proposedPreferences: preferences,
+                },
         );
       })
       .catch(() => {
@@ -433,7 +445,12 @@ export function createChangeReminderSession({
     if (snapshot.kind !== 'enabled' && snapshot.kind !== 'retry-pending') {
       return;
     }
-    if (result.kind === 'succeeded' && lastConfirmedPreferences !== null) {
+    if (result.kind === 'unregistered') {
+      publish({ kind: 'untouched' });
+    } else if (
+      result.kind === 'succeeded' &&
+      lastConfirmedPreferences !== null
+    ) {
       publish({ kind: 'enabled', preferences: lastConfirmedPreferences });
     } else {
       publish(

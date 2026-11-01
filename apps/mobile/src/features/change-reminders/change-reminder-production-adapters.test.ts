@@ -35,6 +35,7 @@ async function settled<T>(promise: Promise<T>, description: string) {
 }
 
 function harness({
+  clock = { now: new Date('2026-08-01T00:00:00.000Z') },
   createRegistrationRequestId = async () => 'a'.repeat(64),
   currentToken = 'fcm-token:with_valid.characters-123',
   deleteItemImplementation = async () => undefined,
@@ -55,6 +56,7 @@ function harness({
   storage = { value: null },
   timeoutMs = 100,
 }: {
+  readonly clock?: { now: Date };
   readonly createRegistrationRequestId?: () => Promise<string>;
   readonly currentToken?: string;
   readonly deleteItemImplementation?: () => Promise<void>;
@@ -97,6 +99,7 @@ function harness({
     createRegistrationRequestId,
     endpoint,
     fetch: request,
+    now: () => clock.now,
     notifications: {
       addPushTokenListener: jest.fn(
         (_listener: (token: { readonly data: unknown }) => void) => ({
@@ -136,6 +139,7 @@ function harness({
   return {
     adapters: createProductionChangeReminderAdapters(dependencies),
     calls,
+    clock,
     dependencies,
     stored: () => storage.value,
   };
@@ -507,6 +511,7 @@ describe('production Change Reminder adapters', () => {
       attemptGeneration: 1,
       deviceToken: 'fcm-token:with_valid.characters-123',
       homeTimeZone: 'Australia/Sydney',
+      lastContactAt: '2026-08-01T00:00:00.000Z',
       oneDayEnabled: true,
       oneWeekEnabled: true,
       registrationRequestId: 'a'.repeat(64),
@@ -521,6 +526,7 @@ describe('production Change Reminder adapters', () => {
         attemptGeneration: 1,
         deviceToken: 'fcm-token:with_valid.characters-123',
         homeTimeZone: 'Australia/Sydney',
+        lastContactAt: '2026-08-01T00:00:00.000Z',
         oneDayEnabled: true,
         oneWeekEnabled: true,
         registrationRequestId: 'a'.repeat(64),
@@ -662,6 +668,7 @@ describe('production Change Reminder adapters', () => {
       attemptGeneration: 5,
       deviceToken: 'fcm-token:with_valid.characters-123',
       homeTimeZone: 'Australia/Brisbane',
+      lastContactAt: '2026-08-01T00:00:00.000Z',
       oneDayEnabled: false,
       oneWeekEnabled: true,
       registrationRequestId: 'a'.repeat(64),
@@ -2737,5 +2744,635 @@ describe('production Change Reminder adapters', () => {
     expect(
       invalidGenerated.dependencies.secureStore.setItemAsync,
     ).not.toHaveBeenCalled();
+  });
+});
+
+describe('Change Reminder check-in', () => {
+  const dayMs = 24 * 60 * 60 * 1_000;
+  const contactTime = new Date('2026-08-01T00:00:00.000Z');
+  const daysAgo = (days: number) =>
+    new Date(contactTime.getTime() - days * dayMs).toISOString();
+  const checkInUrl = `https://reminders.example.test/reminder-subscriptions/${responseBody.installationId}/check-in`;
+  const accepted = async () => new Response(null, { status: 204 });
+  // The service's own answer for a registration it no longer holds.
+  const serviceGone = async () =>
+    Response.json({ error: 'Registration unavailable' }, { status: 404 });
+  const stateKey = 'change-reminder-registration-v2';
+
+  function registeredState(overrides: Record<string, unknown> = {}) {
+    return JSON.stringify({
+      ...responseBody,
+      attemptGeneration: 3,
+      deviceToken: 'fcm-token:with_valid.characters-123',
+      homeTimeZone: 'Australia/Sydney',
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
+      registrationRequestId: 'a'.repeat(64),
+      state: 'registered',
+      version: 4,
+      ...overrides,
+    });
+  }
+  const seeded = (overrides: Record<string, unknown> = {}) => ({
+    value: registeredState(overrides),
+  });
+
+  describe('when contact is due', () => {
+    it('posts to the installation check-in route with its credential and records the time', async () => {
+      const test = harness({
+        fetchImplementation: accepted,
+        storage: seeded(),
+      });
+      const before = JSON.parse(test.stored() ?? '');
+
+      await expect(test.adapters.restore()).resolves.toMatchObject({
+        kind: 'registered',
+        notificationPermissionGranted: true,
+        registration: { lastContactAt: contactTime.toISOString() },
+      });
+
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+      const [url, init] = test.dependencies.fetch.mock.calls[0] ?? [];
+      expect(url).toBe(checkInUrl);
+      expect(init).toMatchObject({
+        headers: { authorization: `Bearer ${responseBody.credential}` },
+        method: 'POST',
+      });
+      expect(init?.body).toBeUndefined();
+      // Contact is the only thing a check-in changes.
+      expect(JSON.parse(test.stored() ?? '')).toEqual({
+        ...before,
+        lastContactAt: contactTime.toISOString(),
+      });
+    });
+
+    async function restoreWithContactAgo(elapsedMs: number) {
+      const recorded = new Date(
+        contactTime.getTime() - elapsedMs,
+      ).toISOString();
+      const test = harness({
+        fetchImplementation: accepted,
+        storage: seeded({ lastContactAt: recorded }),
+      });
+      await test.adapters.restore();
+      return { recorded, test };
+    }
+
+    it('does not check in one millisecond short of 30 days', async () => {
+      const { recorded, test } = await restoreWithContactAgo(30 * dayMs - 1);
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+      expect(JSON.parse(test.stored() ?? '').lastContactAt).toBe(recorded);
+    });
+
+    it('checks in at exactly 30 days', async () => {
+      const { test } = await restoreWithContactAgo(30 * dayMs);
+
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(test.stored() ?? '').lastContactAt).toBe(
+        contactTime.toISOString(),
+      );
+    });
+
+    it('checks in after more than 30 days', async () => {
+      const { test } = await restoreWithContactAgo(31 * dayMs);
+
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    // A clock set back would otherwise hold off every check-in until it
+    // caught up with the recorded time.
+    it('treats a last contact in the future as due', async () => {
+      const test = harness({
+        fetchImplementation: accepted,
+        storage: seeded({ lastContactAt: daysAgo(-1) }),
+      });
+
+      await test.adapters.restore();
+
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(test.stored() ?? '').lastContactAt).toBe(
+        contactTime.toISOString(),
+      );
+    });
+
+    it('does no extra work on a foreground where nothing is due', async () => {
+      const test = harness({
+        fetchImplementation: accepted,
+        storage: seeded({ lastContactAt: daysAgo(1) }),
+      });
+
+      await test.adapters.restore();
+
+      // The one read restore always makes; a check-in would read again.
+      expect(test.dependencies.secureStore.getItemAsync).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+    });
+
+    it('does not check in again once contact is recorded', async () => {
+      const test = harness({
+        fetchImplementation: accepted,
+        storage: seeded(),
+      });
+
+      await test.adapters.restore();
+      await test.adapters.restore();
+
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('checks in while notification permission is off', async () => {
+      const test = harness({
+        existingPermission: {
+          canAskAgain: false,
+          granted: false,
+          status: PermissionStatus.DENIED,
+        },
+        fetchImplementation: accepted,
+        storage: seeded(),
+      });
+
+      await expect(test.adapters.restore()).resolves.toMatchObject({
+        kind: 'registered',
+        notificationPermissionGranted: false,
+      });
+
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(test.stored() ?? '').lastContactAt).toBe(
+        contactTime.toISOString(),
+      );
+    });
+
+    it('records contact on the latest saved registration, not the one it first read', async () => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const test = harness({
+        fetchImplementation: accepted,
+        storage: seeded({ lastContactAt: daysAgo(40) }),
+      });
+      jest
+        .mocked(test.dependencies.notifications.getPermissionsAsync)
+        .mockImplementationOnce(async () => {
+          await held;
+          return {
+            canAskAgain: true,
+            granted: true,
+            status: PermissionStatus.GRANTED,
+          };
+        });
+      // Restore has read the Sydney registration and now waits.
+      const restoring = test.adapters.restore();
+      await expect(
+        test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+      ).resolves.toMatchObject({ kind: 'enabled' });
+      const later = new Date(contactTime.getTime() + 30 * dayMs);
+      test.clock.now = later;
+      release();
+
+      await expect(settled(restoring, 'restore')).resolves.toMatchObject({
+        kind: 'registered',
+        registration: { homeTimeZone: 'Australia/Brisbane' },
+      });
+
+      expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+        homeTimeZone: 'Australia/Brisbane',
+        lastContactAt: later.toISOString(),
+        state: 'registered',
+      });
+    });
+  });
+
+  it('counts a registration as contact', async () => {
+    const test = harness();
+
+    await test.adapters.enable('Australia/Sydney');
+    expect(JSON.parse(test.stored() ?? '').lastContactAt).toBe(
+      contactTime.toISOString(),
+    );
+
+    // Still inside 30 days of that registration, so nothing is sent.
+    test.dependencies.fetch.mockClear();
+    test.clock.now = new Date(contactTime.getTime() + 30 * dayMs - 1);
+    await test.adapters.restore();
+    expect(test.dependencies.fetch).not.toHaveBeenCalled();
+  });
+
+  it('counts an update as contact', async () => {
+    const test = harness({
+      fetchImplementation: accepted,
+      storage: seeded({ lastContactAt: daysAgo(10) }),
+    });
+
+    await expect(
+      test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+    ).resolves.toMatchObject({ kind: 'enabled' });
+
+    expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+      homeTimeZone: 'Australia/Brisbane',
+      lastContactAt: contactTime.toISOString(),
+    });
+  });
+
+  it('gives a registration saved before contact was recorded its first time through its update', async () => {
+    const test = harness({
+      fetchImplementation: accepted,
+      storage: {
+        value: JSON.stringify({
+          ...responseBody,
+          attemptGeneration: 3,
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          registrationRequestId: 'a'.repeat(64),
+          state: 'registered',
+          version: 2,
+        }),
+      },
+    });
+
+    await test.adapters.restore();
+
+    // The upgrade is itself contact, so no separate check-in follows it.
+    expect(
+      test.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
+    ).toEqual(['PUT']);
+    expect(JSON.parse(test.stored() ?? '').lastContactAt).toBe(
+      contactTime.toISOString(),
+    );
+  });
+
+  describe('when the check-in does not succeed', () => {
+    it.each<[string, () => Promise<Response>]>([
+      [
+        'a network failure',
+        async () => {
+          throw new TypeError('Network request failed');
+        },
+      ],
+      ['a server error', async () => new Response(null, { status: 503 })],
+      ['a throttled request', async () => new Response(null, { status: 429 })],
+      [
+        'a rejected credential',
+        async () => Response.json({ error: 'Unauthorized' }, { status: 401 }),
+      ],
+      [
+        'a success that is not the expected 204',
+        async () => new Response('<html>Sign in to Wi-Fi</html>'),
+      ],
+      // Not yet deployed on an older service: the platform answers, not the
+      // service.
+      ['a 404 with no body', async () => new Response(null, { status: 404 })],
+      [
+        'a 404 from the platform with a body of its own',
+        async () => new Response('Not Found', { status: 404 }),
+      ],
+      [
+        'the service wording on another status',
+        async () =>
+          Response.json({ error: 'Registration unavailable' }, { status: 503 }),
+      ],
+    ])(
+      'keeps the registration and records nothing after %s',
+      async (_name, reply) => {
+        const test = harness({ fetchImplementation: reply, storage: seeded() });
+        const before = test.stored();
+
+        await expect(test.adapters.restore()).resolves.toMatchObject({
+          kind: 'registered',
+          notificationPermissionGranted: true,
+        });
+
+        expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+        expect(test.stored()).toBe(before);
+        expect(
+          test.dependencies.secureStore.deleteItemAsync,
+        ).not.toHaveBeenCalled();
+
+        // Nothing was recorded, so the next foreground tries again.
+        await test.adapters.restore();
+        expect(test.dependencies.fetch).toHaveBeenCalledTimes(2);
+      },
+    );
+
+    it('keeps the registration when the request stalls past its deadline', async () => {
+      const test = harness({
+        fetchImplementation: () => new Promise(() => undefined),
+        storage: seeded(),
+        timeoutMs: 1,
+      });
+      const before = test.stored();
+
+      await expect(
+        settled(test.adapters.restore(), 'restore with a stalled check-in'),
+      ).resolves.toMatchObject({ kind: 'registered' });
+
+      expect(test.stored()).toBe(before);
+    });
+
+    it('keeps the registration when recording the time fails', async () => {
+      const test = harness({
+        fetchImplementation: accepted,
+        setItemImplementation: async () => {
+          throw new Error('SecureStore write failed');
+        },
+        storage: seeded(),
+      });
+      const before = test.stored();
+
+      await expect(test.adapters.restore()).resolves.toMatchObject({
+        kind: 'registered',
+      });
+
+      expect(test.stored()).toBe(before);
+    });
+
+    it('then succeeds and records the time on a later foreground', async () => {
+      const fetchImplementation = jest
+        .fn()
+        .mockImplementationOnce(async () => {
+          throw new TypeError('Network request failed');
+        })
+        .mockImplementationOnce(accepted) as jest.MockedFunction<typeof fetch>;
+      const test = harness({ fetchImplementation, storage: seeded() });
+
+      await test.adapters.restore();
+      expect(JSON.parse(test.stored() ?? '').lastContactAt).toBeUndefined();
+
+      await test.adapters.restore();
+      expect(JSON.parse(test.stored() ?? '').lastContactAt).toBe(
+        contactTime.toISOString(),
+      );
+    });
+  });
+
+  describe('when the service says the registration is unavailable', () => {
+    it('clears it and reports Change Reminders as not registered', async () => {
+      const test = harness({
+        fetchImplementation: serviceGone,
+        storage: seeded(),
+      });
+
+      await expect(test.adapters.restore()).resolves.toEqual({
+        kind: 'unregistered',
+      });
+
+      expect(test.stored()).toBeNull();
+      expect(
+        test.dependencies.secureStore.deleteItemAsync,
+      ).toHaveBeenCalledWith(stateKey);
+      // With nothing left to check in, later foregrounds send nothing.
+      await expect(test.adapters.restore()).resolves.toEqual({
+        kind: 'unregistered',
+      });
+      expect(test.dependencies.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets the user enable reminders again with a fresh registration', async () => {
+      const fetchImplementation = jest
+        .fn()
+        .mockImplementationOnce(serviceGone)
+        .mockImplementationOnce(async () =>
+          Response.json(responseBody),
+        ) as jest.MockedFunction<typeof fetch>;
+      const test = harness({ fetchImplementation, storage: seeded() });
+      await test.adapters.restore();
+
+      await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+        kind: 'enabled',
+      });
+
+      const [url, init] = test.dependencies.fetch.mock.calls[1] ?? [];
+      expect(url).toBe('https://reminders.example.test/reminder-subscriptions');
+      expect(init).toMatchObject({ method: 'POST' });
+      expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+        attemptGeneration: 1,
+        lastContactAt: contactTime.toISOString(),
+        state: 'registered',
+      });
+    });
+  });
+
+  describe('when there is no registration to check in', () => {
+    const pendingDelete = JSON.stringify({
+      ...responseBody,
+      attemptGeneration: 3,
+      homeTimeZone: 'Australia/Sydney',
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
+      registrationRequestId: 'a'.repeat(64),
+      state: 'pending-delete',
+      version: 4,
+    });
+    const pending = JSON.stringify({
+      attemptGeneration: 3,
+      deviceToken: 'fcm-token:with_valid.characters-123',
+      homeTimeZone: 'Australia/Sydney',
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
+      registrationRequestId: 'a'.repeat(64),
+      state: 'pending',
+      version: 4,
+    });
+
+    it.each<[string, string | null, string]>([
+      ['nothing is saved', null, 'unregistered'],
+      ['registration is still pending', pending, 'pending'],
+      [
+        'an update is still pending',
+        registeredState({ state: 'pending-update' }),
+        'pending',
+      ],
+      ['a deletion is still pending', pendingDelete, 'deleting'],
+    ])('sends nothing when %s', async (_name, saved, kind) => {
+      const test = harness({
+        fetchImplementation: accepted,
+        storage: { value: saved },
+      });
+
+      await expect(test.adapters.restore()).resolves.toMatchObject({ kind });
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+    });
+
+    it('sends nothing on the web', async () => {
+      const test = harness({
+        fetchImplementation: accepted,
+        platform: 'web',
+        storage: seeded(),
+      });
+
+      await expect(test.adapters.restore()).resolves.toEqual({
+        kind: 'unavailable',
+      });
+
+      expect(test.dependencies.fetch).not.toHaveBeenCalled();
+      expect(test.dependencies.secureStore.getItemAsync).not.toHaveBeenCalled();
+    });
+
+    // A restored iOS keychain record is deleted, not kept alive.
+    it('deletes, rather than checks in, a registration left by a previous install', async () => {
+      const test = harness({
+        existingPermission: {
+          canAskAgain: true,
+          granted: false,
+          status: PermissionStatus.UNDETERMINED,
+        },
+        fetchImplementation: accepted,
+        storage: seeded(),
+      });
+
+      await expect(test.adapters.restore()).resolves.toEqual({
+        kind: 'unregistered',
+      });
+
+      expect(
+        test.dependencies.fetch.mock.calls.map((call) => call[1]?.method),
+      ).toEqual(['DELETE']);
+    });
+  });
+
+  describe('when an update finds the registration gone', () => {
+    it('clears it and reports not registered for a Home Time Zone update', async () => {
+      const test = harness({
+        fetchImplementation: serviceGone,
+        storage: seeded(),
+      });
+
+      await expect(
+        test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+      ).resolves.toEqual({ kind: 'unregistered' });
+
+      expect(test.stored()).toBeNull();
+    });
+
+    it('clears it and reports not registered for a timing update', async () => {
+      const test = harness({
+        fetchImplementation: serviceGone,
+        storage: seeded(),
+      });
+
+      await expect(
+        test.adapters.updatePreferences({
+          oneDayEnabled: false,
+          oneWeekEnabled: true,
+        }),
+      ).resolves.toEqual({ kind: 'unregistered' });
+
+      expect(test.stored()).toBeNull();
+    });
+
+    it('clears it and reports not registered for a token replaced while away', async () => {
+      const test = harness({
+        currentToken: 'fcm-token:replacement_valid.characters-456',
+        fetchImplementation: serviceGone,
+        storage: seeded(),
+      });
+
+      await expect(test.adapters.restore()).resolves.toEqual({
+        kind: 'unregistered',
+      });
+
+      expect(test.stored()).toBeNull();
+    });
+
+    it('clears it and reports not registered when explicit enabling retries a pending update', async () => {
+      const test = harness({
+        fetchImplementation: serviceGone,
+        storage: seeded({ state: 'pending-update' }),
+      });
+
+      await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+        kind: 'unregistered',
+      });
+
+      expect(test.stored()).toBeNull();
+    });
+
+    it('clears it and reports not registered for a refreshed token', async () => {
+      let listener: ((token: { readonly data: unknown }) => void) | undefined;
+      const outcomes: unknown[] = [];
+      const test = harness({
+        fetchImplementation: serviceGone,
+        storage: seeded(),
+      });
+      jest
+        .mocked(test.dependencies.notifications.addPushTokenListener)
+        .mockImplementation((nextListener) => {
+          listener = nextListener;
+          return { remove: jest.fn() };
+        });
+      test.adapters.startTokenRefresh('Australia/Sydney', (result) =>
+        outcomes.push(result),
+      );
+
+      listener?.({ data: 'fcm-token:replacement_valid.characters-456' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(outcomes).toEqual([{ kind: 'unregistered' }]);
+      expect(test.stored()).toBeNull();
+    });
+
+    it.each<[string, (test: ReturnType<typeof harness>) => Promise<unknown>]>([
+      [
+        'a Home Time Zone update',
+        (test) => test.adapters.updateHomeTimeZone!('Australia/Brisbane'),
+      ],
+      [
+        'a timing update',
+        (test) =>
+          test.adapters.updatePreferences({
+            oneDayEnabled: false,
+            oneWeekEnabled: true,
+          }),
+      ],
+    ])(
+      'treats a bare platform 404 as an ordinary failure for %s',
+      async (_name, update) => {
+        const test = harness({
+          fetchImplementation: async () => new Response(null, { status: 404 }),
+          storage: seeded(),
+        });
+
+        await expect(update(test)).resolves.toEqual({ kind: 'failed' });
+
+        expect(JSON.parse(test.stored() ?? '')).toMatchObject({
+          state: 'pending-update',
+        });
+        expect(
+          test.dependencies.secureStore.deleteItemAsync,
+        ).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  describe('the saved contact time', () => {
+    it.each<[string, unknown]>([
+      ['text that is not a time', 'yesterday'],
+      ['a number', 1_785_000_000_000],
+    ])('is rejected as %s', async (_name, lastContactAt) => {
+      const test = harness({ storage: seeded({ lastContactAt }) });
+
+      await expect(test.adapters.restore()).rejects.toThrow(
+        'Invalid stored reminder state',
+      );
+    });
+
+    it('is rejected on a record that is not registered', async () => {
+      const test = harness({
+        storage: seeded({
+          lastContactAt: contactTime.toISOString(),
+          state: 'pending-update',
+        }),
+      });
+
+      await expect(test.adapters.restore()).rejects.toThrow(
+        'Invalid stored reminder state',
+      );
+    });
   });
 });
