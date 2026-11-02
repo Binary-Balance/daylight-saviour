@@ -1431,6 +1431,53 @@ describe('Azure Table mapping', () => {
     assert.equal(pageSize, 100);
   });
 
+  // Azure can answer a filtered scan with an empty page and a continuation
+  // token, so the rows after it must still be listed.
+  it('lists the rows after an empty page', async () => {
+    const row = {
+      attemptGeneration: 3,
+      credentialHash: 'hash',
+      deviceToken: 'device-token',
+      etag: 'etag',
+      homeTimeZone: 'Australia/Sydney',
+      oneDayEnabled: true,
+      oneWeekEnabled: true,
+      partitionKey: 'subscriptions-v1',
+      platform: 'ios',
+      rowKey: 'after-empty',
+    };
+    const azureStore = createAzureReminderSubscriptionStore(
+      {
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      },
+      {
+        createCredential: () => ({
+          getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+        }),
+        createTableClient: () =>
+          ({
+            listEntities: () => ({
+              byPage: () =>
+                (async function* () {
+                  yield Object.assign([], { continuationToken: 'next' });
+                  yield [row];
+                })(),
+            }),
+          }) as never,
+      },
+    );
+
+    const pages = [];
+    for await (const page of azureStore.listZoneSubscriptionPages(
+      'Australia/Sydney',
+    )) {
+      pages.push(page.map((snapshot) => snapshot.installationId));
+    }
+
+    assert.deepEqual(pages, [[], ['after-empty']]);
+  });
+
   // Dispatch warns on last contact, so a value it cannot read must not reach
   // it as a time.
   it('leaves last contact out of a snapshot when the row has no readable time', async () => {
