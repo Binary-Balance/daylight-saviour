@@ -180,6 +180,15 @@ function identityOf(
   };
 }
 
+/**
+ * Throws for a plan no send can use. This is not the same as a plan that
+ * changed: a disabled timing is valid, and compares as changed.
+ */
+function assertUsablePlan(context: ReminderDispatchContext) {
+  identityOf(context);
+  direction(context.delivery.changeDirection);
+}
+
 function parsedContext(context: ReminderDispatchContext) {
   const identity = identityOf(context);
   const delivery = context.delivery;
@@ -518,10 +527,10 @@ export function createReminderDispatchOperation(
           initial.subscription.installationId,
           identity,
         );
-        if (refused !== null) parsedContext(refused);
+        if (refused !== null) assertUsablePlan(refused);
       } catch {
-        // Unreadable or invalid is not changed: the record stays open for a
-        // later run.
+        // An unreadable or unusable plan is not a changed one: the record
+        // stays open for a later run.
         refused = finalCurrent;
       }
       if (refused === null || !sameProviderContext(refused, finalCurrent)) {
@@ -583,9 +592,9 @@ export function createReminderDispatchOperation(
         initial.subscription.installationId,
         identity,
       );
-      // Thrown after the send intent, an invalid plan would leave the
-      // delivery uncertain though nothing was sent.
-      if (finalCurrent !== null) parsedContext(finalCurrent);
+      // Thrown later, this would leave the delivery uncertain, though nothing
+      // was sent.
+      if (finalCurrent !== null) assertUsablePlan(finalCurrent);
     } catch {
       await dependencies.ledger.cancelBeforeProvider(
         claim,

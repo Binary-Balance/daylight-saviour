@@ -1709,6 +1709,34 @@ describe('reminder dispatch operation', () => {
     assert.equal(await authorizedAfter(context()), true);
   });
 
+  // Dispatches, with the plan becoming `next` once the send intent is saved.
+  async function dispatchChangedAfterIntent(next: ReminderDispatchContext) {
+    const fixture = operationFixture();
+    const operation = createReminderDispatchOperation({
+      clock: () => new Date(window.startsAt),
+      ledger: {
+        ...fixture.ledger,
+        beginSend: async (claim, at) => {
+          const started = await fixture.ledger.beginSend(claim, at);
+          fixture.setCurrent(next);
+          return started;
+        },
+      },
+      provider: {
+        send: async () => {
+          throw new Error('Must not reach the provider');
+        },
+      },
+      readCurrentContext: async () => fixture.getCurrent(),
+      subscriptionStore: {
+        getSubscriptionSnapshot: async () => fixture.getCurrent().subscription,
+        removeIfDeviceTokenAndGenerationMatches: async () => 'removed',
+      },
+    });
+    const result = await operation.dispatch(context());
+    return { record: await fixture.ledger.get(identity), result };
+  }
+
   for (const [name, invalid] of [
     [
       'an unknown Home Time Zone',
@@ -1758,40 +1786,47 @@ describe('reminder dispatch operation', () => {
         'transient-failure',
       );
     });
+  }
 
+  for (const [name, invalid] of [
+    [
+      'an unknown Home Time Zone',
+      context({
+        delivery: { ...context().delivery, homeTimeZone: 'Australia/Nowhere' },
+      }),
+    ],
+    [
+      'an invalid generation',
+      context({ subscription: { ...subscription, attemptGeneration: 0 } }),
+    ],
+    [
+      'an unknown direction',
+      context({
+        delivery: {
+          ...context().delivery,
+          changeDirection: 'sideways' as never,
+        },
+      }),
+    ],
+  ] as const) {
     it(`sends nothing for ${name} found after the send intent`, async () => {
-      const fixture = operationFixture();
-      const operation = createReminderDispatchOperation({
-        clock: () => new Date(window.startsAt),
-        ledger: {
-          ...fixture.ledger,
-          beginSend: async (claim, at) => {
-            const started = await fixture.ledger.beginSend(claim, at);
-            fixture.setCurrent(invalid);
-            return started;
-          },
-        },
-        provider: {
-          send: async () => {
-            throw new Error('Must not reach the provider');
-          },
-        },
-        readCurrentContext: async () => fixture.getCurrent(),
-        subscriptionStore: {
-          getSubscriptionSnapshot: async () =>
-            fixture.getCurrent().subscription,
-          removeIfDeviceTokenAndGenerationMatches: async () => 'removed',
-        },
-      });
-
-      const result = await operation.dispatch(context());
+      const { record, result } = await dispatchChangedAfterIntent(invalid);
 
       assert.equal(result.kind, 'transient-failure');
-      const record = await fixture.ledger.get(identity);
       assert.equal(record?.sendStartedAt, undefined);
       assert.notEqual(record?.status, 'uncertain');
     });
   }
+
+  // A disabled timing is a valid plan that changed, not an unusable one, so
+  // no later run can reach this delivery to finish it.
+  it('closes a delivery whose timing is turned off after the send intent', async () => {
+    const { result } = await dispatchChangedAfterIntent(
+      context({ subscription: { ...subscription, oneWeekEnabled: false } }),
+    );
+
+    assert.equal(result.kind, 'stale');
+  });
 
   for (const [change, next, initial] of [
     ...registrationChanges,
