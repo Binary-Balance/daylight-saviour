@@ -238,7 +238,13 @@ describe('productionHomeTimeZoneAdapters', () => {
       process.env[trustedKeysVariable] = JSON.stringify({
         'key-1': `${'A'.repeat(43)}=`,
       });
-      mockExpoFetch.mockRejectedValue(new Error('offline'));
+      // Handled at once, so a mutant that drops this promise fails an
+      // assertion rather than crashing Jest on an unhandled rejection.
+      mockExpoFetch.mockImplementation(() => {
+        const offline = Promise.reject<never>(new Error('offline'));
+        offline.catch(() => undefined);
+        return offline;
+      });
       const { timeZoneDataPacks } = loadAdapters();
       expect(timeZoneDataPacks.getSnapshot().remoteEnabled).toBe(true);
 
