@@ -52,10 +52,13 @@ import {
 } from './reminder-subscriptions.ts';
 
 const sendConcurrency = 8;
-// ponytail: a zone past 5,000 subscriptions never reaches its later rows, as
-// each run restarts at the first page. The page-limit event is the signal to
-// add a durable cursor.
-const maxPagesPerQuery = 50;
+// Flex Consumption stops an execution after 30 minutes unless host.json sets
+// functionTimeout. The zone sweeps, then settlement, may each start work for
+// this long. That leaves most of the limit for the sends in flight and the
+// closed-window check, and a run that settles quickly ends within the 10
+// minutes a platform update waits for it. A bigger budget reaches a bigger
+// zone, as each run restarts it at the first page and skips what is recorded.
+const runBudgetMs = 8 * 60 * 1000;
 // Each window lasts 12 hours, so a window open this long ago has closed, and its
 // last run has had an hour to finish. Every run in the following 12 hours
 // checks it, which outlasts a shorter pack or storage fault after it closes.
@@ -79,10 +82,10 @@ type ReminderDispatchEvent =
   | 'reminder-dispatch-operation-failed'
   | 'reminder-dispatch-pack-horizon-invalid'
   | 'reminder-dispatch-pack-unavailable'
-  | 'reminder-dispatch-page-limit-reached'
   | 'reminder-dispatch-pending'
   | 'reminder-dispatch-permanent-failure'
   | 'reminder-dispatch-stale'
+  | 'reminder-dispatch-time-budget-reached'
   | 'reminder-dispatch-transient-failure'
   | 'reminder-dispatch-uncertain'
   | `reminder-dispatch-window-${ReminderDispatchWindowReport}`;
@@ -196,16 +199,34 @@ function eventLog(log: (event: string) => void) {
 }
 
 type EventLog = ReturnType<typeof eventLog>;
+type BudgetSpent = () => boolean;
+
+/** Returns a test for whether `runBudgetMs` has passed since `startedAt`. */
+function budgetFrom(clock: () => Date, startedAt: Date): BudgetSpent {
+  const endsAt = startedAt.getTime() + runBudgetMs;
+  return () => clock().getTime() >= endsAt;
+}
 
 async function forEachBounded<T>(
   items: readonly T[],
   work: (item: T) => Promise<void>,
+  budgetSpent: BudgetSpent,
 ) {
   const remaining = items.values();
+  let startedAll = true;
+  // A spent budget starts no more items, and the ones in flight finish. The
+  // rest are dropped: the next run reaches them from the first page.
   const worker = async () => {
-    for (const item of remaining) await work(item);
+    for (const item of remaining) {
+      if (budgetSpent()) {
+        startedAll = false;
+        return;
+      }
+      await work(item);
+    }
   };
   await Promise.all(Array.from({ length: sendConcurrency }, worker));
+  return startedAll;
 }
 
 async function countResult(
@@ -229,25 +250,36 @@ async function countResult(
   }
 }
 
-/** Returns whether the pages ran out, rather than a failure or the limit. */
-async function processPages<T>(
+/**
+ * Returns whether the pages ran out, rather than a failure or the budget. An
+ * empty page does not end a query, as Azure can return one with a continuation
+ * token. A budget that ends just after the last page also returns false: the
+ * next run finds those rows recorded and completes the zone.
+ */
+export async function processPages<T>(
   pages: AsyncIterable<readonly T[]>,
   work: (item: T) => Promise<ReminderDispatchResult>,
   count: CountEvent,
+  budgetSpent: BudgetSpent,
   afterPage?: () => void,
 ) {
-  let pagesRead = 0;
+  const stop = () => {
+    count('reminder-dispatch-time-budget-reached');
+    return false;
+  };
   try {
+    // Checked before the first page too, so a spent budget starts no query.
+    if (budgetSpent()) return stop();
     for await (const page of pages) {
-      await forEachBounded(page, (item) =>
-        countResult(() => work(item), count),
+      const startedAll = await forEachBounded(
+        page,
+        (item) => countResult(() => work(item), count),
+        budgetSpent,
       );
       afterPage?.();
-      pagesRead += 1;
-      if (pagesRead === maxPagesPerQuery) {
-        count('reminder-dispatch-page-limit-reached');
-        return false;
-      }
+      // A sweep marker cannot be undone, so a page cut short must not depend
+      // on a second clock read agreeing with the first.
+      if (!startedAll || budgetSpent()) return stop();
     }
     return true;
   } catch {
@@ -328,12 +360,17 @@ async function dispatchDueZones(
     },
   );
 
+  const budgetSpent = budgetFrom(dependencies.clock, plannedAt);
+  // Zones run in pack order, and each run restarts every zone at its first
+  // page. A zone the budget stops before it starts is recorded as incomplete
+  // too, so `window-sweep-incomplete` reports the shortfall, not an outage.
   for (const { plans, zone } of zones) {
     const pages = dependencies.subscriptions.listZoneSubscriptionPages(zone);
     const reachedLastPage = await processPages(
       contextPages(pages, pack, plannedAt),
       (context) => operation.dispatch(context),
       events.count,
+      budgetSpent,
     );
     try {
       for (const plan of plans) {
@@ -403,12 +440,16 @@ export async function runReminderDispatch(
   }
 
   const operation = createOperation(dependencies, async () => null);
+  // Settlement gets a budget of its own, so zone sweeps that spent theirs
+  // cannot starve it.
+  const settlementStartedAt = dependencies.clock();
   await processPages(
-    dependencies.ledger.listUnsettledPages(dependencies.clock(), () =>
+    dependencies.ledger.listUnsettledPages(settlementStartedAt, () =>
       events.count('reminder-dispatch-ledger-row-invalid'),
     ),
     (record) => operation.settle(record),
     events.count,
+    budgetFrom(dependencies.clock, settlementStartedAt),
     // Settlement runs last, so a timeout is most likely to land here.
     () => events.flush(),
   );

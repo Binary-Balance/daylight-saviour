@@ -17,6 +17,7 @@ import {
   createActivePackReader,
   createReminderDispatchProvider,
   createReminderDispatchRunner,
+  processPages,
   runReminderDispatch,
   type ReminderDispatchBoundaries,
 } from './reminder-dispatch-runtime.ts';
@@ -40,6 +41,20 @@ const oneDayDuring = new Date('2026-10-03T01:00:00.000Z');
 const oneDayEnd = new Date('2026-10-03T11:00:00.000Z');
 const pageSize = 100;
 const sydney = 'zone=Australia/Sydney';
+// How long a run may start work after it begins, for the zone sweeps and then
+// for settlement. Pinned here so a change shows in these tests and the README.
+const budgetMs = 8 * 60 * 1000;
+// Zones with a one-week window open at `during`, in the order the pack lists them.
+const dueZones = [
+  'Australia/Sydney',
+  'Australia/Broken_Hill',
+  'Australia/Melbourne',
+  'Australia/Hobart',
+  'Australia/Adelaide',
+  'Australia/Lord_Howe',
+  'Antarctica/Macquarie',
+  'Pacific/Norfolk',
+];
 const packFile = new URL(
   '../../../packages/time-zone-data/generated/australian-coverage.pack.json',
   import.meta.url,
@@ -53,13 +68,13 @@ function activePack() {
 
 // Fails a test whose awaited work never settles, instead of letting it hang:
 // Seshat treats a hang as an unresolved mutant and withholds the score.
-function settled<T>(work: Promise<T>): Promise<T> {
+function settled<T>(work: Promise<T>, limitMs = 5000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(
       () =>
         reject(new assert.AssertionError({ message: 'Work did not settle' })),
-      5000,
+      limitMs,
     );
   });
   return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
@@ -137,13 +152,21 @@ function memoryLedgerTable() {
 function harness(
   rows: readonly Record<string, unknown>[],
   options: {
+    // Empty pages the store returns before each page of rows, as Azure does
+    // when a scan finds nothing yet and hands back a continuation token.
+    readonly emptyPagesBefore?: number;
     readonly now?: Date;
+    // Runs as the store hands out a page, so time can pass between pages.
+    readonly onPage?: () => void;
     readonly outcome?: (
       request: ReminderDispatchProviderRequest,
     ) => Promise<ReminderDispatchProviderResult>;
     readonly prepare?: (
       request: ReminderDispatchProviderRequest,
     ) => Promise<void>;
+    readonly rowsPerPage?: number;
+    // How long each send takes on the injected clock.
+    readonly sendMs?: number;
   } = {},
 ) {
   const ledgerTable = memoryLedgerTable();
@@ -181,9 +204,20 @@ function harness(
         const zone = [...subscriptions.values()].filter(
           (row) => row.homeTimeZone === homeTimeZone,
         );
-        for (let start = 0; start < zone.length; start += pageSize) {
+        const rowsPerPage = options.rowsPerPage ?? pageSize;
+        for (let start = 0; start < zone.length; start += rowsPerPage) {
+          for (
+            let empty = 0;
+            empty < (options.emptyPagesBefore ?? 0);
+            empty++
+          ) {
+            operations.pages += 1;
+            options.onPage?.();
+            yield [] as never;
+          }
           operations.pages += 1;
-          yield zone.slice(start, start + pageSize) as never;
+          options.onPage?.();
+          yield zone.slice(start, start + rowsPerPage) as never;
         }
       },
       merge: async () => {
@@ -229,6 +263,7 @@ function harness(
         );
         try {
           await pause();
+          state.now = new Date(state.now.getTime() + (options.sendMs ?? 0));
           await options.prepare?.(request);
           if (!(await authorize())) return { kind: 'not-authorized' } as const;
           sent.push(request);
@@ -248,7 +283,8 @@ function harness(
     ledgerRows: ledgerTable.rows,
     logs,
     operations,
-    run: () => settled(runReminderDispatch(dependencies)),
+    run: (limitMs?: number) =>
+      settled(runReminderDispatch(dependencies), limitMs),
     sent,
     state,
     subscriptions,
@@ -257,6 +293,26 @@ function harness(
 
 function statuses(test: ReturnType<typeof harness>) {
   return [...test.ledgerRows.values()].flatMap((row) => row.status ?? []);
+}
+
+function sweepStates(test: ReturnType<typeof harness>) {
+  return [...test.ledgerRows.values()].flatMap((row) => row.sweep ?? []);
+}
+
+function advance(test: ReturnType<typeof harness>, ms: number) {
+  test.state.now = new Date(test.state.now.getTime() + ms);
+}
+
+// Rows ask for the one-week reminder only, the one window open at `during`.
+// Planning dominates the cost of a row, and it costs less with one timing.
+function zoneRows(zone: string, count: number) {
+  const name = zone.slice(zone.indexOf('/') + 1).toLowerCase();
+  return Array.from({ length: count }, (_value, index) =>
+    subscriptionRow(`${name}${index}`, {
+      homeTimeZone: zone,
+      oneDayEnabled: false,
+    }),
+  );
 }
 
 const identity = (name: string) => ({
@@ -521,25 +577,242 @@ describe('partitioned reminder dispatch', () => {
     ]);
   });
 
-  it('stops at the page limit and says so', async () => {
-    const test = harness([]);
-    test.dependencies.subscriptions = {
-      ...test.dependencies.subscriptions,
-      async *listZoneSubscriptionPages(zone) {
-        if (zone !== 'Australia/Sydney') return;
-        for (let page = 0; page < 60; page += 1) {
-          test.operations.pages += 1;
-          yield [];
-        }
-      },
+  describe('time budget', () => {
+    const minute = 60 * 1000;
+    const budgetLine = (zone: string) =>
+      `reminder-dispatch-time-budget-reached zone=${zone} count=1`;
+    const budgetLines = (test: ReturnType<typeof harness>) =>
+      test.logs.filter((line) => line.includes('time-budget-reached'));
+    const installationIds = (test: ReturnType<typeof harness>) =>
+      test.sent.map((request) => request.subscription.installationId);
+    // Assumes a run every ten minutes while runs use their budget.
+    const startRun = (test: ReturnType<typeof harness>, run: number) => {
+      test.logs.length = 0;
+      test.state.now = new Date(during.getTime() + run * 10 * minute);
     };
 
-    await test.run();
+    it('does not report a page cut short as finished if the clock steps back', async () => {
+      // Clear before the query and for the first row, spent for the second,
+      // then clear again once the clock has stepped back.
+      const readings = [false, false, true];
+      const events: string[] = [];
+      async function* pages() {
+        yield [1, 2, 3];
+      }
 
-    assert.equal(test.operations.pages, 50);
-    assert.deepEqual(test.logs, [
-      `reminder-dispatch-page-limit-reached ${sydney} count=1`,
-    ]);
+      const reachedLastPage = await processPages(
+        pages(),
+        async () => ({ kind: 'accepted' }),
+        (event) => events.push(event),
+        () => readings.shift() ?? false,
+      );
+
+      assert.equal(reachedLastPage, false);
+      assert.ok(events.includes('reminder-dispatch-time-budget-reached'));
+    });
+
+    it('reaches a zone past the old 5,000-row limit over two runs, sending each once', async () => {
+      // 51 pages of 100. At 180 ms a send, a run starts 2,667 sends before its
+      // 8 minutes are spent, so the second run has the rest to finish.
+      const test = harness(zoneRows('Australia/Sydney', 5_100), {
+        sendMs: 180,
+      });
+
+      startRun(test, 0);
+      await test.run(30_000);
+      const first = test.sent.length;
+      // The sends in flight when the budget ended finish, and none start.
+      assert.ok(first >= 2_667 && first <= 2_667 + 7, `${first} sends`);
+      assert.deepEqual(test.operations.queriedZones, ['Australia/Sydney']);
+      assert.deepEqual(statuses(test), Array(first).fill('accepted'));
+      assert.deepEqual(sweepStates(test), Array(8).fill('incomplete'));
+      assert.deepEqual(test.logs, [
+        `reminder-dispatch-accepted ${sydney} count=${first}`,
+        ...dueZones.map(budgetLine),
+      ]);
+
+      startRun(test, 1);
+      await test.run(30_000);
+      assert.equal(test.sent.length, 5_100);
+      assert.equal(new Set(installationIds(test)).size, 5_100);
+      assert.deepEqual(statuses(test), Array(5_100).fill('accepted'));
+      assert.deepEqual(sweepStates(test), Array(8).fill('complete'));
+      assert.deepEqual(test.logs, [
+        `reminder-dispatch-already-recorded ${sydney} count=${first}`,
+        `reminder-dispatch-accepted ${sydney} count=${5_100 - first}`,
+      ]);
+
+      // A sweep finished the zone, so its window closes with nothing to report.
+      test.logs.length = 0;
+      test.state.now = new Date(windowEnd.getTime() + 120 * minute);
+      await test.run();
+      assert.deepEqual(
+        test.logs.filter((line) => line.includes('-window-')),
+        [],
+      );
+    });
+
+    it('stops inside one zone, leaves the zones after it, and finishes them over later runs', async () => {
+      // At 2.4 s a send, a run starts 200 sends before its 8 minutes are spent:
+      // the first zone's 150 and 50 of the second's.
+      const zones = [
+        'Australia/Sydney',
+        'Australia/Melbourne',
+        'Australia/Hobart',
+      ];
+      const test = harness(
+        zones.flatMap((zone) => zoneRows(zone, 150)),
+        { sendMs: 2_400 },
+      );
+
+      startRun(test, 0);
+      await test.run();
+      // A spent budget starts no query: Hobart and the rest are not read.
+      assert.deepEqual(test.operations.queriedZones, [
+        'Australia/Sydney',
+        'Australia/Broken_Hill',
+        'Australia/Melbourne',
+      ]);
+      assert.deepEqual(budgetLines(test), dueZones.slice(2).map(budgetLine));
+
+      startRun(test, 1);
+      await test.run();
+      assert.deepEqual(budgetLines(test), dueZones.slice(3).map(budgetLine));
+
+      startRun(test, 2);
+      await test.run();
+      assert.deepEqual(budgetLines(test), []);
+      assert.equal(test.sent.length, 450);
+      assert.equal(new Set(installationIds(test)).size, 450);
+      assert.deepEqual(statuses(test), Array(450).fill('accepted'));
+      assert.deepEqual(sweepStates(test), Array(8).fill('complete'));
+    });
+
+    it('reads on past empty pages, as Azure returns them with a continuation token', async () => {
+      // 60 empty pages come before each of the 3 pages of rows, so the first
+      // row is past the 50 pages a run once read.
+      const test = harness(zoneRows('Australia/Sydney', 250), {
+        emptyPagesBefore: 60,
+      });
+
+      await test.run();
+
+      assert.equal(test.operations.pages, 3 * 61);
+      assert.equal(test.sent.length, 250);
+      assert.deepEqual(test.logs, [
+        `reminder-dispatch-accepted ${sydney} count=250`,
+      ]);
+    });
+
+    it('ends a scan of empty pages when the budget is spent', async () => {
+      const test = harness(zoneRows('Australia/Sydney', 250), {
+        emptyPagesBefore: 60,
+        onPage: () => advance(test, budgetMs / 10),
+      });
+
+      await test.run();
+
+      assert.equal(test.operations.pages, 10);
+      assert.deepEqual(test.sent, []);
+      assert.deepEqual(budgetLines(test), dueZones.map(budgetLine));
+    });
+
+    for (const [action, name, elapsed, pages, lines] of [
+      [
+        'carries on',
+        'one millisecond short of the budget',
+        budgetMs - 1,
+        2,
+        [],
+      ],
+      ['stops', 'exactly at the budget', budgetMs, 1, dueZones.map(budgetLine)],
+    ] as const) {
+      it(`${action} ${name}`, async () => {
+        const test = harness(zoneRows('Australia/Sydney', 2), {
+          // The first send ends with the clock at the elapsed time.
+          outcome: async () => {
+            test.state.now = new Date(during.getTime() + elapsed);
+            return { kind: 'accepted' };
+          },
+          rowsPerPage: 1,
+        });
+
+        await test.run();
+
+        assert.equal(test.operations.pages, pages);
+        assert.deepEqual(budgetLines(test), lines);
+      });
+    }
+
+    it('cannot finish a zone whose pages take the whole budget to read, and says so', async () => {
+      // 30 pages of 5 rows arrive in the time a run has, and the zone has 60.
+      // The 30th arrives as the budget ends, so only 29 are worked.
+      const test = harness(zoneRows('Australia/Sydney', 300), {
+        onPage: () => advance(test, budgetMs / 30),
+        rowsPerPage: 5,
+      });
+
+      await test.run();
+      startRun(test, 1);
+      await test.run();
+
+      assert.equal(test.sent.length, 145);
+      assert.ok(
+        test.logs.includes(
+          `reminder-dispatch-already-recorded ${sydney} count=145`,
+        ),
+      );
+      test.logs.length = 0;
+      test.state.now = new Date(windowEnd.getTime() + 120 * minute);
+      await test.run();
+      assert.ok(
+        test.logs.includes(
+          'reminder-dispatch-window-sweep-incomplete zone=Australia/Sydney timing=one-week count=1',
+        ),
+      );
+    });
+
+    it('still checks closed windows and settles when the sweeps spent the budget', async () => {
+      // Sydney's window has closed, and nothing swept Norfolk's an hour ago.
+      // Broken Hill's and Adelaide's stay open for another half hour.
+      const test = harness(zoneRows('Australia/Broken_Hill', 10), {
+        now: afterWindow,
+        onPage: () => advance(test, budgetMs),
+      });
+      await test.ledger.prepare(preparation('sydney', windowOpen));
+
+      await test.run();
+
+      assert.deepEqual(test.logs, [
+        budgetLine('Australia/Broken_Hill'),
+        budgetLine('Australia/Adelaide'),
+        'reminder-dispatch-window-not-swept zone=Pacific/Norfolk timing=one-week count=1',
+        'reminder-dispatch-expired count=1',
+      ]);
+      assert.deepEqual(statuses(test), ['expired']);
+    });
+
+    it('stops settlement at a budget of its own', async () => {
+      const test = harness([]);
+      let pagesRead = 0;
+      test.dependencies.ledger = {
+        ...test.ledger,
+        async *listUnsettledPages() {
+          for (let page = 0; page < 30; page += 1) {
+            pagesRead += 1;
+            advance(test, budgetMs / 10);
+            yield [];
+          }
+        },
+      };
+
+      await test.run();
+
+      assert.equal(pagesRead, 10);
+      assert.deepEqual(test.logs, [
+        'reminder-dispatch-time-budget-reached count=1',
+      ]);
+    });
   });
 
   it('sends once when invocations overlap', async () => {
@@ -629,7 +902,9 @@ describe('partitioned reminder dispatch', () => {
     });
 
     it('refuses a catch-up send after slow acquisition, and expires it', async () => {
+      // Half a minute from the end of the window, inside the claim lease.
       const test = harness([row()], {
+        now: new Date(windowEnd.getTime() - 30_000),
         prepare: async () => {
           test.state.now = afterWindow;
         },
@@ -1043,11 +1318,14 @@ describe('partitioned reminder dispatch', () => {
     const windowLogs = (test: ReturnType<typeof harness>) =>
       test.logs.filter((line) => line.includes('-window-')).sort();
 
+    // Each query takes the whole budget to answer, so no sweep reaches its last
+    // page.
     function limitedQueries(test: ReturnType<typeof harness>) {
       test.dependencies.subscriptions = {
         ...test.dependencies.subscriptions,
         async *listZoneSubscriptionPages() {
-          for (let page = 0; page < 60; page += 1) yield [];
+          advance(test, budgetMs);
+          yield [];
         },
       };
       return test;
@@ -1085,7 +1363,7 @@ describe('partitioned reminder dispatch', () => {
       assert.deepEqual(windowLogs(test), events('not-swept', 'one-day'));
     });
 
-    it('reports a window whose sweeps stopped at the page limit, once', async () => {
+    it('reports a window whose sweeps ran out of budget, once', async () => {
       const test = limitedQueries(harness([]));
 
       await test.run();
