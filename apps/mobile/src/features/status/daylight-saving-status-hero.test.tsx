@@ -1,6 +1,8 @@
 import { act, render, screen } from '@testing-library/react-native';
 import * as ReactNative from 'react-native';
+import type { ReactTestInstance } from 'react-test-renderer';
 
+import { holdAnimations } from '../../../test-support/hold-animations';
 import { daylightSaviourPalettes } from '../../theme';
 import DaylightSavingStatusHero, {
   type DaylightSavingStatusHeroFacts,
@@ -17,8 +19,24 @@ const facts: DaylightSavingStatusHeroFacts = {
 const initialWindowDimensions = ReactNative.Dimensions.get('window');
 const initialScreenDimensions = ReactNative.Dimensions.get('screen');
 
+// The clock is announced as one label, so none of its parts may be a separate
+// stop for a screen reader.
+function expectClockPartsGrouped() {
+  const parts = [
+    screen.getByTestId('clock-line'),
+    screen.getByTestId('clock-value'),
+    screen.queryByTestId('clock-overflow'),
+    screen.queryByTestId('clock-meridiem'),
+    screen.getByText(/^AEST · UTC\+10:00 · /),
+  ];
+  for (const part of parts) {
+    if (part !== null) expect(part.props.accessible).toBe(false);
+  }
+}
+
 describe('DaylightSavingStatusHero', () => {
   afterEach(() => {
+    jest.restoreAllMocks();
     act(() => {
       ReactNative.Dimensions.set({
         screen: initialScreenDimensions,
@@ -78,6 +96,10 @@ describe('DaylightSavingStatusHero', () => {
         color: palette.ink,
         fontSize: expectedClockSize,
       });
+      expect(
+        ReactNative.StyleSheet.flatten(clock.props.style).lineHeight,
+      ).toBeCloseTo(expectedClockSize * 1.05);
+      expectClockPartsGrouped();
 
       if (expectedMeridiem === null) {
         expect(screen.queryByTestId('clock-meridiem')).toBeNull();
@@ -90,6 +112,9 @@ describe('DaylightSavingStatusHero', () => {
           color: palette.ink,
           fontSize: expectedClockSize * 0.3,
         });
+        expect(
+          ReactNative.StyleSheet.flatten(meridiem.props.style).lineHeight,
+        ).toBeCloseTo(expectedClockSize * 0.42);
       }
 
       expect(
@@ -157,7 +182,42 @@ describe('DaylightSavingStatusHero', () => {
     expect(
       ReactNative.StyleSheet.flatten(clock.props.style).fontSize * 2,
     ).toBeGreaterThan(72);
+    expect(
+      ReactNative.StyleSheet.flatten(clock.props.style).lineHeight,
+    ).toBeCloseTo(72 * 1.05);
+    expectClockPartsGrouped();
   });
+
+  it.each([
+    [1.49, 'row'],
+    [1.5, 'column'],
+    [2, 'column'],
+  ] as const)(
+    'at font scale %s lays the clock out in a %s',
+    (fontScale, layout) => {
+      ReactNative.Dimensions.set({
+        screen: { fontScale, height: 789, scale: 1, width: 430 },
+        window: { fontScale, height: 789, scale: 1, width: 430 },
+      });
+
+      render(
+        <DaylightSavingStatusHero
+          facts={facts}
+          palette={daylightSaviourPalettes.light}
+          uses24hourClock={false}
+        />,
+      );
+
+      expect(
+        ReactNative.StyleSheet.flatten(
+          screen.getByTestId('clock-line').props.style,
+        ).flexDirection,
+      ).toBe(layout);
+      expect(screen.queryByTestId('clock-overflow') !== null).toBe(
+        layout === 'column',
+      );
+    },
+  );
 
   it.each([
     [false, 180, 'status-motion-lock-in'],
@@ -228,4 +288,114 @@ describe('DaylightSavingStatusHero', () => {
       ).toBe(true);
     },
   );
+
+  describe('status transition', () => {
+    const standard = 'Standard time applies';
+    const daylight = 'Daylight saving time applies';
+
+    function Hero({
+      reducedMotion = false,
+      status = standard,
+      transitionKey = 'standard',
+    }: {
+      readonly reducedMotion?: boolean;
+      readonly status?: DaylightSavingStatusHeroFacts['status'];
+      readonly transitionKey?: string;
+    }) {
+      return (
+        <DaylightSavingStatusHero
+          facts={{ ...facts, status }}
+          palette={daylightSaviourPalettes.light}
+          reducedMotion={reducedMotion}
+          statusTransitionKey={transitionKey}
+          uses24hourClock={false}
+        />
+      );
+    }
+
+    const opacityOf = (node: ReactTestInstance) =>
+      ReactNative.StyleSheet.flatten(node.props.style).opacity;
+    const hiddenStatus = (status: string) =>
+      screen.queryByText(status, { includeHiddenElements: true });
+
+    it.each([
+      [false, 0.7, 180],
+      [true, 0.85, 90],
+    ] as const)(
+      'fades the new status in over the one it replaces when reduced motion is %s',
+      (reducedMotion, startOpacity, duration) => {
+        const held = holdAnimations();
+        const timing = jest.spyOn(ReactNative.Animated, 'timing');
+        const view = render(<Hero reducedMotion={reducedMotion} />);
+        expect(timing).not.toHaveBeenCalled();
+
+        view.rerender(
+          <Hero
+            reducedMotion={reducedMotion}
+            status={daylight}
+            transitionKey="daylight"
+          />,
+        );
+
+        const previous = screen.getByText(standard, {
+          includeHiddenElements: true,
+        });
+        expect(previous.props.accessibilityElementsHidden).toBe(true);
+        expect(opacityOf(previous)).toBe(1);
+        expect(opacityOf(screen.getByRole('header', { name: daylight }))).toBe(
+          startOpacity,
+        );
+        expect(timing.mock.calls.map(([, config]) => config)).toEqual([
+          { duration, toValue: 0, useNativeDriver: true },
+          { duration, toValue: 1, useNativeDriver: true },
+        ]);
+        expect(held).toHaveLength(1);
+        expect(held[0]?.started).toBe(true);
+
+        act(() => held[0]?.finish());
+
+        expect(hiddenStatus(standard)).toBeNull();
+        expect(screen.getByRole('header', { name: daylight })).toBeTruthy();
+      },
+    );
+
+    it('fades from the status it last showed', () => {
+      const held = holdAnimations();
+      const view = render(<Hero />);
+      view.rerender(<Hero status={daylight} transitionKey="daylight" />);
+      act(() => held[0]?.finish());
+
+      view.rerender(<Hero transitionKey="standard-again" />);
+
+      expect(held).toHaveLength(2);
+      expect(hiddenStatus(daylight)?.props.accessibilityElementsHidden).toBe(
+        true,
+      );
+    });
+
+    it('does not replay a transition when only the motion preference changes', () => {
+      const held = holdAnimations();
+      const view = render(<Hero />);
+      view.rerender(<Hero status={daylight} transitionKey="daylight" />);
+      act(() => held[0]?.finish());
+
+      view.rerender(
+        <Hero reducedMotion status={daylight} transitionKey="daylight" />,
+      );
+
+      expect(held).toHaveLength(1);
+      expect(hiddenStatus(standard)).toBeNull();
+    });
+
+    it('stops a crossfade in flight when it unmounts', () => {
+      const held = holdAnimations();
+      const view = render(<Hero />);
+      view.rerender(<Hero status={daylight} transitionKey="daylight" />);
+      expect(held[0]?.stop).not.toHaveBeenCalled();
+
+      view.unmount();
+
+      expect(held[0]?.stop).toHaveBeenCalledTimes(1);
+    });
+  });
 });
