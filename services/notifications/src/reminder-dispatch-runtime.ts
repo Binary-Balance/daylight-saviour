@@ -213,15 +213,20 @@ async function forEachBounded<T>(
   budgetSpent: BudgetSpent,
 ) {
   const remaining = items.values();
+  let startedAll = true;
   // A spent budget starts no more items, and the ones in flight finish. The
   // rest are dropped: the next run reaches them from the first page.
   const worker = async () => {
     for (const item of remaining) {
-      if (budgetSpent()) return;
+      if (budgetSpent()) {
+        startedAll = false;
+        return;
+      }
       await work(item);
     }
   };
   await Promise.all(Array.from({ length: sendConcurrency }, worker));
+  return startedAll;
 }
 
 async function countResult(
@@ -251,29 +256,30 @@ async function countResult(
  * token. A budget that ends just after the last page also returns false: the
  * next run finds those rows recorded and completes the zone.
  */
-async function processPages<T>(
+export async function processPages<T>(
   pages: AsyncIterable<readonly T[]>,
   work: (item: T) => Promise<ReminderDispatchResult>,
   count: CountEvent,
   budgetSpent: BudgetSpent,
   afterPage?: () => void,
 ) {
-  const stopped = () => {
-    if (!budgetSpent()) return false;
+  const stop = () => {
     count('reminder-dispatch-time-budget-reached');
-    return true;
+    return false;
   };
   try {
     // Checked before the first page too, so a spent budget starts no query.
-    if (stopped()) return false;
+    if (budgetSpent()) return stop();
     for await (const page of pages) {
-      await forEachBounded(
+      const startedAll = await forEachBounded(
         page,
         (item) => countResult(() => work(item), count),
         budgetSpent,
       );
       afterPage?.();
-      if (stopped()) return false;
+      // A sweep marker cannot be undone, so a page cut short must not depend
+      // on a second clock read agreeing with the first.
+      if (!startedAll || budgetSpent()) return stop();
     }
     return true;
   } catch {

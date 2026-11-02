@@ -17,6 +17,7 @@ import {
   createActivePackReader,
   createReminderDispatchProvider,
   createReminderDispatchRunner,
+  processPages,
   runReminderDispatch,
   type ReminderDispatchBoundaries,
 } from './reminder-dispatch-runtime.ts';
@@ -584,11 +585,31 @@ describe('partitioned reminder dispatch', () => {
       test.logs.filter((line) => line.includes('time-budget-reached'));
     const installationIds = (test: ReturnType<typeof harness>) =>
       test.sent.map((request) => request.subscription.installationId);
-    // The timer starts a run every ten minutes while runs use their budget.
+    // Assumes a run every ten minutes while runs use their budget.
     const startRun = (test: ReturnType<typeof harness>, run: number) => {
       test.logs.length = 0;
       test.state.now = new Date(during.getTime() + run * 10 * minute);
     };
+
+    it('does not report a page cut short as finished if the clock steps back', async () => {
+      // Clear before the query and for the first row, spent for the second,
+      // then clear again once the clock has stepped back.
+      const readings = [false, false, true];
+      const events: string[] = [];
+      async function* pages() {
+        yield [1, 2, 3];
+      }
+
+      const reachedLastPage = await processPages(
+        pages(),
+        async () => ({ kind: 'accepted' }),
+        (event) => events.push(event),
+        () => readings.shift() ?? false,
+      );
+
+      assert.equal(reachedLastPage, false);
+      assert.ok(events.includes('reminder-dispatch-time-budget-reached'));
+    });
 
     it('reaches a zone past the old 5,000-row limit over two runs, sending each once', async () => {
       // 51 pages of 100. At 180 ms a send, a run starts 2,667 sends before its

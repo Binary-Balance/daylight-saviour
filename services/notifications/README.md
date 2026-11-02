@@ -322,8 +322,10 @@ for a running execution.
 
 The timer does not
 [start a run while another is outstanding](https://learn.microsoft.com/en-us/azure/azure-functions/functions-bindings-timer#scale-out),
-so a run that spends its budget ends inside ten minutes and the next starts at
-the following five-minute mark. A 12-hour window holds at most 72 runs.
+so a run that spends its budget is followed soon after it ends. The figures below
+assume one run every ten minutes, 72 in a 12-hour window. A run that overruns
+its five minutes can be followed at once, so that is a lower bound on runs, not
+a bound on cost: the app runs almost continuously through a large window.
 
 Request latency is not measured, so the figures below rest on two assumptions
 to replace with hosted ones: 20 ms for each storage request and 500 ms of
@@ -353,8 +355,21 @@ get any time. Past it, `time-budget-reached` on every run and
 removes the skip.
 
 The 72 runs assume settlement is light. If it uses its whole budget, a run takes
-up to about 18 minutes and the next starts at the 20-minute mark, so a window
-holds 36 runs and the 33 above take about 11 hours.
+up to about 18 minutes, so a window holds about 40 runs and the 33 above take
+about 10 hours. That run is past the 10 minutes a platform update waits, which
+is safe: an interrupted send becomes `uncertain` and is not replayed, and
+settlement logs after each page.
+
+The margin is thin. At 35 ms a storage request, 72 runs reach only about 99,000,
+and at 38 ms even the ceiling is 100,000. Measure these on the first large
+window, as they ignore planning CPU too, about 0.1 ms a row.
+
+Cost is bounded by time, not rows. At 8 reads in flight and 20 ms each, a run
+makes at most about 192,000 reads and a window about 15 million. At the
+documented scale that is about 1.6 million requests for first sends, plus 100,000
+reads for every run, so 7 to 12 million a window. Settlement also scans the
+ledger with a non-key filter on every run, all year, until the rows are purged.
+Only its budget limits that scan, and it has not been measured.
 
 ## Stored data and retention
 
