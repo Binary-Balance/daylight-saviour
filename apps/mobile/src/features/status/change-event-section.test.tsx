@@ -1,8 +1,10 @@
-import { render, screen } from '@testing-library/react-native';
+import { act, render, screen } from '@testing-library/react-native';
 import * as ReactNative from 'react-native';
+import type { ReactTestInstance } from 'react-test-renderer';
 import { activateAustralianTimeZoneDataPack } from '@daylight-saviour/domain';
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
+import { holdAnimations } from '../../../test-support/hold-animations';
 import { daylightSaviourPalettes } from '../../theme';
 import ChangeEventSection from './change-event-section';
 import { createStatusViewModel } from './status-view-model';
@@ -22,6 +24,16 @@ function report(
     new Date(instant),
     false,
     'test-installation',
+  );
+}
+
+function section(instant: string, reducedMotion: boolean | null) {
+  return (
+    <ChangeEventSection
+      palette={daylightSaviourPalettes.light}
+      reducedMotion={reducedMotion}
+      report={report(instant)}
+    />
   );
 }
 
@@ -268,5 +280,183 @@ describe('ChangeEventSection', () => {
     expect(screen.getByText('UTC+10:30 → UTC+11:00')).toBeTruthy();
     expect(screen.getByText(/Clocks move 30 minutes/)).toBeTruthy();
     expect(screen.getByText('In 1 day')).toBeTruthy();
+  });
+
+  describe('event motion', () => {
+    const backward = '2026-04-04T15:59:59.000Z';
+    const forward = '2026-10-02T16:00:00.000Z';
+
+    it.each([
+      ['Backward Change', false, backward, 280, 1, { translateX: 12 }, true],
+      ['Forward Change', false, forward, 260, 1, { translateY: -12 }, false],
+      ['Backward Change', true, backward, 90, 0.72, { translateX: 0 }, false],
+      ['Forward Change', true, forward, 90, 0.72, { translateY: 0 }, false],
+    ] as const)(
+      'starts %s motion at its first frame and runs it to rest (reduced motion: %s)',
+      (
+        _direction,
+        reducedMotion,
+        instant,
+        duration,
+        startOpacity,
+        startTransform,
+        hasEcho,
+      ) => {
+        const held = holdAnimations();
+        const timing = jest.spyOn(ReactNative.Animated, 'timing');
+
+        render(section(instant, reducedMotion));
+
+        const content = screen.getByTestId('semantic-event-content');
+        expect(content.props.style.opacity).toBe(startOpacity);
+        expect(content.props.style.transform).toEqual([startTransform]);
+        const toRest = { duration, toValue: 0, useNativeDriver: true };
+        expect(timing.mock.calls.map(([, config]) => config)).toEqual([
+          { duration, toValue: 1, useNativeDriver: true },
+          toRest,
+          ...(hasEcho ? [toRest] : []),
+        ]);
+        expect(held).toHaveLength(1);
+        expect(held[0]?.started).toBe(true);
+      },
+    );
+
+    it('starts the decorative echo faint and offset, then fades it out', () => {
+      render(section(backward, false));
+
+      const echo = screen
+        .getAllByText('3:00 am → 2:00 am', { includeHiddenElements: true })
+        .find((node) => node.props.accessibilityElementsHidden);
+      expect(ReactNative.StyleSheet.flatten(echo?.props.style)).toMatchObject({
+        opacity: 0.35,
+        transform: [{ translateX: 12 }],
+      });
+    });
+
+    it('restarts for a different event and abandons the motion it replaces', () => {
+      const held = holdAnimations();
+      const view = render(section(backward, false));
+      expect(held[0]?.stop).not.toHaveBeenCalled();
+
+      view.rerender(section(forward, false));
+
+      expect(held[0]?.stop).toHaveBeenCalledTimes(1);
+      const content = screen.getByTestId('semantic-event-content');
+      expect(content.props.style.transform).toEqual([{ translateY: -12 }]);
+    });
+
+    it('stops the motion in flight when it unmounts', () => {
+      const held = holdAnimations();
+      const view = render(section(backward, false));
+
+      view.unmount();
+
+      expect(held[0]?.stop).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('countdown crossfade', () => {
+    const threeSeconds = '2026-04-04T15:59:57.000Z';
+    const twoSeconds = '2026-04-04T15:59:58.000Z';
+    const oneSecond = '2026-04-04T15:59:59.000Z';
+
+    const opacityOf = (node: ReactTestInstance) =>
+      ReactNative.StyleSheet.flatten(node.props.style).opacity;
+    const hiddenCountdown = (text: string) =>
+      screen.queryByText(text, { includeHiddenElements: true });
+
+    it('does not crossfade a countdown that has not changed', () => {
+      const held = holdAnimations();
+      const view = render(section(twoSeconds, null));
+      expect(
+        screen.getAllByText('In 2 seconds', { includeHiddenElements: true }),
+      ).toHaveLength(1);
+
+      view.rerender(section(twoSeconds, false));
+
+      // Only the event's own motion starts, now that the preference is known.
+      expect(held).toHaveLength(1);
+      expect(
+        screen.getAllByText('In 2 seconds', { includeHiddenElements: true }),
+      ).toHaveLength(1);
+    });
+
+    it.each([
+      [false, 0.7, 140],
+      [true, 0.85, 90],
+    ] as const)(
+      'fades the new countdown in over the old one when reduced motion is %s',
+      (reducedMotion, startOpacity, duration) => {
+        const held = holdAnimations();
+        const timing = jest.spyOn(ReactNative.Animated, 'timing');
+        const view = render(section(twoSeconds, reducedMotion));
+        // held[0] is the event's own motion, started on mount.
+        const eventMotionCalls = timing.mock.calls.length;
+
+        view.rerender(section(oneSecond, reducedMotion));
+
+        const previous = screen.getByText('In 2 seconds', {
+          includeHiddenElements: true,
+        });
+        expect(previous.props.accessibilityElementsHidden).toBe(true);
+        expect(opacityOf(previous)).toBe(1);
+        expect(opacityOf(screen.getByTestId('countdown-current'))).toBe(
+          startOpacity,
+        );
+        expect(
+          timing.mock.calls.slice(eventMotionCalls).map(([, config]) => config),
+        ).toEqual([
+          { duration, toValue: 0, useNativeDriver: true },
+          { duration, toValue: 1, useNativeDriver: true },
+        ]);
+        expect(held).toHaveLength(2);
+        expect(held[1]?.started).toBe(true);
+
+        act(() => held[1]?.finish());
+
+        expect(hiddenCountdown('In 2 seconds')).toBeNull();
+        expect(screen.getByTestId('countdown-current').props.children).toBe(
+          'In 1 second',
+        );
+      },
+    );
+
+    it('fades from the value it last showed', () => {
+      const held = holdAnimations();
+      const view = render(section(threeSeconds, false));
+      view.rerender(section(twoSeconds, false));
+      act(() => held[1]?.finish());
+
+      view.rerender(section(oneSecond, false));
+
+      expect(
+        hiddenCountdown('In 2 seconds')?.props.accessibilityElementsHidden,
+      ).toBe(true);
+      expect(hiddenCountdown('In 3 seconds')).toBeNull();
+    });
+
+    it('changes the countdown without a crossfade while the motion preference is unknown', () => {
+      const held = holdAnimations();
+      const view = render(section(twoSeconds, null));
+
+      view.rerender(section(oneSecond, null));
+
+      expect(screen.getByTestId('countdown-current').props.children).toBe(
+        'In 1 second',
+      );
+      expect(hiddenCountdown('In 2 seconds')).toBeNull();
+      expect(held).toHaveLength(0);
+    });
+
+    it('stops a crossfade in flight when it unmounts', () => {
+      const held = holdAnimations();
+      const view = render(section(twoSeconds, false));
+      view.rerender(section(oneSecond, false));
+      expect(held[1]?.stop).not.toHaveBeenCalled();
+
+      view.unmount();
+
+      expect(held[1]?.stop).toHaveBeenCalledTimes(1);
+    });
   });
 });
