@@ -387,8 +387,50 @@ describe('DaylightSavingStatusHero', () => {
       expect(hiddenStatus(standard)).toBeNull();
     });
 
-    // These two use the real Animated module, so the opacity read back is the
-    // one a user would see.
+    it('fades when the status returns to the one it started with', () => {
+      const held = holdAnimations();
+      const view = render(<Hero />);
+      view.rerender(<Hero status={daylight} transitionKey="daylight" />);
+      act(() => held[0]?.finish());
+
+      view.rerender(<Hero />);
+
+      expect(held).toHaveLength(2);
+    });
+
+    it('uses a motion preference that resolved after the first render', () => {
+      holdAnimations();
+      const view = render(<Hero reducedMotion={null} />);
+      view.rerender(<Hero reducedMotion={false} />);
+
+      view.rerender(
+        <Hero
+          reducedMotion={false}
+          status={daylight}
+          transitionKey="daylight"
+        />,
+      );
+
+      expect(opacityOf(screen.getByRole('header', { name: daylight }))).toBe(
+        0.7,
+      );
+    });
+
+    it('uses a motion preference that changes with the status', () => {
+      holdAnimations();
+      const view = render(<Hero reducedMotion={false} />);
+
+      view.rerender(
+        <Hero reducedMotion status={daylight} transitionKey="daylight" />,
+      );
+
+      expect(opacityOf(screen.getByRole('header', { name: daylight }))).toBe(
+        0.85,
+      );
+    });
+
+    // Uses the real Animated module, so the opacity read back is the one a
+    // user would see.
     it('shows a new status at once while the motion preference is unknown', () => {
       const timing = jest.spyOn(ReactNative.Animated, 'timing');
       const view = render(<Hero reducedMotion={null} />);

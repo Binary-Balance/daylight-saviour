@@ -421,6 +421,25 @@ describe('ChangeEventSection', () => {
       },
     );
 
+    it('uses a motion preference that resolved after the first render', () => {
+      holdAnimations();
+      const view = render(section(twoSeconds, null));
+      view.rerender(section(twoSeconds, false));
+
+      view.rerender(section(oneSecond, false));
+
+      expect(opacityOf(screen.getByTestId('countdown-current'))).toBe(0.7);
+    });
+
+    it('uses a motion preference that changes with the countdown', () => {
+      holdAnimations();
+      const view = render(section(twoSeconds, false));
+
+      view.rerender(section(oneSecond, true));
+
+      expect(opacityOf(screen.getByTestId('countdown-current'))).toBe(0.85);
+    });
+
     it('fades from the value it last showed', () => {
       const held = holdAnimations();
       const view = render(section(threeSeconds, false));
