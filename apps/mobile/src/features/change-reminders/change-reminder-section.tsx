@@ -22,7 +22,10 @@ import type {
   ChangeReminderAdapters,
   ChangeReminderPreferences,
 } from './change-reminder-adapters';
-import { createChangeReminderSession } from './change-reminder-session';
+import {
+  createChangeReminderSession,
+  type ChangeReminderSessionSnapshot,
+} from './change-reminder-session';
 
 // Announces registration starting and finishing, once each. Live regions do
 // not suit this: iOS ignores them, and on Android the enabled text would be read
@@ -55,6 +58,68 @@ function useRegistrationAnnouncements(
       AccessibilityInfo.announceForAccessibility(outcome);
     }
   }, [kind, outcome, outcomeReadByRegion]);
+}
+
+function useChangeReminderSession(
+  adapters: ChangeReminderAdapters,
+  homeTimeZone: string,
+) {
+  const session = useMemo(
+    () => createChangeReminderSession({ adapters, homeTimeZone }),
+    [adapters, homeTimeZone],
+  );
+  const snapshot = useSyncExternalStore(
+    session.subscribe,
+    session.getSnapshot,
+    session.getSnapshot,
+  );
+
+  useEffect(() => session.start(), [session]);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') session.dispatch({ type: 'foreground' });
+    });
+    return () => subscription.remove();
+  }, [session]);
+  useEffect(() => {
+    if (snapshot.kind !== 'enabled') return;
+    return adapters.startTokenRefresh(homeTimeZone, (result) => {
+      session.dispatch({ result, type: 'token-refresh' });
+    });
+  }, [adapters, homeTimeZone, session, snapshot.kind]);
+
+  return { dispatch: session.dispatch, snapshot };
+}
+
+function useTestInstallationId(
+  adapters: ChangeReminderAdapters,
+  snapshot: ChangeReminderSessionSnapshot,
+  testBuild: boolean,
+) {
+  const [installationId, setInstallationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (
+      !testBuild ||
+      snapshot.kind !== 'enabled' ||
+      adapters.readInstallationId === undefined
+    )
+      return;
+    let active = true;
+    void adapters
+      .readInstallationId()
+      .then((value) => {
+        if (active) setInstallationId(value);
+      })
+      .catch(() => {
+        if (active) setInstallationId(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [adapters, snapshot, testBuild]);
+
+  return installationId;
 }
 
 function TimingControls({
@@ -117,50 +182,11 @@ export default function ChangeReminderSection({
   readonly testBuild?: boolean;
   readonly verifiedNoEvent?: boolean;
 }) {
-  const session = useMemo(
-    () => createChangeReminderSession({ adapters, homeTimeZone }),
-    [adapters, homeTimeZone],
+  const { dispatch, snapshot } = useChangeReminderSession(
+    adapters,
+    homeTimeZone,
   );
-  const snapshot = useSyncExternalStore(
-    session.subscribe,
-    session.getSnapshot,
-    session.getSnapshot,
-  );
-  const [installationId, setInstallationId] = useState<string | null>(null);
-
-  useEffect(() => session.start(), [session]);
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active') session.dispatch({ type: 'foreground' });
-    });
-    return () => subscription.remove();
-  }, [session]);
-  useEffect(() => {
-    if (snapshot.kind !== 'enabled') return;
-    return adapters.startTokenRefresh(homeTimeZone, (result) => {
-      session.dispatch({ result, type: 'token-refresh' });
-    });
-  }, [adapters, homeTimeZone, session, snapshot.kind]);
-  useEffect(() => {
-    if (
-      !testBuild ||
-      snapshot.kind !== 'enabled' ||
-      adapters.readInstallationId === undefined
-    )
-      return;
-    let active = true;
-    void adapters
-      .readInstallationId()
-      .then((value) => {
-        if (active) setInstallationId(value);
-      })
-      .catch(() => {
-        if (active) setInstallationId(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [adapters, snapshot, testBuild]);
+  const installationId = useTestInstallationId(adapters, snapshot, testBuild);
 
   const content =
     snapshot.kind === 'untouched'
@@ -292,7 +318,7 @@ export default function ChangeReminderSection({
             snapshot.kind === 'preferences-failed'
           }
           onChange={(preferences) =>
-            session.dispatch({ type: 'change-preferences', preferences })
+            dispatch({ type: 'change-preferences', preferences })
           }
           palette={palette}
           preferences={snapshot.preferences}
@@ -302,7 +328,7 @@ export default function ChangeReminderSection({
         <Pressable
           accessibilityHint={copy.changeReminders.accessibility.enableHint}
           accessibilityRole="button"
-          onPress={() => session.dispatch({ type: 'show-explainer' })}
+          onPress={() => dispatch({ type: 'show-explainer' })}
           style={[styles.button, { borderColor: palette.controlBoundary }]}
         >
           <Text style={[styles.buttonText, { color: palette.ink }]}>
@@ -315,7 +341,7 @@ export default function ChangeReminderSection({
       {snapshot.kind === 'explainer' ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => session.dispatch({ type: 'enable' })}
+          onPress={() => dispatch({ type: 'enable' })}
           style={[styles.button, { backgroundColor: palette.actionFill }]}
         >
           <Text style={[styles.buttonText, { color: palette.onActionFill }]}>
@@ -329,7 +355,7 @@ export default function ChangeReminderSection({
           {snapshot.kind === 'confirm-disable' ? (
             <Pressable
               accessibilityRole="button"
-              onPress={() => session.dispatch({ type: 'cancel-disable' })}
+              onPress={() => dispatch({ type: 'cancel-disable' })}
               style={[styles.button, { borderColor: palette.controlBoundary }]}
             >
               <Text style={[styles.buttonText, { color: palette.ink }]}>
@@ -339,7 +365,7 @@ export default function ChangeReminderSection({
           ) : null}
           <Pressable
             accessibilityRole="button"
-            onPress={() => session.dispatch({ type: 'confirm-disable' })}
+            onPress={() => dispatch({ type: 'confirm-disable' })}
             style={[styles.button, { backgroundColor: palette.actionFill }]}
           >
             <Text style={[styles.buttonText, { color: palette.onActionFill }]}>
@@ -354,7 +380,7 @@ export default function ChangeReminderSection({
         <View style={styles.actions}>
           <Pressable
             accessibilityRole="button"
-            onPress={() => session.dispatch({ type: 'retry-preferences' })}
+            onPress={() => dispatch({ type: 'retry-preferences' })}
             style={[styles.button, { borderColor: palette.controlBoundary }]}
           >
             <Text style={[styles.buttonText, { color: palette.ink }]}>
@@ -363,7 +389,7 @@ export default function ChangeReminderSection({
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            onPress={() => session.dispatch({ type: 'cancel-preferences' })}
+            onPress={() => dispatch({ type: 'cancel-preferences' })}
             style={[styles.button, { borderColor: palette.controlBoundary }]}
           >
             <Text style={[styles.buttonText, { color: palette.ink }]}>
@@ -375,7 +401,7 @@ export default function ChangeReminderSection({
       {snapshot.kind === 'zone-failed' ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => session.dispatch({ type: 'retry-zone' })}
+          onPress={() => dispatch({ type: 'retry-zone' })}
           style={[styles.button, { borderColor: palette.controlBoundary }]}
         >
           <Text style={[styles.buttonText, { color: palette.ink }]}>
@@ -386,7 +412,7 @@ export default function ChangeReminderSection({
       {snapshot.kind === 'failed' || snapshot.kind === 'permission-denied' ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => session.dispatch({ type: 'enable' })}
+          onPress={() => dispatch({ type: 'enable' })}
           style={[styles.button, { borderColor: palette.controlBoundary }]}
         >
           <Text style={[styles.buttonText, { color: palette.ink }]}>
@@ -399,7 +425,7 @@ export default function ChangeReminderSection({
       {snapshot.kind === 'retry-pending' ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => session.dispatch({ type: 'enable' })}
+          onPress={() => dispatch({ type: 'enable' })}
           style={[styles.button, { borderColor: palette.controlBoundary }]}
         >
           <Text style={[styles.buttonText, { color: palette.ink }]}>
@@ -410,7 +436,7 @@ export default function ChangeReminderSection({
       {snapshot.kind === 'load-failed' ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => session.dispatch({ type: 'retry-load' })}
+          onPress={() => dispatch({ type: 'retry-load' })}
           style={[styles.button, { borderColor: palette.controlBoundary }]}
         >
           <Text style={[styles.buttonText, { color: palette.ink }]}>
