@@ -116,6 +116,7 @@ describe('productionHomeTimeZoneAdapters', () => {
   describe('device localization', () => {
     it.each([
       ['no calendar', [], null, null],
+      ['an empty zone', [{ timeZone: '', uses24hourClock: null }], '', null],
       [
         'no preference',
         [{ timeZone: null, uses24hourClock: null }],
