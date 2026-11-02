@@ -448,22 +448,23 @@ describe('ChangeEventSection', () => {
       expect(held).toHaveLength(0);
     });
 
-    // Uses the real Animated module, so the opacity read back is the one a user
-    // would see.
     it.each([
       [false, true],
       [true, false],
       [false, null],
     ] as const)(
-      'shows the countdown fully when reduced motion changes from %s to %s mid-crossfade',
+      'lets a crossfade finish when reduced motion changes from %s to %s',
       (before, after) => {
+        const held = holdAnimations();
         const view = render(section(twoSeconds, before));
         view.rerender(section(oneSecond, before));
-        expect(hiddenCountdown('In 2 seconds')).not.toBeNull();
+        // The first animation is the section's entrance.
+        const crossfade = held[1];
 
         view.rerender(section(oneSecond, after));
 
-        expect(opacityOf(screen.getByTestId('countdown-current'))).toBe(1);
+        expect(crossfade?.stop).not.toHaveBeenCalled();
+        act(() => crossfade?.finish());
         expect(hiddenCountdown('In 2 seconds')).toBeNull();
       },
     );

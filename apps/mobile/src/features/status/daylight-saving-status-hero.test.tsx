@@ -422,8 +422,9 @@ describe('DaylightSavingStatusHero', () => {
       [true, false],
       [false, null],
     ] as const)(
-      'shows the status fully when reduced motion changes from %s to %s mid-crossfade',
+      'lets a crossfade finish when reduced motion changes from %s to %s',
       (before, after) => {
+        const held = holdAnimations();
         const view = render(<Hero reducedMotion={before} />);
         view.rerender(
           <Hero
@@ -432,7 +433,6 @@ describe('DaylightSavingStatusHero', () => {
             transitionKey="daylight"
           />,
         );
-        expect(hiddenStatus(standard)).not.toBeNull();
 
         view.rerender(
           <Hero
@@ -442,9 +442,9 @@ describe('DaylightSavingStatusHero', () => {
           />,
         );
 
-        expect(opacityOf(screen.getByRole('header', { name: daylight }))).toBe(
-          1,
-        );
+        expect(held).toHaveLength(1);
+        expect(held[0]?.stop).not.toHaveBeenCalled();
+        act(() => held[0]?.finish());
         expect(hiddenStatus(standard)).toBeNull();
       },
     );

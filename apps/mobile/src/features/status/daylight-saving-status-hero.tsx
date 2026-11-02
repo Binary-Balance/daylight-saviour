@@ -44,6 +44,13 @@ export default function DaylightSavingStatusHero({
   const [previousOpacity] = useState(() => new Animated.Value(0));
   const currentStatusRef = useRef(facts.status);
   const lastStatusTransitionKey = useRef(statusTransitionKey);
+  // Read through a ref so a preference change leaves a running crossfade to
+  // finish. A stopped native animation reports the part-faded opacity back
+  // after any reset, which leaves the status faded until the next change.
+  const reducedMotionRef = useRef(reducedMotion);
+  useEffect(() => {
+    reducedMotionRef.current = reducedMotion;
+  }, [reducedMotion]);
   const largeText = fontScale >= 1.5;
   const clockSize = baseClockSize;
   const [clockValue, clockMeridiem = null] = uses24hourClock
@@ -56,38 +63,28 @@ export default function DaylightSavingStatusHero({
     const replacedStatus = currentStatusRef.current;
     currentStatusRef.current = facts.status;
     setCurrentStatus(facts.status);
+    const reduced = reducedMotionRef.current;
     // Until the preference is known, replace the status at once instead of
     // animating, so the old one never lingers waiting for it.
-    if (reducedMotion === null) return;
+    if (reduced === null) return;
     setPreviousStatus(replacedStatus);
-    currentOpacity.setValue(reducedMotion ? 0.85 : 0.7);
+    currentOpacity.setValue(reduced ? 0.85 : 0.7);
     previousOpacity.setValue(1);
     const animation = Animated.parallel([
       Animated.timing(previousOpacity, {
-        duration: reducedMotion ? 90 : 180,
+        duration: reduced ? 90 : 180,
         toValue: 0,
         useNativeDriver: true,
       }),
       Animated.timing(currentOpacity, {
-        duration: reducedMotion ? 90 : 180,
+        duration: reduced ? 90 : 180,
         toValue: 1,
         useNativeDriver: true,
       }),
     ]);
     animation.start(() => setPreviousStatus(null));
-    return () => {
-      animation.stop();
-      // Stopped part way, as when the preference changes, the new status
-      // would stay faded until the next transition.
-      currentOpacity.setValue(1);
-    };
-  }, [
-    currentOpacity,
-    facts.status,
-    previousOpacity,
-    reducedMotion,
-    statusTransitionKey,
-  ]);
+    return () => animation.stop();
+  }, [currentOpacity, facts.status, previousOpacity, statusTransitionKey]);
 
   return (
     <View style={styles.statusSection}>
