@@ -352,6 +352,10 @@ get any time. Past it, `time-budget-reached` on every run and
 `window-sweep-incomplete` are the signals to add a durable cursor, which
 removes the skip.
 
+The 72 runs assume settlement is light. If it uses its whole budget, a run takes
+up to about 18 minutes and the next starts at the 20-minute mark, so a window
+holds 36 runs and the 33 above take about 11 hours.
+
 ## Stored data and retention
 
 | Record                                                 | Purpose                                                   | Contents                                                                                                                                                  | Kept until                                              |
