@@ -75,7 +75,12 @@ export default function DaylightSavingStatusHero({
       }),
     ]);
     animation.start(() => setPreviousStatus(null));
-    return () => animation.stop();
+    return () => {
+      animation.stop();
+      // Stopped part way, as when the preference changes, the new status
+      // would stay faded until the next transition.
+      currentOpacity.setValue(1);
+    };
   }, [
     currentOpacity,
     facts.status,

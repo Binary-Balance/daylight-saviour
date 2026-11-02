@@ -387,8 +387,8 @@ describe('DaylightSavingStatusHero', () => {
       expect(hiddenStatus(standard)).toBeNull();
     });
 
-    // Uses the real Animated module, so the opacity read back is the one a user
-    // would see.
+    // These two use the real Animated module, so the opacity read back is the
+    // one a user would see.
     it('shows a new status at once while the motion preference is unknown', () => {
       const timing = jest.spyOn(ReactNative.Animated, 'timing');
       const view = render(<Hero reducedMotion={null} />);
@@ -416,6 +416,38 @@ describe('DaylightSavingStatusHero', () => {
       expect(hiddenStatus(standard)).toBeNull();
       expect(timing).not.toHaveBeenCalled();
     });
+
+    it.each([
+      [false, true],
+      [true, false],
+      [false, null],
+    ] as const)(
+      'shows the status fully when reduced motion changes from %s to %s mid-crossfade',
+      (before, after) => {
+        const view = render(<Hero reducedMotion={before} />);
+        view.rerender(
+          <Hero
+            reducedMotion={before}
+            status={daylight}
+            transitionKey="daylight"
+          />,
+        );
+        expect(hiddenStatus(standard)).not.toBeNull();
+
+        view.rerender(
+          <Hero
+            reducedMotion={after}
+            status={daylight}
+            transitionKey="daylight"
+          />,
+        );
+
+        expect(opacityOf(screen.getByRole('header', { name: daylight }))).toBe(
+          1,
+        );
+        expect(hiddenStatus(standard)).toBeNull();
+      },
+    );
 
     it('stops a crossfade in flight when it unmounts', () => {
       const held = holdAnimations();

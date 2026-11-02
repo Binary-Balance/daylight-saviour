@@ -171,7 +171,12 @@ function CountdownTransition({
     animation.start(() => {
       setPreviousValue(null);
     });
-    return () => animation.stop();
+    return () => {
+      animation.stop();
+      // Stopped part way, as when the preference changes, the countdown
+      // would stay faded until the next change.
+      currentOpacity.setValue(1);
+    };
   }, [currentOpacity, previousOpacity, reducedMotion, value]);
 
   return (
