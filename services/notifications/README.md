@@ -123,19 +123,27 @@ An enabled run:
    stops planning for that run, and the next run retries. A pack promoted
    meanwhile applies from the next run.
 2. Plans each pack zone at the run's start, and queries subscriptions only in
-   zones with an open Delivery Window. Each query reads pages of up to 100 rows,
-   at most 50 pages, with at most 8 dispatches in flight.
+   zones with an open Delivery Window, one zone after another in the pack's
+   order. Each query reads pages of up to 100 rows, with at most 8 dispatches in
+   flight. An empty page does not end a query: Azure can return one with a
+   continuation token.
 3. Dispatches each subscription's planned reminders. The provider expiry and
    complete-operation deadline are both the earliest of the Delivery Window end,
    Validity Horizon and Change Event. When a zone's query ends, the run records
-   a sweep marker for that zone's open windows.
+   a sweep marker for that zone's open windows. The zones share a
+   [time budget](#time-budget-and-zone-size) of 8 minutes from the start of the
+   run. Once it is spent, the run starts no more dispatches or pages, lets the
+   dispatches in flight finish, and records the zone it was in, and each zone it
+   never reached, as not having reached its last page. The next run starts every
+   zone again at its first page and skips what is recorded.
 4. [Checks windows that closed recently](#closed-delivery-windows) against their
    sweep markers.
-5. Settles records no later plan will reach, up to 50 pages of 100: a pending or
-   claimed record whose window has closed, and a rejected token whose cleanup is
-   unfinished. This needs no pack and makes no provider send. A cleanup that
-   keeps failing retries until the daily purge removes its record, 30 days after
-   its last update.
+5. Settles records no later plan will reach: a pending or claimed record whose
+   window has closed, and a rejected token whose cleanup is unfinished. This
+   needs no pack and makes no provider send. It has a time budget of its own, 8
+   minutes from when it starts, so sweeps that spent theirs cannot starve it. A
+   cleanup that keeps failing retries until the daily purge removes its record,
+   30 days after its last update.
 
 Overlapping runs are safe: ledger claims admit one worker for each delivery, and
 a send intent left by an interrupted run becomes uncertain and is not replayed.
@@ -165,7 +173,7 @@ provider detail:
 | `pack-unavailable`              | **The pack could not be read or verified, so nothing was planned.**                                                                                                                                                                                                                             |
 | `pack-horizon-invalid`          | **The run's time is outside the active pack's coverage or Validity Horizon, so nothing was planned.**                                                                                                                                                                                           |
 | `operation-failed`              | A storage call failed. The ledger keeps the delivery safe to retry.                                                                                                                                                                                                                             |
-| `page-limit-reached`            | **A query stopped at 50 pages, so later rows were not reached.**                                                                                                                                                                                                                                |
+| `time-budget-reached`           | The run's time budget ended before a query reached its last page. With a `zone`, its later rows wait for a later run, as expected while a large zone is worked through; `window-sweep-incomplete` reports one no run finished. Without one, settlement stopped.                                 |
 | `ledger-row-invalid`            | **A ledger row could not be read, so settlement or the purge skipped it.** It repeats until the purge deletes it. A row with no readable last update may never reach the purge, because the purge query compares that field. Settlement still reports it on every run while it looks unsettled. |
 
 Senders still write their own fixed events, such as
@@ -180,8 +188,10 @@ delays sends, so this is the one case that loses reminders.
 
 A sweep marker covers it. It is one ledger row for each zone, Change Event and
 timing, with no installation data. A run writes it when it finishes a due zone,
-recording whether that sweep reached the last page. One sweep that did completes
-the window, and a later sweep cannot undo that.
+recording whether that sweep reached the last page. A sweep the
+[time budget](#time-budget-and-zone-size) stopped did not, and nor did a zone
+the budget stopped before it started. One sweep that did reach it completes the
+window, and a later sweep cannot undo that.
 
 Each run then plans every pack zone for the instant 13 hours ago. A window lasts
 12 hours, so any window open then has closed, and its last run has had an hour to
@@ -291,15 +301,56 @@ request. A run also makes 2 pack requests, and at most 8 sends are in flight, so
 up to 24 FCM credential requests can run at once.
 
 These counts do not yet justify token caching, connection pooling or new
-infrastructure. Revisit them when a zone reaches thousands of subscriptions. At
-5,000 in one zone a run reaches the page limit, and later rows are never reached
-because each run starts at the first page. `page-limit-reached` and
-`window-sweep-incomplete` are the signals to add a durable cursor. The filter is on a non-key column, so Azure scans the
-shared partition; a sparse zone can use extra pages, including empty ones, and
-these count towards the limit.
+infrastructure. The filter is on a non-key column, so Azure scans the shared
+partition, and a sparse zone can return empty pages. They cost time, which the
+budget below bounds, and nothing else: the sweep reads on past them.
 
 Portable tests use injected stores, time and providers; they provide no
 live-send or deployment evidence.
+
+#### Time budget and zone size
+
+A run starts no zone work after 8 minutes (`runBudgetMs`), and no settlement
+work after 8 more. Flex Consumption stops an execution after
+[30 minutes by default](https://learn.microsoft.com/en-us/azure/azure-functions/functions-scale#function-app-timeout-duration),
+and `host.json` sets no `functionTimeout`, so that default applies. The budgets
+leave 14 minutes for the sends in flight, whose provider requests each stop
+within 10 seconds, the closed-window check, and recording the sweeps. A run with
+little to settle ends in about 9 minutes, inside the
+[10 minutes a platform update waits](https://learn.microsoft.com/en-us/azure/azure-functions/functions-scale#function-app-timeout-duration)
+for a running execution.
+
+The timer does not
+[start a run while another is outstanding](https://learn.microsoft.com/en-us/azure/azure-functions/functions-bindings-timer#scale-out),
+so a run that spends its budget ends inside ten minutes and the next starts at
+the following five-minute mark. A 12-hour window holds at most 72 runs.
+
+Request latency is not measured, so the figures below rest on two assumptions
+to replace with hosted ones: 20 ms for each storage request and 500 ms of
+provider time for each send, with 8 in flight.
+
+| Work                                        | Cost                                    | Time with 8 in flight                |
+| ------------------------------------------- | --------------------------------------- | ------------------------------------ |
+| Skip a subscription an earlier run recorded | 1 ledger read, and 1/100 of a page read | 1.01 × 20 ms ÷ 8, taken as 3 ms      |
+| Send to a subscription the first time       | 16 storage requests and a provider call | (16 × 20 + 500) ÷ 8, taken as 100 ms |
+
+Every run starts a zone at its first page, so it skips what earlier runs
+recorded before it reaches anything new. With 480 s of budget:
+
+- A run that skips nothing sends 480 ÷ 0.1 = 4,800 times.
+- A run that only skips reaches 480 ÷ 0.003 = 160,000 subscriptions. No number
+  of runs takes a zone further.
+- Each run closes 3% (3 ms ÷ 100 ms) of the gap to that ceiling, so after k runs
+  a zone has reached 160,000 × (1 − 0.97^k). A window's 72 runs reach about
+  142,000.
+
+The documented scale is 100,000 subscriptions in the zones due in a window
+together. That takes 33 runs, about 5½ hours of the window. The zones share the
+budget and run in the pack's order, so this is their total, not the size of each
+zone, and a large first zone is skipped in every run before the zones behind it
+get any time. Past it, `time-budget-reached` on every run and
+`window-sweep-incomplete` are the signals to add a durable cursor, which
+removes the skip.
 
 ## Stored data and retention
 
