@@ -298,7 +298,7 @@ describe('DaylightSavingStatusHero', () => {
       status = standard,
       transitionKey = 'standard',
     }: {
-      readonly reducedMotion?: boolean;
+      readonly reducedMotion?: boolean | null;
       readonly status?: DaylightSavingStatusHeroFacts['status'];
       readonly transitionKey?: string;
     }) {
@@ -385,6 +385,36 @@ describe('DaylightSavingStatusHero', () => {
 
       expect(held).toHaveLength(1);
       expect(hiddenStatus(standard)).toBeNull();
+    });
+
+    // Uses the real Animated module, so the opacity read back is the one a user
+    // would see.
+    it('shows a new status at once while the motion preference is unknown', () => {
+      const timing = jest.spyOn(ReactNative.Animated, 'timing');
+      const view = render(<Hero reducedMotion={null} />);
+
+      view.rerender(
+        <Hero
+          reducedMotion={null}
+          status={daylight}
+          transitionKey="daylight"
+        />,
+      );
+
+      expect(opacityOf(screen.getByRole('header', { name: daylight }))).toBe(1);
+      expect(hiddenStatus(standard)).toBeNull();
+
+      view.rerender(
+        <Hero
+          reducedMotion={false}
+          status={daylight}
+          transitionKey="daylight"
+        />,
+      );
+
+      expect(screen.getByRole('header', { name: daylight })).toBeTruthy();
+      expect(hiddenStatus(standard)).toBeNull();
+      expect(timing).not.toHaveBeenCalled();
     });
 
     it('stops a crossfade in flight when it unmounts', () => {

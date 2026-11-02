@@ -51,16 +51,15 @@ export default function DaylightSavingStatusHero({
     : facts.clock.split(' ');
 
   useEffect(() => {
-    if (
-      reducedMotion === null ||
-      lastStatusTransitionKey.current === statusTransitionKey
-    ) {
-      return;
-    }
+    if (lastStatusTransitionKey.current === statusTransitionKey) return;
     lastStatusTransitionKey.current = statusTransitionKey;
-    setPreviousStatus(currentStatusRef.current);
+    const replacedStatus = currentStatusRef.current;
     currentStatusRef.current = facts.status;
     setCurrentStatus(facts.status);
+    // Until the preference is known, replace the status at once instead of
+    // animating, so the old one never lingers waiting for it.
+    if (reducedMotion === null) return;
+    setPreviousStatus(replacedStatus);
     currentOpacity.setValue(reducedMotion ? 0.85 : 0.7);
     previousOpacity.setValue(1);
     const animation = Animated.parallel([
