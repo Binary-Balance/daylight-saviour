@@ -31,7 +31,7 @@ jobs:
           - area: notifications
             blocking: true # #153
           - area: mobile
-            blocking: false # #154
+            blocking: true # #154
     env:
       AREA: ${{ matrix.area }}
       BLOCKING: ${{ matrix.blocking }}
