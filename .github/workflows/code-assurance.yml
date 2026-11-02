@@ -29,7 +29,7 @@ jobs:
           - area: packages
             blocking: true # #152
           - area: notifications
-            blocking: false # #153
+            blocking: true # #153
           - area: mobile
             blocking: false # #154
     env:
