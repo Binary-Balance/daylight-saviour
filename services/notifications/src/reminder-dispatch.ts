@@ -180,7 +180,7 @@ function identityOf(
   };
 }
 
-function parsedContext(context: ReminderDispatchContext) {
+function parsedPlan(context: ReminderDispatchContext) {
   const identity = identityOf(context);
   const delivery = context.delivery;
   const startsAt = parseInstant(
@@ -202,18 +202,6 @@ function parsedContext(context: ReminderDispatchContext) {
   if (endsAt.getTime() < startsAt.getTime()) {
     throw new Error('Invalid reminder dispatch delivery window');
   }
-  if (
-    !context.subscription.oneDayEnabled &&
-    !context.subscription.oneWeekEnabled
-  ) {
-    throw new Error('Reminder dispatch has no enabled timing');
-  }
-  if (
-    (identity.timing === 'one-day' && !context.subscription.oneDayEnabled) ||
-    (identity.timing === 'one-week' && !context.subscription.oneWeekEnabled)
-  ) {
-    throw new Error('Reminder dispatch timing is disabled');
-  }
   return {
     completeOperationDeadline,
     delivery,
@@ -223,6 +211,34 @@ function parsedContext(context: ReminderDispatchContext) {
     startsAt,
     eventAt: parseInstant(identity.changeEventAt, 'Change Event instant'),
   } as const;
+}
+
+/**
+ * Throws for a plan no send can use. A disabled timing is not one of these: it
+ * is a valid plan that changed, and it closes the delivery.
+ */
+function assertUsablePlan(context: ReminderDispatchContext) {
+  parsedPlan(context);
+  direction(context.delivery.changeDirection);
+}
+
+function parsedContext(context: ReminderDispatchContext) {
+  const plan = parsedPlan(context);
+  if (
+    !context.subscription.oneDayEnabled &&
+    !context.subscription.oneWeekEnabled
+  ) {
+    throw new Error('Reminder dispatch has no enabled timing');
+  }
+  if (
+    (plan.identity.timing === 'one-day' &&
+      !context.subscription.oneDayEnabled) ||
+    (plan.identity.timing === 'one-week' &&
+      !context.subscription.oneWeekEnabled)
+  ) {
+    throw new Error('Reminder dispatch timing is disabled');
+  }
+  return plan;
 }
 
 export function effectiveExpiry(
@@ -512,14 +528,17 @@ export function createReminderDispatchOperation(
     outcome: ReminderDispatchProviderResult,
   ): Promise<ReminderDispatchResult> {
     if (outcome.kind === 'not-authorized') {
-      let refused: ReminderDispatchContext | null = finalCurrent;
+      let refused: ReminderDispatchContext | null;
       try {
         refused = await dependencies.readCurrentContext(
           initial.subscription.installationId,
           identity,
         );
+        if (refused !== null) assertUsablePlan(refused);
       } catch {
-        // Unreadable is not changed: the record stays open for a later run.
+        // An unreadable or unusable plan is not a changed one: the record
+        // stays open for a later run.
+        refused = finalCurrent;
       }
       if (refused === null || !sameProviderContext(refused, finalCurrent)) {
         await dependencies.ledger.cancelBeforeProvider(
@@ -580,6 +599,9 @@ export function createReminderDispatchOperation(
         initial.subscription.installationId,
         identity,
       );
+      // Thrown later, this would leave the delivery uncertain, though nothing
+      // was sent.
+      if (finalCurrent !== null) assertUsablePlan(finalCurrent);
     } catch {
       await dependencies.ledger.cancelBeforeProvider(
         claim,
@@ -646,18 +668,19 @@ export function createReminderDispatchOperation(
       } catch {
         return false;
       }
-      if (
-        authorizedCurrent === null ||
-        !sameProviderContext(authorizedCurrent, finalCurrent) ||
-        authorizedCurrent.subscription.attemptGeneration !==
-          claim.attemptGeneration
-      ) {
-        return false;
-      }
+      if (authorizedCurrent === null) return false;
+      // Parsed first, as `sameProviderContext` throws on an invalid plan.
       let authorizedParsed: ReturnType<typeof parsedContext>;
       try {
         authorizedParsed = parsedContext(authorizedCurrent);
       } catch {
+        return false;
+      }
+      if (
+        !sameProviderContext(authorizedCurrent, finalCurrent) ||
+        authorizedCurrent.subscription.attemptGeneration !==
+          claim.attemptGeneration
+      ) {
         return false;
       }
       const authorizedNow = copyDate(clock(), 'clock');
