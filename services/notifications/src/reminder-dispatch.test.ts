@@ -1808,13 +1808,72 @@ describe('reminder dispatch operation', () => {
         },
       }),
     ],
+    ['a bad pack horizon', context({ activePackValidUntil: 'never' })],
+    ['a bad deadline', context({ completeOperationDeadline: 'never' })],
+    [
+      'an inverted window',
+      context({
+        delivery: {
+          ...context().delivery,
+          deliveryWindow: { endsAt: window.startsAt, startsAt: window.endsAt },
+        },
+      }),
+    ],
   ] as const) {
     it(`sends nothing for ${name} found after the send intent`, async () => {
       const { record, result } = await dispatchChangedAfterIntent(invalid);
 
       assert.equal(result.kind, 'transient-failure');
-      assert.equal(record?.sendStartedAt, undefined);
-      assert.notEqual(record?.status, 'uncertain');
+      assert.ok(record);
+      assert.equal(record.sendStartedAt, undefined);
+      assert.notEqual(record.status, 'uncertain');
+    });
+  }
+
+  for (const [name, next, kind] of [
+    [
+      'an unknown direction',
+      context({
+        delivery: {
+          ...context().delivery,
+          changeDirection: 'sideways' as never,
+        },
+      }),
+      'transient-failure',
+    ],
+    [
+      'a bad pack horizon',
+      context({ activePackValidUntil: 'never' }),
+      'transient-failure',
+    ],
+    [
+      'the delivery timing turned off',
+      context({ subscription: { ...subscription, oneWeekEnabled: false } }),
+      'stale',
+    ],
+  ] as const) {
+    it(`records ${kind} when a refused send finds ${name}`, async () => {
+      const fixture = operationFixture();
+      const operation = createReminderDispatchOperation({
+        clock: () => new Date(window.startsAt),
+        ledger: fixture.ledger,
+        provider: {
+          send: async () => {
+            fixture.setCurrent(next);
+            return { kind: 'not-authorized' };
+          },
+        },
+        readCurrentContext: async () => fixture.getCurrent(),
+        subscriptionStore: {
+          getSubscriptionSnapshot: async () =>
+            fixture.getCurrent().subscription,
+          removeIfDeviceTokenAndGenerationMatches: async () => 'removed',
+        },
+      });
+
+      const result = await operation.dispatch(context());
+
+      assert.equal(result.kind, kind);
     });
   }
 
