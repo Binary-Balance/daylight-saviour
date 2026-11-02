@@ -145,25 +145,34 @@ function CountdownTransition({
   const [previousValue, setPreviousValue] = useState<string | null>(null);
   const lastValue = useRef(value);
 
+  // Read through a ref so a preference change leaves a running crossfade to
+  // finish. A stopped native animation reports the part-faded opacity back
+  // after any reset, which leaves the countdown faded until the next change.
+  const reducedMotionRef = useRef(reducedMotion);
+  useEffect(() => {
+    reducedMotionRef.current = reducedMotion;
+  }, [reducedMotion]);
+
   useEffect(() => {
     if (lastValue.current === value) return;
     setPreviousValue(lastValue.current);
     lastValue.current = value;
-    if (reducedMotion === null) {
+    const reduced = reducedMotionRef.current;
+    if (reduced === null) {
       setPreviousValue(null);
       return;
     }
 
-    currentOpacity.setValue(reducedMotion ? 0.85 : 0.7);
+    currentOpacity.setValue(reduced ? 0.85 : 0.7);
     previousOpacity.setValue(1);
     const animation = Animated.parallel([
       Animated.timing(previousOpacity, {
-        duration: reducedMotion ? 90 : 140,
+        duration: reduced ? 90 : 140,
         toValue: 0,
         useNativeDriver: true,
       }),
       Animated.timing(currentOpacity, {
-        duration: reducedMotion ? 90 : 140,
+        duration: reduced ? 90 : 140,
         toValue: 1,
         useNativeDriver: true,
       }),
@@ -172,7 +181,7 @@ function CountdownTransition({
       setPreviousValue(null);
     });
     return () => animation.stop();
-  }, [currentOpacity, previousOpacity, reducedMotion, value]);
+  }, [currentOpacity, previousOpacity, value]);
 
   return (
     <View style={styles.countdownTransition}>

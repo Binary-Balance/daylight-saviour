@@ -298,7 +298,7 @@ describe('DaylightSavingStatusHero', () => {
       status = standard,
       transitionKey = 'standard',
     }: {
-      readonly reducedMotion?: boolean;
+      readonly reducedMotion?: boolean | null;
       readonly status?: DaylightSavingStatusHeroFacts['status'];
       readonly transitionKey?: string;
     }) {
@@ -386,6 +386,110 @@ describe('DaylightSavingStatusHero', () => {
       expect(held).toHaveLength(1);
       expect(hiddenStatus(standard)).toBeNull();
     });
+
+    it('fades when the status returns to the one it started with', () => {
+      const held = holdAnimations();
+      const view = render(<Hero />);
+      view.rerender(<Hero status={daylight} transitionKey="daylight" />);
+      act(() => held[0]?.finish());
+
+      view.rerender(<Hero />);
+
+      expect(held).toHaveLength(2);
+    });
+
+    it('uses a motion preference that resolved after the first render', () => {
+      holdAnimations();
+      const view = render(<Hero reducedMotion={null} />);
+      view.rerender(<Hero reducedMotion={false} />);
+
+      view.rerender(
+        <Hero
+          reducedMotion={false}
+          status={daylight}
+          transitionKey="daylight"
+        />,
+      );
+
+      expect(opacityOf(screen.getByRole('header', { name: daylight }))).toBe(
+        0.7,
+      );
+    });
+
+    it('uses a motion preference that changes with the status', () => {
+      holdAnimations();
+      const view = render(<Hero reducedMotion={false} />);
+
+      view.rerender(
+        <Hero reducedMotion status={daylight} transitionKey="daylight" />,
+      );
+
+      expect(opacityOf(screen.getByRole('header', { name: daylight }))).toBe(
+        0.85,
+      );
+    });
+
+    // Uses the real Animated module, so the opacity read back is the one a
+    // user would see.
+    it('shows a new status at once while the motion preference is unknown', () => {
+      const timing = jest.spyOn(ReactNative.Animated, 'timing');
+      const view = render(<Hero reducedMotion={null} />);
+
+      view.rerender(
+        <Hero
+          reducedMotion={null}
+          status={daylight}
+          transitionKey="daylight"
+        />,
+      );
+
+      expect(opacityOf(screen.getByRole('header', { name: daylight }))).toBe(1);
+      expect(hiddenStatus(standard)).toBeNull();
+
+      view.rerender(
+        <Hero
+          reducedMotion={false}
+          status={daylight}
+          transitionKey="daylight"
+        />,
+      );
+
+      expect(screen.getByRole('header', { name: daylight })).toBeTruthy();
+      expect(hiddenStatus(standard)).toBeNull();
+      expect(timing).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [false, true],
+      [true, false],
+      [false, null],
+    ] as const)(
+      'lets a crossfade finish when reduced motion changes from %s to %s',
+      (before, after) => {
+        const held = holdAnimations();
+        const view = render(<Hero reducedMotion={before} />);
+        view.rerender(
+          <Hero
+            reducedMotion={before}
+            status={daylight}
+            transitionKey="daylight"
+          />,
+        );
+
+        view.rerender(
+          <Hero
+            reducedMotion={after}
+            status={daylight}
+            transitionKey="daylight"
+          />,
+        );
+
+        expect(held).toHaveLength(1);
+        expect(held[0]?.stop).not.toHaveBeenCalled();
+        act(() => held[0]?.finish());
+        expect(hiddenStatus(standard)).toBeNull();
+      },
+    );
 
     it('stops a crossfade in flight when it unmounts', () => {
       const held = holdAnimations();

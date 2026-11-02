@@ -421,6 +421,25 @@ describe('ChangeEventSection', () => {
       },
     );
 
+    it('uses a motion preference that resolved after the first render', () => {
+      holdAnimations();
+      const view = render(section(twoSeconds, null));
+      view.rerender(section(twoSeconds, false));
+
+      view.rerender(section(oneSecond, false));
+
+      expect(opacityOf(screen.getByTestId('countdown-current'))).toBe(0.7);
+    });
+
+    it('uses a motion preference that changes with the countdown', () => {
+      holdAnimations();
+      const view = render(section(twoSeconds, false));
+
+      view.rerender(section(oneSecond, true));
+
+      expect(opacityOf(screen.getByTestId('countdown-current'))).toBe(0.85);
+    });
+
     it('fades from the value it last showed', () => {
       const held = holdAnimations();
       const view = render(section(threeSeconds, false));
@@ -447,6 +466,27 @@ describe('ChangeEventSection', () => {
       expect(hiddenCountdown('In 2 seconds')).toBeNull();
       expect(held).toHaveLength(0);
     });
+
+    it.each([
+      [false, true],
+      [true, false],
+      [false, null],
+    ] as const)(
+      'lets a crossfade finish when reduced motion changes from %s to %s',
+      (before, after) => {
+        const held = holdAnimations();
+        const view = render(section(twoSeconds, before));
+        view.rerender(section(oneSecond, before));
+        // The first animation is the section's entrance.
+        const crossfade = held[1];
+
+        view.rerender(section(oneSecond, after));
+
+        expect(crossfade?.stop).not.toHaveBeenCalled();
+        act(() => crossfade?.finish());
+        expect(hiddenCountdown('In 2 seconds')).toBeNull();
+      },
+    );
 
     it('stops a crossfade in flight when it unmounts', () => {
       const held = holdAnimations();
