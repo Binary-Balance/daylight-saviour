@@ -4,24 +4,36 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ComponentType,
 } from 'react';
 import {
   AccessibilityInfo,
   AppState,
   Platform,
-  Pressable,
   StyleSheet,
-  Switch,
   Text,
   View,
 } from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import type { DaylightSaviourPalette } from '../../theme';
-import type {
-  ChangeReminderAdapters,
-  ChangeReminderPreferences,
-} from './change-reminder-adapters';
+import type { ChangeReminderAdapters } from './change-reminder-adapters';
+import {
+  ConfirmDisableActions,
+  DisableFailedActions,
+  ExplainerActions,
+  FailedActions,
+  LoadFailedActions,
+  OsBlockedActions,
+  PermissionDeniedActions,
+  PermissionRevokedActions,
+  PreferencesFailedActions,
+  RetryPendingActions,
+  StartActions,
+  TimingControls,
+  ZoneFailedActions,
+  type ActionProps,
+} from './change-reminder-controls';
 import {
   createChangeReminderSession,
   type ChangeReminderSessionSnapshot,
@@ -127,6 +139,7 @@ const reminders = copy.changeReminders;
 type Kind = ChangeReminderSessionSnapshot['kind'];
 
 interface Card {
+  readonly Actions?: ComponentType<ActionProps>;
   readonly content: { readonly body: string; readonly heading?: string };
   // `busy` states wait on something; `error` states are read out as alerts.
   readonly tone: 'busy' | 'error' | 'plain';
@@ -135,25 +148,59 @@ interface Card {
 // What each state says. `enabled` is left out because its message names the
 // timings that are on.
 const cards: Record<Exclude<Kind, 'enabled'>, Card> = {
-  'confirm-disable': { content: reminders.disableConfirmation, tone: 'plain' },
-  'disable-failed': { content: reminders.disableFailed, tone: 'error' },
-  disabled: { content: reminders.disabled, tone: 'plain' },
+  'confirm-disable': {
+    Actions: ConfirmDisableActions,
+    content: reminders.disableConfirmation,
+    tone: 'plain',
+  },
+  'disable-failed': {
+    Actions: DisableFailedActions,
+    content: reminders.disableFailed,
+    tone: 'error',
+  },
+  disabled: {
+    Actions: StartActions,
+    content: reminders.disabled,
+    tone: 'plain',
+  },
   disabling: { content: { body: reminders.disabling }, tone: 'busy' },
-  explainer: { content: reminders.explainer, tone: 'plain' },
-  failed: { content: reminders.failed, tone: 'error' },
-  'load-failed': { content: reminders.loadFailed, tone: 'error' },
+  explainer: {
+    Actions: ExplainerActions,
+    content: reminders.explainer,
+    tone: 'plain',
+  },
+  failed: { Actions: FailedActions, content: reminders.failed, tone: 'error' },
+  'load-failed': {
+    Actions: LoadFailedActions,
+    content: reminders.loadFailed,
+    tone: 'error',
+  },
   loading: { content: { body: reminders.loading }, tone: 'busy' },
-  'os-blocked': { content: reminders.osBlocked, tone: 'error' },
-  'permission-denied': { content: reminders.permissionDenied, tone: 'error' },
+  'os-blocked': {
+    Actions: OsBlockedActions,
+    content: reminders.osBlocked,
+    tone: 'error',
+  },
+  'permission-denied': {
+    Actions: PermissionDeniedActions,
+    content: reminders.permissionDenied,
+    tone: 'error',
+  },
   'permission-revoked': {
+    Actions: PermissionRevokedActions,
     content: reminders.permissionRevoked,
     tone: 'error',
   },
   'preferences-failed': {
+    Actions: PreferencesFailedActions,
     content: reminders.preferencesFailed,
     tone: 'error',
   },
-  'retry-pending': { content: reminders.retryPending, tone: 'error' },
+  'retry-pending': {
+    Actions: RetryPendingActions,
+    content: reminders.retryPending,
+    tone: 'error',
+  },
   saving: { content: reminders.saving, tone: 'busy' },
   'saving-preferences': {
     content: { body: reminders.savingPreferences },
@@ -161,8 +208,16 @@ const cards: Record<Exclude<Kind, 'enabled'>, Card> = {
   },
   'saving-zone': { content: { body: reminders.savingZone }, tone: 'busy' },
   unavailable: { content: reminders.webUnavailable, tone: 'plain' },
-  untouched: { content: reminders.untouched, tone: 'plain' },
-  'zone-failed': { content: reminders.zoneFailed, tone: 'error' },
+  untouched: {
+    Actions: StartActions,
+    content: reminders.untouched,
+    tone: 'plain',
+  },
+  'zone-failed': {
+    Actions: ZoneFailedActions,
+    content: reminders.zoneFailed,
+    tone: 'error',
+  },
   'zone-mismatch': { content: reminders.zoneMismatch, tone: 'error' },
 };
 
@@ -222,53 +277,6 @@ function CardMessage({
   );
 }
 
-function TimingControls({
-  preferences,
-  onChange,
-  palette,
-  disabled,
-}: {
-  readonly preferences: ChangeReminderPreferences;
-  readonly onChange: (preferences: ChangeReminderPreferences) => void;
-  readonly palette: DaylightSaviourPalette;
-  readonly disabled: boolean;
-}) {
-  return (
-    <View style={styles.timings}>
-      <View style={styles.timing}>
-        <Text style={[styles.timingLabel, { color: palette.ink }]}>
-          {copy.changeReminders.timing.oneWeek}
-        </Text>
-        <Switch
-          accessibilityLabel={copy.changeReminders.accessibility.oneWeek}
-          accessibilityRole="switch"
-          accessibilityState={{ disabled }}
-          disabled={disabled}
-          onValueChange={(oneWeekEnabled) =>
-            onChange({ ...preferences, oneWeekEnabled })
-          }
-          value={preferences.oneWeekEnabled}
-        />
-      </View>
-      <View style={styles.timing}>
-        <Text style={[styles.timingLabel, { color: palette.ink }]}>
-          {copy.changeReminders.timing.oneDay}
-        </Text>
-        <Switch
-          accessibilityLabel={copy.changeReminders.accessibility.oneDay}
-          accessibilityRole="switch"
-          accessibilityState={{ disabled }}
-          disabled={disabled}
-          onValueChange={(oneDayEnabled) =>
-            onChange({ ...preferences, oneDayEnabled })
-          }
-          value={preferences.oneDayEnabled}
-        />
-      </View>
-    </View>
-  );
-}
-
 export default function ChangeReminderSection({
   adapters,
   homeTimeZone,
@@ -289,6 +297,7 @@ export default function ChangeReminderSection({
   const installationId = useTestInstallationId(adapters, snapshot, testBuild);
 
   const card = cardOf(snapshot);
+  const Actions = card.Actions;
   useRegistrationAnnouncements(
     snapshot.kind,
     card.tone === 'busy' ? undefined : card.content.body,
@@ -321,145 +330,14 @@ export default function ChangeReminderSection({
           preferences={snapshot.preferences}
         />
       ) : null}
-      {snapshot.kind === 'untouched' || snapshot.kind === 'disabled' ? (
-        <Pressable
-          accessibilityHint={copy.changeReminders.accessibility.enableHint}
-          accessibilityRole="button"
-          onPress={() => dispatch({ type: 'show-explainer' })}
-          style={[styles.button, { borderColor: palette.controlBoundary }]}
-        >
-          <Text style={[styles.buttonText, { color: palette.ink }]}>
-            {snapshot.kind === 'disabled'
-              ? copy.changeReminders.disabled.action
-              : copy.changeReminders.untouched.action}
-          </Text>
-        </Pressable>
-      ) : null}
-      {snapshot.kind === 'explainer' ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => dispatch({ type: 'enable' })}
-          style={[styles.button, { backgroundColor: palette.actionFill }]}
-        >
-          <Text style={[styles.buttonText, { color: palette.onActionFill }]}>
-            {copy.changeReminders.explainer.confirm}
-          </Text>
-        </Pressable>
-      ) : null}
-      {snapshot.kind === 'confirm-disable' ||
-      snapshot.kind === 'disable-failed' ? (
-        <View style={styles.actions}>
-          {snapshot.kind === 'confirm-disable' ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => dispatch({ type: 'cancel-disable' })}
-              style={[styles.button, { borderColor: palette.controlBoundary }]}
-            >
-              <Text style={[styles.buttonText, { color: palette.ink }]}>
-                {copy.changeReminders.disableConfirmation.cancel}
-              </Text>
-            </Pressable>
-          ) : null}
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => dispatch({ type: 'confirm-disable' })}
-            style={[styles.button, { backgroundColor: palette.actionFill }]}
-          >
-            <Text style={[styles.buttonText, { color: palette.onActionFill }]}>
-              {snapshot.kind === 'disable-failed'
-                ? copy.changeReminders.disableFailed.confirm
-                : copy.changeReminders.disableConfirmation.confirm}
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
-      {snapshot.kind === 'preferences-failed' ? (
-        <View style={styles.actions}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => dispatch({ type: 'retry-preferences' })}
-            style={[styles.button, { borderColor: palette.controlBoundary }]}
-          >
-            <Text style={[styles.buttonText, { color: palette.ink }]}>
-              {copy.changeReminders.preferencesFailed.retry}
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => dispatch({ type: 'cancel-preferences' })}
-            style={[styles.button, { borderColor: palette.controlBoundary }]}
-          >
-            <Text style={[styles.buttonText, { color: palette.ink }]}>
-              {copy.changeReminders.preferencesFailed.cancel}
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
-      {snapshot.kind === 'zone-failed' ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => dispatch({ type: 'retry-zone' })}
-          style={[styles.button, { borderColor: palette.controlBoundary }]}
-        >
-          <Text style={[styles.buttonText, { color: palette.ink }]}>
-            {copy.changeReminders.zoneFailed.retry}
-          </Text>
-        </Pressable>
-      ) : null}
-      {snapshot.kind === 'failed' || snapshot.kind === 'permission-denied' ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => dispatch({ type: 'enable' })}
-          style={[styles.button, { borderColor: palette.controlBoundary }]}
-        >
-          <Text style={[styles.buttonText, { color: palette.ink }]}>
-            {snapshot.kind === 'failed'
-              ? copy.changeReminders.failed.retry
-              : copy.changeReminders.permissionDenied.retry}
-          </Text>
-        </Pressable>
-      ) : null}
-      {snapshot.kind === 'retry-pending' ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => dispatch({ type: 'enable' })}
-          style={[styles.button, { borderColor: palette.controlBoundary }]}
-        >
-          <Text style={[styles.buttonText, { color: palette.ink }]}>
-            {copy.changeReminders.retryPending.retry}
-          </Text>
-        </Pressable>
-      ) : null}
-      {snapshot.kind === 'load-failed' ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => dispatch({ type: 'retry-load' })}
-          style={[styles.button, { borderColor: palette.controlBoundary }]}
-        >
-          <Text style={[styles.buttonText, { color: palette.ink }]}>
-            {copy.changeReminders.loadFailed.retry}
-          </Text>
-        </Pressable>
-      ) : null}
-      {snapshot.kind === 'os-blocked' ||
-      snapshot.kind === 'permission-revoked' ? (
-        <Pressable
-          accessibilityHint={
-            copy.changeReminders.accessibility.openSettingsHint
-          }
-          accessibilityRole="button"
-          onPress={() => {
-            void adapters.openSettings().catch(() => undefined);
-          }}
-          style={[styles.button, { borderColor: palette.controlBoundary }]}
-        >
-          <Text style={[styles.buttonText, { color: palette.ink }]}>
-            {snapshot.kind === 'os-blocked'
-              ? copy.changeReminders.osBlocked.openSettings
-              : copy.changeReminders.permissionRevoked.openSettings}
-          </Text>
-        </Pressable>
-      ) : null}
+      {Actions === undefined ? null : (
+        <Actions
+          adapters={adapters}
+          dispatch={dispatch}
+          kind={snapshot.kind}
+          palette={palette}
+        />
+      )}
       {testBuild && snapshot.kind === 'enabled' && installationId !== null ? (
         <Text
           selectable
@@ -473,16 +351,7 @@ export default function ChangeReminderSection({
 }
 
 const styles = StyleSheet.create({
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   body: { fontSize: 17, lineHeight: 25 },
-  button: {
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    minHeight: 44,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  buttonText: { fontSize: 14, fontWeight: '800' },
   card: { borderTopWidth: StyleSheet.hairlineWidth, gap: 12, paddingTop: 16 },
   metadata: {
     fontSize: 12,
@@ -490,12 +359,4 @@ const styles = StyleSheet.create({
     letterSpacing: 1.1,
     lineHeight: 18,
   },
-  timing: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 44,
-  },
-  timingLabel: { fontSize: 17 },
-  timings: { gap: 4 },
 });
