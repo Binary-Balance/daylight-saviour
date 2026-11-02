@@ -33,6 +33,9 @@ const bundledSnapshot = {
   source: 'bundled',
 } as const;
 
+const dormantCopy =
+  'No change scheduled. Keep reminders on and we’ll warn you if that changes.';
+
 function restoredReminderRegistration(homeTimeZone: string) {
   return {
     kind: 'registered' as const,
@@ -65,6 +68,19 @@ function StatusScreen(
       {...props}
     />
   );
+}
+
+// AccessibilityInfo.addEventListener has an overload for each event, and
+// jest.mocked cannot narrow it to 'reduceMotionChanged'.
+function mockReduceMotionListener(
+  register: (handler: (enabled: boolean) => void) => { remove: () => void },
+) {
+  jest
+    .mocked(ReactNative.AccessibilityInfo.addEventListener)
+    .mockImplementation(((
+      _event: string,
+      handler: (enabled: boolean) => void,
+    ) => register(handler)) as never);
 }
 
 type RenderNode = {
@@ -107,6 +123,12 @@ describe('StatusScreen facade', () => {
     mockReminderRestore.mockImplementation(
       () => new Promise<ChangeReminderRestoreResult>(() => undefined),
     );
+    // Jest's AccessibilityInfo mock is shared, so restoreAllMocks leaves these
+    // as a test set them. Put the defaults back.
+    jest
+      .mocked(ReactNative.AccessibilityInfo.isReduceMotionEnabled)
+      .mockImplementation(() => Promise.resolve(false));
+    mockReduceMotionListener(() => ({ remove: jest.fn() }));
   });
 
   it.each(['light', 'dark'] as const)(
@@ -202,8 +224,6 @@ describe('StatusScreen facade', () => {
   });
 
   it('keeps reminders available in verified no-event zones only', async () => {
-    const dormantCopy =
-      'No change scheduled. Keep reminders on and we’ll warn you if that changes.';
     mockReminderRestore.mockResolvedValue(
       restoredReminderRegistration('Australia/Brisbane'),
     );
@@ -251,6 +271,24 @@ describe('StatusScreen facade', () => {
       ),
     ).toBeTruthy();
     unavailable.unmount();
+
+    // A zone with a change coming up is ready, but not a no-event zone.
+    mockReminderRestore.mockResolvedValue(
+      restoredReminderRegistration('Australia/Sydney'),
+    );
+    render(
+      <StatusScreen
+        now={new Date('2026-07-19T00:00:00.000Z')}
+        reducedMotion
+        zoneId="Australia/Sydney"
+      />,
+    );
+    expect(
+      await screen.findByText(
+        /one-week and one-day Change Reminders are enabled/i,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(dormantCopy)).toBeNull();
   });
 
   it('uses a report-unavailable alert when a tap opens unavailable civil-time data', () => {
@@ -451,6 +489,83 @@ describe('StatusScreen facade', () => {
     ).toBe(0);
   });
 
+  it('does not look up or follow the system setting when the caller sets motion', () => {
+    render(
+      <StatusScreen now={new Date('2026-04-04T15:59:59.000Z')} reducedMotion />,
+    );
+
+    expect(
+      ReactNative.AccessibilityInfo.isReduceMotionEnabled,
+    ).not.toHaveBeenCalled();
+    expect(
+      ReactNative.AccessibilityInfo.addEventListener,
+    ).not.toHaveBeenCalledWith('reduceMotionChanged', expect.anything());
+  });
+
+  it('follows the system motion setting while mounted and stops on unmount', async () => {
+    let changeSetting: ((enabled: boolean) => void) | undefined;
+    const remove = jest.fn();
+    mockReduceMotionListener((handler) => {
+      changeSetting = handler;
+      return { remove };
+    });
+
+    const view = render(
+      <StatusScreen now={new Date('2026-04-04T15:59:59.000Z')} />,
+    );
+    await act(async () => undefined);
+    expect(screen.getByTestId('motion-reverse-fading-echo')).toBeTruthy();
+
+    act(() => changeSetting?.(true));
+
+    expect(screen.getByTestId('motion-short-fade')).toBeTruthy();
+    expect(remove).not.toHaveBeenCalled();
+
+    view.unmount();
+
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a motion answer that arrives after the caller took over', async () => {
+    let answerFirstLookup: ((enabled: boolean) => void) | undefined;
+    jest
+      .mocked(ReactNative.AccessibilityInfo.isReduceMotionEnabled)
+      .mockReturnValueOnce(
+        new Promise<boolean>((resolve) => {
+          answerFirstLookup = resolve;
+        }),
+      )
+      .mockReturnValueOnce(new Promise<boolean>(() => undefined));
+    const now = new Date('2026-04-04T15:59:59.000Z');
+
+    const view = render(<StatusScreen now={now} />);
+    view.rerender(<StatusScreen now={now} reducedMotion />);
+    view.rerender(<StatusScreen now={now} />);
+    await act(async () => answerFirstLookup?.(true));
+
+    expect(screen.getByTestId('motion-awaiting-preference')).toBeTruthy();
+  });
+
+  it('stops the live clock when it unmounts', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-04T15:59:59.000Z'));
+    const setIntervalSpy = jest.spyOn(globalThis, 'setInterval');
+    const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
+
+    const view = render(<StatusScreen reducedMotion />);
+    const clock = setIntervalSpy.mock.calls.findIndex(
+      ([, delay]) => delay === 1_000,
+    );
+    expect(clock).toBeGreaterThanOrEqual(0);
+    expect(clearIntervalSpy).not.toHaveBeenCalled();
+
+    view.unmount();
+
+    expect(clearIntervalSpy).toHaveBeenCalledWith(
+      setIntervalSpy.mock.results[clock]?.value,
+    );
+  });
+
   it('acknowledges first aftermath opening and skips it on repeat opening', () => {
     const acknowledge = jest.fn();
     const first = render(
@@ -475,6 +590,22 @@ describe('StatusScreen facade', () => {
     expect(screen.getByTestId('ordinary-civil-time-report')).toBeTruthy();
     expect(screen.queryByTestId('aftermath-civil-time-report')).toBeNull();
     expect(acknowledge).toHaveBeenCalledTimes(1);
+  });
+
+  it('acknowledges an Aftermath once when the caller passes a new callback', () => {
+    const now = new Date('2026-10-03T17:00:00.000Z');
+    const first = jest.fn();
+    const second = jest.fn();
+    const view = render(
+      <StatusScreen now={now} onAcknowledgeAftermath={first} reducedMotion />,
+    );
+
+    view.rerender(
+      <StatusScreen now={now} onAcknowledgeAftermath={second} reducedMotion />,
+    );
+
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).not.toHaveBeenCalled();
   });
 
   it('orders every critical fact and action before visual-header settings', () => {
