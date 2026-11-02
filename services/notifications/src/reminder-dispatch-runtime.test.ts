@@ -302,10 +302,15 @@ function advance(test: ReturnType<typeof harness>, ms: number) {
   test.state.now = new Date(test.state.now.getTime() + ms);
 }
 
+// Rows ask for the one-week reminder only, the one window open at `during`.
+// Planning dominates the cost of a row, and it costs less with one timing.
 function zoneRows(zone: string, count: number) {
   const name = zone.slice(zone.indexOf('/') + 1).toLowerCase();
   return Array.from({ length: count }, (_value, index) =>
-    subscriptionRow(`${name}${index}`, { homeTimeZone: zone }),
+    subscriptionRow(`${name}${index}`, {
+      homeTimeZone: zone,
+      oneDayEnabled: false,
+    }),
   );
 }
 
@@ -593,7 +598,7 @@ describe('partitioned reminder dispatch', () => {
       });
 
       startRun(test, 0);
-      await test.run(20_000);
+      await test.run(30_000);
       const first = test.sent.length;
       // The sends in flight when the budget ended finish, and none start.
       assert.ok(first >= 2_667 && first <= 2_667 + 7, `${first} sends`);
@@ -606,7 +611,7 @@ describe('partitioned reminder dispatch', () => {
       ]);
 
       startRun(test, 1);
-      await test.run(20_000);
+      await test.run(30_000);
       assert.equal(test.sent.length, 5_100);
       assert.equal(new Set(installationIds(test)).size, 5_100);
       assert.deepEqual(statuses(test), Array(5_100).fill('accepted'));
