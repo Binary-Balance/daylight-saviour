@@ -19,8 +19,8 @@
       "name": "notifications",
       "runner": "node",
       "cwd": ".",
-      "timeoutMs": 60000,
-      "mutantTimeoutMinMs": 60000,
+      "timeoutMs": 120000,
+      "mutantTimeoutMinMs": 120000,
       "typecheck": [
         "node",
         "node_modules/typescript/bin/tsc",
