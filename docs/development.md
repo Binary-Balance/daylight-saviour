@@ -383,8 +383,8 @@ missed and warns for the other thresholds.
 
 The Code assurance workflow runs `check` for packages and `crap` for
 notifications and mobile on each change, and `check` for every area weekly. A
-notifications `check` takes an hour or more, too long for each change, so a
-change there can pass and the next weekly run still fail on its mutation score.
+`check` of either takes an hour or more, too long for each change, so a change
+there can pass and the next weekly run still fail on its mutation score.
 The summary appears on the workflow run, and the JSON report is kept as an
 artifact.
 
