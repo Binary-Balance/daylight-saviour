@@ -34,10 +34,11 @@ jobs:
           java-version: '17.0.19+10'
 
       - name: Set up Gradle cache
-        # Not v6: its default cache is proprietary and needs accepting Gradle's
-        # terms, and its open source cache fails here because it keys on Gradle
-        # files, which do not exist until the Android project is generated.
-        uses: gradle/actions/setup-gradle@v5
+        # v6's default cache is proprietary, under Gradle's terms of use, which
+        # the owner accepted in #226. Its open source cache fails here because
+        # it keys on Gradle files, which do not exist until the Android project
+        # is generated.
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
