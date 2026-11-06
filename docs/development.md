@@ -91,8 +91,8 @@ web or Android bundle:
   a crafted pattern can grow until matching exhausts the CPU. Only `glob` sets
   the optimisation level it needs. Version 11.0.1 and later are patched, but
   these tools require earlier majors. They match only patterns from repository
-  configuration and installed packages. The 3.1.5 copy under ESLint and Jest is
-  outside this advisory.
+  configuration and installed packages. The root 3.1.5 copy, used by ESLint and
+  Jest, is outside this advisory.
 
 Remove each exception when its dependents accept a patched release.
 

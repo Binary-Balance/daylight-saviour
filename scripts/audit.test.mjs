@@ -6,9 +6,7 @@ import { exceptions, validateAudit } from './audit.mjs';
 const zodUrl = 'https://github.com/advisories/GHSA-mrhx-c7xc-m3w5';
 const decoderUrl = 'https://github.com/advisories/GHSA-qr28-fpjm-wq7f';
 const nodesOf = (packageName) => [
-  ...(exceptions.find(({ name }) => name === packageName).nodes ?? [
-    `node_modules/${packageName}`,
-  ]),
+  ...exceptions.find(({ name }) => name === packageName).nodes,
 ];
 
 const advisory = (name, url, severity) => ({
@@ -70,7 +68,7 @@ const audit = () => ({
         'minimatch',
       ],
       effects: [],
-      nodes: nodesOf('glob').reverse(),
+      nodes: ['node_modules/glob'],
     },
     minimatch: {
       severity: 'moderate',
@@ -82,7 +80,7 @@ const audit = () => ({
         ),
       ],
       effects: ['glob'],
-      nodes: nodesOf('minimatch'),
+      nodes: nodesOf('minimatch').reverse(),
     },
   },
 });
