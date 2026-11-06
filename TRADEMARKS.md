@@ -4,7 +4,8 @@
 Gaelian Ditchburn. All rights are reserved.
 
 The [Apache-2.0 licence](LICENSE) covers the code and technical documentation.
-It does not cover these trademarks or the icon files below, except for
+The icon files below are copyright Gaelian Ditchburn, all rights reserved, and
+are not licensed under Apache-2.0. Apache-2.0 grants no trademark rights beyond
 reasonable and customary use in describing where the work came from.
 
 Forks may use and change the code. They must replace the name and icon before
