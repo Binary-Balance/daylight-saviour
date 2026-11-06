@@ -85,15 +85,14 @@ web or Android bundle:
   signal is the Expo CLI's TypeScript project check, which sets a 5 second
   timeout. The walk can continue in the background after that, but it uses a
   fixed pattern on the local project, skips `node_modules` and costs only time.
-  The 7.2.3 copies under Jest are outside this advisory, and `npm audit` reports
-  them only because they depend on `minimatch`.
-- `minimatch` 3.1.5 and 10.2.6 ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)),
-  through ESLint, Jest, `glob` and `@expo/fingerprint`: a crafted pattern can
-  grow until matching exhausts the CPU. Only 10.2.6 has the affected code, and
-  only `glob` sets the optimisation level it needs; the advisory's version range
-  also covers 3.1.5. Version 11.0.1 and later are patched, but these tools
-  require earlier majors. They match only patterns from repository configuration
-  and installed packages.
+  The 7.2.3 copies under Jest are outside this advisory.
+- `minimatch` 10.2.6 ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)),
+  through `glob`, `@expo/fingerprint` and `@typescript-eslint/typescript-estree`:
+  a crafted pattern can grow until matching exhausts the CPU. Only `glob` sets
+  the optimisation level it needs. Version 11.0.1 and later are patched, but
+  these tools require earlier majors. They match only patterns from repository
+  configuration and installed packages. The 3.1.5 copy under ESLint and Jest is
+  outside this advisory.
 
 Remove each exception when its dependents accept a patched release.
 

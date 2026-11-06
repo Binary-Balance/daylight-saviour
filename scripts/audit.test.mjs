@@ -6,7 +6,9 @@ import { exceptions, validateAudit } from './audit.mjs';
 const zodUrl = 'https://github.com/advisories/GHSA-mrhx-c7xc-m3w5';
 const decoderUrl = 'https://github.com/advisories/GHSA-qr28-fpjm-wq7f';
 const nodesOf = (packageName) => [
-  ...exceptions.find(({ name }) => name === packageName).nodes,
+  ...(exceptions.find(({ name }) => name === packageName).nodes ?? [
+    `node_modules/${packageName}`,
+  ]),
 ];
 
 const advisory = (name, url, severity) => ({
@@ -234,7 +236,7 @@ test('rejects a second installed copy of an excepted package', () => {
 
 test('rejects a new installed copy of a package with several', () => {
   const report = audit();
-  report.vulnerabilities.glob.nodes.push('node_modules/other/glob');
+  report.vulnerabilities.minimatch.nodes.push('node_modules/other/minimatch');
   assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
 });
 

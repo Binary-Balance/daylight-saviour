@@ -34,13 +34,6 @@ export const exceptions = [
     name: 'glob',
     url: 'https://github.com/advisories/GHSA-3g3m-2fjr-6pw4',
     severity: 'moderate',
-    nodes: [
-      'node_modules/@jest/reporters/node_modules/glob',
-      'node_modules/glob',
-      'node_modules/jest-config/node_modules/glob',
-      'node_modules/jest-runtime/node_modules/glob',
-      'node_modules/test-exclude/node_modules/glob',
-    ],
     dependents: [
       'node_modules/@expo/cli',
       'node_modules/@expo/config',
@@ -61,7 +54,6 @@ export const exceptions = [
       'node_modules/@expo/fingerprint/node_modules/minimatch',
       'node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch',
       'node_modules/glob/node_modules/minimatch',
-      'node_modules/minimatch',
     ],
     dependents: [
       'node_modules/@eslint/config-array',
