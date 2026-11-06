@@ -19,6 +19,7 @@ app.
 - `apps/mobile/assets/images/android-icon-foreground.png`: Android adaptive
   foreground
 - `apps/mobile/assets/images/android-icon-monochrome.png`: Android themed icon
+- `apps/mobile/assets/images/notification-icon.png`: Android notification icon
 - `apps/mobile/assets/images/favicon.png`: web favicon
 - `apps/mobile/store/play-store-icon.png`: Google Play listing icon
 
