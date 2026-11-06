@@ -17,7 +17,7 @@ const advisory = (name, url, severity) => ({
 });
 
 const audit = () => ({
-  metadata: { vulnerabilities: { high: 3, moderate: 4 } },
+  metadata: { vulnerabilities: { high: 3, moderate: 3 } },
   vulnerabilities: {
     '@expo/fingerprint': {
       severity: 'moderate',
@@ -220,7 +220,9 @@ test('rejects an excepted advisory whose severity changed', () => {
 
 test('rejects a second installed copy of an excepted package', () => {
   const report = audit();
-  report.vulnerabilities.glob.nodes.push('node_modules/other/glob');
+  report.vulnerabilities['decode-uri-component'].nodes.push(
+    'node_modules/other/decode-uri-component',
+  );
   assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
 });
 

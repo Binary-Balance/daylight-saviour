@@ -5,7 +5,8 @@ import { spawnSync } from 'node:child_process';
 // release; docs/development.md records why each is acceptable. Each lists the
 // only lockfile packages that may depend directly on the affected package, and
 // `nodes` lists the reported copies when npm audit reports a nested copy or
-// more than one, so a new direct dependent or copy fails the audit, as does a change in severity.
+// more than one, so a new direct dependent or copy fails the audit, as does a
+// change in severity.
 // Remove an exception once its dependents accept a patched release.
 export const exceptions = [
   {
