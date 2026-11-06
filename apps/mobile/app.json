@@ -8,7 +8,7 @@
     "scheme": "daylight-saviour",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/app-icon.icon",
       "bundleIdentifier": "au.com.binarybalance.daylightsaviour",
       "config": {
         "usesNonExemptEncryption": false
@@ -16,9 +16,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#081426",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": true,
@@ -30,7 +29,13 @@
     },
     "plugins": [
       "expo-router",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#FFB238"
+        }
+      ],
       [
         "expo-splash-screen",
         {
