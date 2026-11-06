@@ -24,4 +24,4 @@ Native `android/` and `ios/` projects are generated build outputs, not source of
 
 ## Licence
 
-Code and technical documentation are licensed under Apache-2.0. Daylight Saviour trademarks remain reserved; the licence grants no right to use them except as needed for reasonable and customary description of the work's source or origin.
+Code and technical documentation are licensed under Apache-2.0. Daylight Saviour trademarks, including the app icon, remain reserved; the licence grants no right to use them except as needed for reasonable and customary description of the work's source or origin. See [`TRADEMARKS.md`](TRADEMARKS.md) and [`NOTICE`](NOTICE).

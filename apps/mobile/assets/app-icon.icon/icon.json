@@ -1,0 +1,32 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "srgb:0.03137,0.07843,0.14902,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.01961,0.03137,0.05490,1.00000"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "jumped-ray.svg",
+          "name": "jumped-ray"
+        },
+        {
+          "image-name": "sun.svg",
+          "name": "sun"
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}
