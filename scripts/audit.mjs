@@ -4,8 +4,8 @@ import { spawnSync } from 'node:child_process';
 // ponytail: temporary exceptions for advisories without a compatible patched
 // release; docs/development.md records why each is acceptable. Each lists the
 // only lockfile packages that may depend directly on the affected package, and
-// `nodes` lists the reported copies when npm audit reports more than one, so a
-// new direct dependent or copy fails the audit, as does a change in severity.
+// `nodes` lists the reported copies when npm audit reports a nested copy or
+// more than one, so a new direct dependent or copy fails the audit, as does a change in severity.
 // Remove an exception once its dependents accept a patched release.
 export const exceptions = [
   {
@@ -21,19 +21,10 @@ export const exceptions = [
     dependents: ['node_modules/query-string'],
   },
   {
-    name: 'zod',
-    url: 'https://github.com/advisories/GHSA-mrhx-c7xc-m3w5',
-    severity: 'high',
-    dependents: [
-      'node_modules/@expo/cli',
-      'node_modules/eslint-plugin-react-hooks',
-      'node_modules/zod-validation-error',
-    ],
-  },
-  {
     name: 'glob',
     url: 'https://github.com/advisories/GHSA-3g3m-2fjr-6pw4',
     severity: 'moderate',
+    nodes: ['node_modules/@expo/fingerprint/node_modules/glob'],
     dependents: [
       'node_modules/@expo/cli',
       'node_modules/@expo/config',
@@ -53,12 +44,12 @@ export const exceptions = [
     nodes: [
       'node_modules/@expo/fingerprint/node_modules/minimatch',
       'node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch',
-      'node_modules/glob/node_modules/minimatch',
     ],
     dependents: [
       'node_modules/@eslint/config-array',
       'node_modules/@eslint/eslintrc',
       'node_modules/@expo/fingerprint',
+      'node_modules/@expo/fingerprint/node_modules/glob',
       'node_modules/@jest/reporters/node_modules/glob',
       'node_modules/@typescript-eslint/typescript-estree',
       'node_modules/eslint',
@@ -113,7 +104,7 @@ const isAllowedAdvisory = (packageName, vulnerability, advisory, lock) => {
 const hasLockedExpoRouterDecoder = (lock) => {
   const packages = lock?.packages;
   return (
-    packages?.['node_modules/expo-router']?.version === '57.0.29' &&
+    packages?.['node_modules/expo-router']?.version === '57.0.30' &&
     packages?.['node_modules/expo-router']?.dependencies?.['query-string'] ===
       '^7.1.3' &&
     packages['node_modules/query-string']?.version === '7.1.3' &&
