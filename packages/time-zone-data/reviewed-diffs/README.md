@@ -10,7 +10,9 @@ reviews it accepts.
 ## Writing one
 
 1. The refused refresh prints the semantic diff and a draft expected diff.
-   Copy the draft unchanged into `<IANA version>.json`.
+   Copy the draft unchanged into `<IANA version>.json`, then run
+   `npx prettier --write` on the file so the format check passes. Formatting
+   does not change the review.
 2. Write `explanation`: what changed and why, in plain words.
 3. Fill each `evidence` entry with an HTTPS `url`, usually the IANA
    announcement or `NEWS` entry, and a `description`. `supports` lists the
