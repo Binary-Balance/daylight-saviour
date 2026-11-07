@@ -16,10 +16,11 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 const maxRequestBytes = 8 * 1024;
 const throttleWindowMs = 10 * 60 * 1000;
 export const operationalRetentionMs = 30 * 24 * 60 * 60 * 1000;
-// ADR 0022 expires a subscription after 24 months without contact. Dispatch
-// warns after a fixed 365 days, so this is two of those years, with no
-// calendar arithmetic.
-const expireAfterLastContactMs = 2 * 365 * 24 * 60 * 60 * 1000;
+// ADR 0022 warns after 12 months without contact and expires after 24. Fixed
+// 365-day years keep the rule exact in milliseconds, with no calendar
+// arithmetic.
+export const warnAfterLastContactMs = 365 * 24 * 60 * 60 * 1000;
+const expireAfterLastContactMs = 2 * warnAfterLastContactMs;
 const registrationRequestValidityMs = 24 * 60 * 60 * 1000;
 const registrationRequestFutureSkewMs = 5 * 60 * 1000;
 const throttleLimit = 5;
@@ -736,12 +737,21 @@ function removalRefusal(
   return null;
 }
 
-// True when the subscription's last contact, or its registration time for a row
-// saved before contact was recorded, is at or before the cutoff. Dispatch warns
-// on the same time. A row with neither was never warned, so it never expires,
-// and a date that cannot be read (NaN compares false) keeps the row too.
-function silentSince(existing: SubscriptionEntity, cutoff: Date) {
-  const contactAt = existing.lastContactAt ?? existing.registeredAt;
+/**
+ * True when the subscription's last contact, or its registration time for a
+ * row saved before contact was recorded, is at or before the cutoff. Warning
+ * and expiry both use it. A row with neither time, such as a retired marker,
+ * is never silent, so it is never warned or expired. A date that cannot be
+ * read (NaN compares false) counts as contact too.
+ */
+export function silentSince(
+  subscription: {
+    readonly lastContactAt?: Date | undefined;
+    readonly registeredAt?: Date | undefined;
+  },
+  cutoff: Date,
+) {
+  const contactAt = subscription.lastContactAt ?? subscription.registeredAt;
   return contactAt !== undefined && contactAt.getTime() <= cutoff.getTime();
 }
 
@@ -1102,6 +1112,11 @@ export function createTableReminderSubscriptionStore(
     async expireSilentSubscriptions(now) {
       const cutoff = new Date(now.getTime() - expireAfterLastContactMs);
       for await (const listed of subscriptions.listSilentSince(cutoff)) {
+        // The query also lists a row for an old registration time when its
+        // last contact is recent, as for an app that checks in but never
+        // changes its settings. Contact never moves backwards, so skip it
+        // without reading it again.
+        if (!silentSince(listed, cutoff)) continue;
         // Every write to a subscription sets its last contact, so a row still
         // silent when read again is the one listed. A check-in or update that
         // races the removal keeps the subscription. Retired markers have no
@@ -1309,7 +1324,9 @@ export function createAzureReminderSubscriptionStore(
             filter: odata`state eq 'retired' and retiredAt lt ${now}`,
           },
         }) as AsyncIterable<SubscriptionEntity>,
-      listSilentSince: async function* (cutoff) {
+      listSilentSince: async function* (
+        cutoff,
+      ): AsyncGenerator<SubscriptionEntity, void, unknown> {
         // Retired markers have neither time, so the filter leaves them out.
         const rows = subscriptions.listEntities<SubscriptionRow>({
           queryOptions: {

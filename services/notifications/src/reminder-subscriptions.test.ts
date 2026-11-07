@@ -135,6 +135,15 @@ function subscriptionTable(
       readonly rowKey: string;
       readonly state?: 'retired';
     }>;
+    readonly listSilentSince: (cutoff: Date) => AsyncIterable<{
+      readonly attemptGeneration: number;
+      readonly deviceToken?: string;
+      readonly etag: string;
+      readonly lastContactAt?: Date;
+      readonly partitionKey: string;
+      readonly registeredAt?: Date;
+      readonly rowKey: string;
+    }>;
     readonly merge: (
       entity: Record<string, unknown>,
       etag: string,
@@ -3881,6 +3890,54 @@ describe('generation-ordered subscription persistence', () => {
       assert.equal(row?.state, undefined);
       assert.deepEqual(row?.lastContactAt, now);
       assert.equal(row?.deviceToken, 'token-silent');
+    });
+
+    it('keeps the marker of a disable that lands while it is being removed', async () => {
+      const { registrationStore, subscriptions } = await storeWith({
+        silent: { lastContactAt: new Date(cutoff - 1) },
+      });
+      const disabledAt = new Date('2026-11-07T03:16:00.000Z');
+      subscriptions.setBeforeReplace(async () => {
+        subscriptions.setBeforeReplace(undefined);
+        assert.equal(
+          await registrationStore.deleteSubscription(
+            'silent',
+            'credential-silent',
+            disabledAt,
+          ),
+          'deleted',
+        );
+      });
+
+      await registrationStore.expireSilentSubscriptions(now);
+
+      const row = subscriptions.rows.get('subscriptions-v1/silent');
+      assert.equal(row?.state, 'retired');
+      assert.deepEqual(row?.retiredAt, disabledAt);
+    });
+
+    it('does not read again a row listed only for an old registration time', async () => {
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptionTable({
+          get: async () => {
+            throw new Error('a row with recent contact was read again');
+          },
+          listSilentSince: async function* () {
+            yield {
+              attemptGeneration: 1,
+              deviceToken: 'token',
+              etag: 'etag',
+              lastContactAt: new Date(cutoff + 1),
+              partitionKey: 'subscriptions-v1',
+              registeredAt: new Date(cutoff - 1),
+              rowKey: 'checks-in',
+            };
+          },
+        }),
+        unusedThrottleTable(),
+      );
+
+      await registrationStore.expireSilentSubscriptions(now);
     });
   });
 });
