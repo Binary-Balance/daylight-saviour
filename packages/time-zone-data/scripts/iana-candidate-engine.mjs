@@ -1254,8 +1254,29 @@ export function assertReviewedSemanticDiff(
   sourceVersion,
 ) {
   if (actual.differences.length === 0) return;
-  if (expected === undefined) {
+  // The refresh writes nothing when it rejects a difference, so the error is
+  // the operator's only record of what changed and of the exact differences a
+  // reviewed file must repeat. The draft cannot pass until a person fills in
+  // the explanation and evidence.
+  const draft = {
+    sourceVersion,
+    archiveSha256,
+    explanation: '',
+    evidence: [
+      {
+        url: '',
+        description: '',
+        supports: actual.differences.map((_, index) => index),
+      },
+    ],
+    differences: actual.differences,
+  };
+  const reject = (problem) =>
     fail(
+      `${problem}\n${actual.text}Draft expected diff:\n${JSON.stringify(draft, null, 2)}`,
+    );
+  if (expected === undefined) {
+    reject(
       'unexplained civil-time difference; reviewed expected diff with evidence is required',
     );
   }
@@ -1264,22 +1285,22 @@ export function assertReviewedSemanticDiff(
     expected === null ||
     Array.isArray(expected)
   ) {
-    fail('reviewed expected diff must be an object');
+    reject('reviewed expected diff must be an object');
   }
   if (
     expected.sourceVersion !== sourceVersion ||
     expected.archiveSha256 !== archiveSha256
   ) {
-    fail('reviewed expected diff does not identify this verified archive');
+    reject('reviewed expected diff does not identify this verified archive');
   }
   if (
     typeof expected.explanation !== 'string' ||
     expected.explanation.trim().length === 0
   ) {
-    fail('reviewed expected diff requires a human explanation');
+    reject('reviewed expected diff requires a human explanation');
   }
   if (!Array.isArray(expected.evidence) || expected.evidence.length === 0) {
-    fail('reviewed expected diff requires IANA evidence');
+    reject('reviewed expected diff requires IANA evidence');
   }
   for (const evidence of expected.evidence) {
     if (
@@ -1298,7 +1319,7 @@ export function assertReviewedSemanticDiff(
           index >= actual.differences.length,
       )
     ) {
-      fail(
+      reject(
         'reviewed expected diff evidence must contain an HTTPS URL, explanation, and supported change indexes',
       );
     }
@@ -1307,13 +1328,13 @@ export function assertReviewedSemanticDiff(
     expected.evidence.flatMap((evidence) => evidence.supports),
   );
   if (actual.differences.some((_, index) => !supportedChanges.has(index))) {
-    fail('reviewed expected diff evidence must cover every change');
+    reject('reviewed expected diff evidence must cover every change');
   }
   if (
     !Array.isArray(expected.differences) ||
     canonicalJson(expected.differences) !== canonicalJson(actual.differences)
   ) {
-    fail(
+    reject(
       'reviewed expected diff does not match generated semantic differences',
     );
   }
