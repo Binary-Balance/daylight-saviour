@@ -1,7 +1,8 @@
 # Notification service
 
 Azure Functions hosts installation-scoped Change Reminder registration, daily
-[retention cleanup](#stored-data-and-retention) and
+[retention cleanup](#stored-data-and-retention), which can also
+[expire silent subscriptions](#expiring-a-silent-subscription), and
 [scheduled dispatch](#scheduled-dispatch), which stays suspended until an
 operator enables it. This package also provides reusable APNs and FCM senders,
 and keyless FCM access-token primitives. The APNs sender accepts an injected
@@ -247,7 +248,8 @@ as reviewed copy.
 [ADR 0016](../../docs/adr/0016-provide-a-reminder-dispatch-kill-switch.md). It
 stops scheduled reminder sends through APNs and FCM. It does not change
 subscriptions, credentials or the Time-Zone Data Pack, and the app is not told,
-so its status does not change. Registration and retention cleanup keep running.
+so its status does not change. Registration and retention cleanup keep running,
+including any [expiry](#expiring-a-silent-subscription).
 The owner-gated test send has [its own gates](#deployment-settings), so turn
 those off separately.
 
@@ -373,13 +375,13 @@ Only its budget limits that scan, and it has not been measured.
 
 ## Stored data and retention
 
-| Record                                                 | Purpose                                                   | Contents                                                                                                                                                  | Kept until                                              |
-| ------------------------------------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Subscription (`ReminderSubscriptions`)                 | Send reminders and authorise changes to them              | Installation ID, credential hash, push token, platform, Home Time Zone, timing preferences, generation, registration time and last contact time           | Disable, deletion or a permanent invalid-token response |
-| Retired-identity marker (`ReminderSubscriptions`)      | Stop a delayed registration recreating a removed identity | Installation ID, generation and retirement time                                                                                                           | 30 days after the subscription is removed               |
-| Registration throttle (`ReminderRegistrationThrottle`) | Limit registration, update, check-in and delete requests  | Hashed client IP address or installation ID, ten-minute window and request count                                                                          | 30 days after its window starts                         |
-| Dispatch ledger (`ReminderDispatchLedger`)             | Send each reminder at most once and record its outcome    | Installation ID, Home Time Zone, Change Event, timing, generation, delivery window, pack horizon, status, claim, expiry and cleanup state, and timestamps | 30 days after its last update                           |
-| Sweep marker (`ReminderDispatchLedger`)                | Report a Delivery Window that no run fully swept          | Home Time Zone, Change Event, timing, sweep state and last update                                                                                         | 30 days after its last update                           |
+| Record                                                 | Purpose                                                   | Contents                                                                                                                                                  | Kept until                                                                                                             |
+| ------------------------------------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Subscription (`ReminderSubscriptions`)                 | Send reminders and authorise changes to them              | Installation ID, credential hash, push token, platform, Home Time Zone, timing preferences, generation, registration time and last contact time           | Disable, deletion, a permanent invalid-token response, or [24 months without contact](#expiring-a-silent-subscription) |
+| Retired-identity marker (`ReminderSubscriptions`)      | Stop a delayed registration recreating a removed identity | Installation ID, generation and retirement time                                                                                                           | 30 days after the subscription is removed                                                                              |
+| Registration throttle (`ReminderRegistrationThrottle`) | Limit registration, update, check-in and delete requests  | Hashed client IP address or installation ID, ten-minute window and request count                                                                          | 30 days after its window starts                                                                                        |
+| Dispatch ledger (`ReminderDispatchLedger`)             | Send each reminder at most once and record its outcome    | Installation ID, Home Time Zone, Change Event, timing, generation, delivery window, pack horizon, status, claim, expiry and cleanup state, and timestamps | 30 days after its last update                                                                                          |
+| Sweep marker (`ReminderDispatchLedger`)                | Report a Delivery Window that no run fully swept          | Home Time Zone, Change Event, timing, sweep state and last update                                                                                         | 30 days after its last update                                                                                          |
 
 The last contact time is set at registration and by every authenticated update
 or check-in. The app checks in on its next return to the foreground once 30
@@ -391,11 +393,13 @@ uses it for the warning and expiry it describes.
 
 Uninstalling the app does not tell the service. An uninstalled app's
 subscription stays until APNs or FCM rejects its token as permanently invalid,
-which can only happen when something is sent to it. Apple does not promise
-when, or whether, APNs starts rejecting a token after an uninstall, so such a
-subscription may be kept indefinitely. When a reinstalled iOS app finds the
-previous install's registration in the keychain, it makes one attempt to
-delete that registration from the service before starting again.
+which can only happen when something is sent to it, or until it
+[expires](#expiring-a-silent-subscription) after 24 months without contact.
+Apple does not promise when, or whether, APNs starts rejecting a token after an
+uninstall, so without expiry such a subscription may be kept indefinitely. When
+a reinstalled iOS app finds the previous install's registration in the
+keychain, it makes one attempt to delete that registration from the service
+before starting again.
 
 Removing a subscription replaces its row with the marker at once. The daily
 `reminder-throttle-cleanup` timer deletes the other expired rows, so a row can
@@ -418,6 +422,27 @@ deletes it. The query compares `updatedAt`, so the purge may never list a row
 without a readable date. Settlement reports such a row on every run while it
 matches the unsettled query, and any other such row raises no event.
 
+### Expiring a silent subscription
+
+[ADR 0022](../../docs/adr/0022-expire-silent-reminder-subscriptions-after-warning.md)
+removes a subscription after 24 months without contact, so an uninstalled
+app's data is not kept indefinitely. Opening the app or tapping a reminder is
+contact. When `REMINDER_SUBSCRIPTION_EXPIRY_ENABLED` is exactly `true`, the
+daily cleanup run, after its purges, removes each subscription whose last
+contact was 730 days or more before the run: two of the fixed 365-day years
+that [warning](#warning-a-silent-subscription) uses. It judges the same time as
+the warning, so a row with neither time never expires, as it was never warned.
+
+Expiry removes a subscription the way a disable does: the row becomes the
+30-day retired-identity marker, and the app shows Change Reminders as off when
+it next makes contact. Each removal reads the row again and carries its ETag,
+so a check-in or update that races it keeps the subscription. A subscription
+for a Home Time Zone with no Change Event gets no warning, but still expires.
+
+Expiry is off by default and must stay off until scheduled dispatch can deliver
+the warning, or users lose reminders without notice. For the same reason, turn
+it off while the [kill switch](#kill-switch) stops dispatch for long.
+
 ## Deployment settings
 
 The deployed registration functions read the reminder settings below. The
@@ -427,25 +452,26 @@ APNs provider settings and both pack settings; if any is missing it logs
 `reminder-dispatch-unavailable` and sends nothing. It does not depend on the
 test gates.
 
-| Setting                               | Purpose                                                                                            |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `REMINDER_MANAGED_IDENTITY_CLIENT_ID` | User-assigned Azure managed identity used by deployed registration and throttle-cleanup functions. |
-| `REMINDER_STORAGE_ACCOUNT_NAME`       | Azure Table account used by deployed registration and throttle-cleanup functions.                  |
-| `FCM_ENTRA_ASSERTION_AUDIENCE`        | Reserved Entra Application ID URI for the reusable keyless access-token provider.                  |
-| `FCM_WORKLOAD_IDENTITY_PROVIDER`      | Reserved Google workload identity provider resource beginning `//iam.googleapis.com/projects/…`.   |
-| `FCM_SERVICE_ACCOUNT_EMAIL`           | Reserved exact Google service account to impersonate for FCM.                                      |
-| `FCM_PROJECT_ID`                      | Reserved exact Firebase/Google project for FCM HTTP v1 send URLs.                                  |
-| `REMINDER_DISPATCH_ENABLED`           | The [kill switch](#kill-switch). Enables scheduled dispatch when exactly `true`.                   |
-| `TIME_ZONE_DATA_MANIFEST_URL`         | Signed Time-Zone Data Pack manifest. Read only when dispatch is enabled.                           |
-| `TIME_ZONE_DATA_TRUSTED_KEYS_JSON`    | JSON object of pack key IDs and Ed25519 public keys. Read only when dispatch is enabled.           |
-| `FCM_RUNTIME_ENABLED`                 | Enables the retained owner-controlled Android Change Reminder test composition.                    |
-| `FCM_TEST_SEND_ENABLED`               | Existing default-disabled owner test-send gate shared by Android and iOS smoke sends.              |
-| `APNS_RUNTIME_ENABLED`                | Enables the retained owner-controlled iOS Change Reminder test composition.                        |
-| `APNS_ENVIRONMENT`                    | Required APNs host selection: exactly `sandbox` or `production`; no default is used.               |
-| `APNS_TOPIC`                          | Required iOS bundle topic sent as the APNs topic header.                                           |
-| `APNS_TEAM_ID`                        | Required ten-character Apple developer team ID for the provider JWT issuer.                        |
-| `APNS_KEY_ID`                         | Required ten-character Apple signing key ID for the provider JWT header.                           |
-| `APNS_PRIVATE_KEY`                    | Required PEM P-256 private key; it signs provider JWTs only in memory.                             |
+| Setting                                | Purpose                                                                                            |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `REMINDER_MANAGED_IDENTITY_CLIENT_ID`  | User-assigned Azure managed identity used by deployed registration and throttle-cleanup functions. |
+| `REMINDER_STORAGE_ACCOUNT_NAME`        | Azure Table account used by deployed registration and throttle-cleanup functions.                  |
+| `FCM_ENTRA_ASSERTION_AUDIENCE`         | Reserved Entra Application ID URI for the reusable keyless access-token provider.                  |
+| `FCM_WORKLOAD_IDENTITY_PROVIDER`       | Reserved Google workload identity provider resource beginning `//iam.googleapis.com/projects/…`.   |
+| `FCM_SERVICE_ACCOUNT_EMAIL`            | Reserved exact Google service account to impersonate for FCM.                                      |
+| `FCM_PROJECT_ID`                       | Reserved exact Firebase/Google project for FCM HTTP v1 send URLs.                                  |
+| `REMINDER_DISPATCH_ENABLED`            | The [kill switch](#kill-switch). Enables scheduled dispatch when exactly `true`.                   |
+| `REMINDER_SUBSCRIPTION_EXPIRY_ENABLED` | Enables [expiry](#expiring-a-silent-subscription) of silent subscriptions when exactly `true`.     |
+| `TIME_ZONE_DATA_MANIFEST_URL`          | Signed Time-Zone Data Pack manifest. Read only when dispatch is enabled.                           |
+| `TIME_ZONE_DATA_TRUSTED_KEYS_JSON`     | JSON object of pack key IDs and Ed25519 public keys. Read only when dispatch is enabled.           |
+| `FCM_RUNTIME_ENABLED`                  | Enables the retained owner-controlled Android Change Reminder test composition.                    |
+| `FCM_TEST_SEND_ENABLED`                | Existing default-disabled owner test-send gate shared by Android and iOS smoke sends.              |
+| `APNS_RUNTIME_ENABLED`                 | Enables the retained owner-controlled iOS Change Reminder test composition.                        |
+| `APNS_ENVIRONMENT`                     | Required APNs host selection: exactly `sandbox` or `production`; no default is used.               |
+| `APNS_TOPIC`                           | Required iOS bundle topic sent as the APNs topic header.                                           |
+| `APNS_TEAM_ID`                         | Required ten-character Apple developer team ID for the provider JWT issuer.                        |
+| `APNS_KEY_ID`                          | Required ten-character Apple signing key ID for the provider JWT header.                           |
+| `APNS_PRIVATE_KEY`                     | Required PEM P-256 private key; it signs provider JWTs only in memory.                             |
 
 When composed, the keyless access-token provider accepts only short-lived
 credentials: managed-identity assertions must have a valid future expiry, while

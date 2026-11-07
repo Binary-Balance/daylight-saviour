@@ -47,6 +47,8 @@ import {
 } from './reminder-dispatch.ts';
 import {
   createAzureReminderSubscriptionStore,
+  silentSince,
+  warnAfterLastContactMs,
   type ReminderSubscriptionSnapshot,
   type ReminderSubscriptionStore,
 } from './reminder-subscriptions.ts';
@@ -63,9 +65,6 @@ const runBudgetMs = 8 * 60 * 1000;
 // last run has had an hour to finish. Every run in the following 12 hours
 // checks it, which outlasts a shorter pack or storage fault after it closes.
 const closedWindowLookbackMs = 13 * 60 * 60 * 1000;
-// ADR 0022 warns after 12 months without contact. A fixed 365 days keeps the
-// rule exact in milliseconds, with no calendar arithmetic.
-const warnAfterLastContactMs = 365 * 24 * 60 * 60 * 1000;
 const packReadTimeoutMs = 10_000;
 const maxManifestBytes = 64 * 1024;
 const everyTiming = { oneDayEnabled: true, oneWeekEnabled: true };
@@ -144,16 +143,11 @@ const dispatcherOwnsCleanup = {
   removeIfDeviceTokenMatches: async () => 'not-found' as const,
 };
 
-/**
- * A row saved before last contact was recorded is judged on its registration
- * time. A missing time, or a date that cannot be read (NaN compares false),
- * gives no basis to warn.
- */
+// Expiry judges the same contact time, so a warned row is the one that expires.
 function isWarned(subscription: ReminderSubscriptionSnapshot, plannedAt: Date) {
-  const contactAt = subscription.lastContactAt ?? subscription.registeredAt;
-  return (
-    contactAt !== undefined &&
-    plannedAt.getTime() - contactAt.getTime() >= warnAfterLastContactMs
+  return silentSince(
+    subscription,
+    new Date(plannedAt.getTime() - warnAfterLastContactMs),
   );
 }
 

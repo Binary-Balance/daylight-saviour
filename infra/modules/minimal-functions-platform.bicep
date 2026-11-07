@@ -81,6 +81,8 @@ type FcmSettings = {
 type ReminderDispatchSettings = {
   enabled: bool
 
+  subscriptionExpiryEnabled: bool?
+
   timeZoneDataManifestUrl: string
 
   timeZoneDataTrustedKeysJson: string
@@ -134,7 +136,7 @@ param fcm FcmSettings = {
   workloadIdentityProvider: ''
 }
 
-@description('Optional caller-supplied Change Reminder dispatch settings. Dispatch stays suspended unless enabled is true. apnsPrivateKeyReference is a Key Vault reference, never the key.')
+@description('Optional caller-supplied Change Reminder dispatch settings. Dispatch stays suspended unless enabled is true, and subscription expiry stays off unless subscriptionExpiryEnabled is true. apnsPrivateKeyReference is a Key Vault reference, never the key.')
 param reminderDispatch ReminderDispatchSettings?
 
 @description('Build identifier returned by the notification-service health endpoint.')

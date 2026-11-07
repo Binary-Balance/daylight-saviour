@@ -17,6 +17,7 @@ module platform '../modules/minimal-functions-platform.bicep' = {
     resourceNames: resourceNames
     reminderDispatch: {
       enabled: true
+      subscriptionExpiryEnabled: true
       timeZoneDataManifestUrl: 'https://time-zone-data.example.invalid/manifest.json'
       timeZoneDataTrustedKeysJson: '{"sample-key":"sample-public-key"}'
       apnsEnvironment: 'sandbox'

@@ -20,10 +20,14 @@ Inputs:
   email, FCM project ID, and the explicit `testSendEnabled` gate. Both FCM
   runtime and test sends are disabled by default; no Google key is accepted.
 - `reminderDispatch` — optional Change Reminder dispatch settings: the `enabled`
-  gate, the signed Time-Zone Data Pack manifest URL and trusted keys JSON, and
-  the APNs environment, topic, team ID, key ID and private key reference. Leave
-  it unset and the module adds only `REMINDER_DISPATCH_ENABLED=false`. Setting it
-  adds the other seven settings, and makes the runtime identity resolve Key Vault
+  gate, the optional `subscriptionExpiryEnabled` gate, the signed Time-Zone Data
+  Pack manifest URL and trusted keys JSON, and the APNs environment, topic, team
+  ID, key ID and private key reference. Leave it unset and the module adds only
+  `REMINDER_DISPATCH_ENABLED=false` and
+  `REMINDER_SUBSCRIPTION_EXPIRY_ENABLED=false`. Expiry stays off until
+  `subscriptionExpiryEnabled` is `true`; enable it only once dispatch can deliver
+  the warning that comes first. Setting `reminderDispatch` adds the other seven
+  settings, and makes the runtime identity resolve Key Vault
   references. A value set by hand is replaced at the next deployment, because the
   module owns the whole settings set. Enabled dispatch needs every field and the
   `fcm` values, because it composes FCM and APNs together. `fcm.enabled` does not

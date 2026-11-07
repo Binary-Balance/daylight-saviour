@@ -16,6 +16,11 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 const maxRequestBytes = 8 * 1024;
 const throttleWindowMs = 10 * 60 * 1000;
 export const operationalRetentionMs = 30 * 24 * 60 * 60 * 1000;
+// ADR 0022 warns after 12 months without contact and expires after 24. Fixed
+// 365-day years keep the rule exact in milliseconds, with no calendar
+// arithmetic.
+export const warnAfterLastContactMs = 365 * 24 * 60 * 60 * 1000;
+const expireAfterLastContactMs = 2 * warnAfterLastContactMs;
 const registrationRequestValidityMs = 24 * 60 * 60 * 1000;
 const registrationRequestFutureSkewMs = 5 * 60 * 1000;
 const throttleLimit = 5;
@@ -78,6 +83,11 @@ interface SubscriptionTable {
     rowKey: string,
   ) => Promise<SubscriptionEntity>;
   readonly listRetiredExpired: (now: Date) => AsyncIterable<SubscriptionEntity>;
+  /**
+   * Rows whose last contact or registration time is at or before the cutoff.
+   * A row can be listed for its other time.
+   */
+  readonly listSilentSince: (cutoff: Date) => AsyncIterable<SubscriptionEntity>;
   readonly listZonePages: (
     homeTimeZone: string,
   ) => AsyncIterable<readonly SubscriptionEntity[]>;
@@ -164,6 +174,8 @@ export interface ReminderSubscriptionStore {
   ) => Promise<'removed' | 'not-found' | 'token-replaced'>;
   readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
   readonly purgeExpiredRetiredSubscriptions: (now: Date) => Promise<void>;
+  /** Removes subscriptions with no contact for 24 months (ADR 0022). */
+  readonly expireSilentSubscriptions: (now: Date) => Promise<void>;
   readonly createSubscription: (
     record: ReminderSubscriptionRecord,
     registrationRequestId: string,
@@ -725,38 +737,55 @@ function removalRefusal(
   return null;
 }
 
-async function removeStoredSubscription(
+/**
+ * True when the subscription's last contact, or its registration time for a
+ * row saved before contact was recorded, is at or before the cutoff. Warning
+ * and expiry both use it. A row with neither time, such as a retired marker,
+ * is never silent, so it is never warned or expired. A date that cannot be
+ * read (NaN compares false) counts as contact too.
+ */
+export function silentSince(
+  subscription: {
+    readonly lastContactAt?: Date | undefined;
+    readonly registeredAt?: Date | undefined;
+  },
+  cutoff: Date,
+) {
+  const contactAt = subscription.lastContactAt ?? subscription.registeredAt;
+  return contactAt !== undefined && contactAt.getTime() <= cutoff.getTime();
+}
+
+// The 30-day marker that replaces a removed subscription.
+function retiredMarker(
+  installationId: string,
+  attemptGeneration: number,
+  retiredAt: Date,
+) {
+  return {
+    partitionKey: subscriptionPartitionKey,
+    rowKey: installationId,
+    state: 'retired',
+    attemptGeneration,
+    retiredAt,
+  };
+}
+
+// `refuse` judges each read of the row, so a write that loses a race is judged
+// again against what won it.
+async function removeStoredSubscription<Refusal extends string>(
   subscriptions: SubscriptionTable,
-  subscription: Pick<
-    StoredReminderSubscription,
-    'deviceToken' | 'installationId'
-  >,
-  attemptGeneration: number | undefined,
-  invalidatedAt: Date | undefined,
+  installationId: string,
+  refuse: (existing: SubscriptionEntity) => Refusal | null,
 ) {
   const retiredAt = new Date();
   for (let attempt = 0; attempt < tableMutationRetryLimit; attempt += 1) {
-    const existing = await findSubscription(
-      subscriptions,
-      subscription.installationId,
-    );
+    const existing = await findSubscription(subscriptions, installationId);
     if (existing === null) return 'not-found' as const;
-    const refusal = removalRefusal(
-      existing,
-      subscription.deviceToken,
-      attemptGeneration,
-      invalidatedAt,
-    );
+    const refusal = refuse(existing);
     if (refusal !== null) return refusal;
     try {
       await subscriptions.replace(
-        {
-          partitionKey: subscriptionPartitionKey,
-          rowKey: subscription.installationId,
-          state: 'retired',
-          attemptGeneration: existing.attemptGeneration,
-          retiredAt,
-        },
+        retiredMarker(installationId, existing.attemptGeneration, retiredAt),
         existing.etag,
       );
       return 'removed' as const;
@@ -900,9 +929,14 @@ export function createTableReminderSubscriptionStore(
     async removeIfDeviceTokenMatches(subscription, invalidatedAt) {
       return removeStoredSubscription(
         subscriptions,
-        subscription,
-        undefined,
-        invalidatedAt,
+        subscription.installationId,
+        (existing) =>
+          removalRefusal(
+            existing,
+            subscription.deviceToken,
+            undefined,
+            invalidatedAt,
+          ),
       );
     },
     async removeIfDeviceTokenAndGenerationMatches(
@@ -912,9 +946,14 @@ export function createTableReminderSubscriptionStore(
     ) {
       return removeStoredSubscription(
         subscriptions,
-        subscription,
-        attemptGeneration,
-        invalidatedAt,
+        subscription.installationId,
+        (existing) =>
+          removalRefusal(
+            existing,
+            subscription.deviceToken,
+            attemptGeneration,
+            invalidatedAt,
+          ),
       );
     },
     async createSubscription(record, registrationRequestId) {
@@ -1009,13 +1048,11 @@ export function createTableReminderSubscriptionStore(
         async (existing) => {
           try {
             await subscriptions.replace(
-              {
-                partitionKey: subscriptionPartitionKey,
-                rowKey: installationId,
-                state: 'retired',
-                attemptGeneration: existing.attemptGeneration,
+              retiredMarker(
+                installationId,
+                existing.attemptGeneration,
                 retiredAt,
-              },
+              ),
               existing.etag,
             );
             return 'deleted' as const;
@@ -1070,6 +1107,26 @@ export function createTableReminderSubscriptionStore(
             throw error;
           }
         }
+      }
+    },
+    async expireSilentSubscriptions(now) {
+      const cutoff = new Date(now.getTime() - expireAfterLastContactMs);
+      for await (const listed of subscriptions.listSilentSince(cutoff)) {
+        // The query also lists a row for an old registration time when its
+        // last contact is recent, as for an app that checks in but never
+        // changes its settings. Contact never moves backwards, so skip it
+        // without reading it again.
+        if (!silentSince(listed, cutoff)) continue;
+        // Every write to a subscription sets its last contact, so a row still
+        // silent when read again is the one listed. A check-in or update that
+        // races the removal keeps the subscription. Retired markers have no
+        // contact time, so they are never removed again.
+        await removeStoredSubscription(
+          subscriptions,
+          listed.rowKey,
+          (existing) =>
+            silentSince(existing, cutoff) ? null : ('contacted' as const),
+        );
       }
     },
   };
@@ -1267,6 +1324,23 @@ export function createAzureReminderSubscriptionStore(
             filter: odata`state eq 'retired' and retiredAt lt ${now}`,
           },
         }) as AsyncIterable<SubscriptionEntity>,
+      listSilentSince: async function* (
+        cutoff,
+      ): AsyncGenerator<SubscriptionEntity, void, unknown> {
+        // Retired markers have neither time, so the filter leaves them out.
+        const rows = subscriptions.listEntities<SubscriptionRow>({
+          queryOptions: {
+            filter: odata`PartitionKey eq ${subscriptionPartitionKey} and (lastContactAt le ${cutoff} or registeredAt le ${cutoff})`,
+          },
+        });
+        for await (const row of rows) {
+          yield subscriptionEntityFromRow(
+            row,
+            subscriptionPartitionKey,
+            row.rowKey as string,
+          );
+        }
+      },
       listZonePages: async function* (
         homeTimeZone,
       ): AsyncGenerator<readonly SubscriptionEntity[], void, unknown> {

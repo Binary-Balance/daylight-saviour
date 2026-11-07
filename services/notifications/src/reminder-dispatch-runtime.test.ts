@@ -199,6 +199,9 @@ function harness(
       listRetiredExpired: async function* () {
         // Dispatch never purges.
       },
+      listSilentSince: async function* () {
+        // Dispatch never expires subscriptions.
+      },
       async *listZonePages(homeTimeZone) {
         operations.queriedZones.push(homeTimeZone);
         const zone = [...subscriptions.values()].filter(
