@@ -776,7 +776,7 @@ describe('verified IANA Australian candidate refresh', () => {
               {
                 url: 'https://example.test/review',
                 description: 'review',
-                supports: [0],
+                supports: [0, 1],
               },
             ],
             explanation: 'reviewed change',
@@ -786,7 +786,7 @@ describe('verified IANA Australian candidate refresh', () => {
           'b'.repeat(64),
           '2026d',
         ),
-      /(cover every change|reviewed expected diff does not match)[^]*Draft expected diff:/,
+      /does not match generated semantic differences[^]*Draft expected diff:/,
     );
     const expected = {
       archiveSha256: 'b'.repeat(64),
