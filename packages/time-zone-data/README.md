@@ -72,7 +72,9 @@ fails closed. A civil-time difference requires `--expected-diff` containing
 the exact structured `semanticDiff.differences`, the verified archive version
 and digest, a human explanation, and HTTPS evidence entries whose
 `supports` indexes identify the changes they justify. An evidence URL or a
-refreshed snapshot by itself cannot approve a difference.
+refreshed snapshot by itself cannot approve a difference. A refused difference
+prints the semantic diff and a draft to fill in; reviewed files live in
+[`reviewed-diffs/`](reviewed-diffs/README.md).
 
 ## Signed artifact publisher
 

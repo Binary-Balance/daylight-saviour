@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
-import { gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 
 import { activateTimeZoneDataPack } from '@daylight-saviour/contracts';
 
@@ -646,6 +646,86 @@ describe('verified IANA Australian candidate refresh', () => {
         reviewedDifferences,
       ),
     );
+  });
+
+  it('reports a rejected change and publishes it once the draft is reviewed', async () => {
+    // Moves South Australia's daylight-saving start an hour later. The swap
+    // keeps every tar entry the same length, so the archive stays valid.
+    const tar = Buffer.from(gunzipSync(await readFile(archivePath)));
+    const rule = 'Rule\tAS\t2008\tmax\t-\tOct\tSun>=1\t2:00s';
+    const at = tar.indexOf(rule);
+    assert.ok(at > 0);
+    tar.write(rule.replace('2:00s', '3:00s'), at);
+    const root = await mkdtemp(join(tmpdir(), 'daylight-iana-reviewed-'));
+    const changedArchivePath = join(root, 'tzdata2026c.tar.gz');
+    await writeFile(changedArchivePath, gzipSync(tar));
+    const options = async (extras) =>
+      refreshOptions(join(root, 'candidate'), {
+        archivePath: changedArchivePath,
+        verifySignature: async () => ({ fingerprint, verifier: 'gpg' }),
+        ...extras,
+      });
+
+    const rejection = await refreshAustralianPack(await options()).then(
+      () => assert.fail('an unexplained change must not publish'),
+      (error) => error.message,
+    );
+    assert.match(rejection, /unexplained civil-time difference/);
+    assert.match(rejection, /^Zone Australia\/Adelaide:$/m);
+    assert.match(rejection, /^ {2}transition added: \d{4}-10-/m);
+    assert.doesNotMatch(rejection, /^Zone Australia\/Sydney:$/m);
+    const draft = JSON.parse(rejection.split('Draft expected diff:\n')[1]);
+    assert.equal(draft.sourceVersion, '2026c');
+    assert.equal(
+      draft.archiveSha256,
+      createHash('sha256')
+        .update(await readFile(changedArchivePath))
+        .digest('hex'),
+    );
+
+    const reviewedPath = join(root, '2026c.json');
+    await writeFile(reviewedPath, JSON.stringify(draft));
+    await assert.rejects(
+      refreshAustralianPack(await options({ expectedDiffPath: reviewedPath })),
+      /requires a human explanation[^]*^Zone Australia\/Adelaide:$/m,
+    );
+
+    draft.explanation = 'Test-only synthetic change to the start hour.';
+    draft.evidence[0].url = 'https://www.iana.org/time-zones';
+    draft.evidence[0].description = 'Test-only synthetic evidence';
+    await writeFile(reviewedPath, JSON.stringify(draft));
+    const result = await refreshAustralianPack(
+      await options({ expectedDiffPath: reviewedPath }),
+    );
+    assert.equal(result.status, 'published');
+    const semanticDiffText = await readFile(
+      join(root, 'candidate', 'semantic-diff.txt'),
+      'utf8',
+    );
+    assert.match(semanticDiffText, /^Zone Australia\/Adelaide:$/m);
+    assert.match(semanticDiffText, /^ {2}transition added: \d{4}-10-/m);
+    const provenance = JSON.parse(
+      await readFile(join(root, 'candidate', 'provenance.json'), 'utf8'),
+    );
+    assert.equal(provenance.review.explanation, draft.explanation);
+  });
+
+  it('keeps reviewed diffs findable and away from the baseline release', async () => {
+    const directory = join(packageDirectory, 'reviewed-diffs');
+    const baseline = await fixtureBaseline();
+    const names = (await readdir(directory)).filter((name) =>
+      name.endsWith('.json'),
+    );
+    for (const name of names) {
+      const reviewed = JSON.parse(
+        await readFile(join(directory, name), 'utf8'),
+      );
+      // Callers look a review up by the release they verified.
+      assert.equal(name, `${reviewed.sourceVersion}.json`);
+      // The baseline already holds its own release, so a review of it
+      // describes a difference that no longer exists and fails conformance.
+      assert.notEqual(reviewed.sourceVersion, baseline.source.version);
+    }
   });
 
   it('requires reviewed structured evidence for every civil-time difference', () => {
