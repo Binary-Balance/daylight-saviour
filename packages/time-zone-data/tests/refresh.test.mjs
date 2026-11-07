@@ -786,7 +786,7 @@ describe('verified IANA Australian candidate refresh', () => {
           'b'.repeat(64),
           '2026d',
         ),
-      /cover every change|reviewed expected diff does not match/,
+      /(cover every change|reviewed expected diff does not match)[^]*Draft expected diff:/,
     );
     const expected = {
       archiveSha256: 'b'.repeat(64),
@@ -809,7 +809,21 @@ describe('verified IANA Australian candidate refresh', () => {
           'b'.repeat(64),
           '2026d',
         ),
-      /cover every change/,
+      /cover every change[^]*Draft expected diff:/,
+    );
+    assert.throws(
+      () => assertReviewedSemanticDiff(expected, diff, 'c'.repeat(64), '2026d'),
+      /does not identify this verified archive[^]*Draft expected diff:/,
+    );
+    assert.throws(
+      () =>
+        assertReviewedSemanticDiff(
+          { ...expected, evidence: [] },
+          diff,
+          'b'.repeat(64),
+          '2026d',
+        ),
+      /requires IANA evidence[^]*Draft expected diff:/,
     );
     expected.evidence[0].supports = [0, 1];
     assert.doesNotThrow(() =>
