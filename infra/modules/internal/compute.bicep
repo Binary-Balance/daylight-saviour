@@ -42,6 +42,7 @@ var baseAppSettings = {
   REMINDER_DISPATCH_ENABLED: (reminderDispatch.?enabled ?? false) ? 'true' : 'false'
   REMINDER_MANAGED_IDENTITY_CLIENT_ID: runtimeIdentityClientId
   REMINDER_STORAGE_ACCOUNT_NAME: storageAccountName
+  REMINDER_SUBSCRIPTION_EXPIRY_ENABLED: (reminderDispatch.?subscriptionExpiryEnabled ?? false) ? 'true' : 'false'
 }
 
 // A caller that does not opt in gets none of these keys: an empty setting still

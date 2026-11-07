@@ -85,6 +85,7 @@ function store(
     listZoneSubscriptionPages: async function* () {
       // Handler tests never list a zone.
     },
+    expireSilentSubscriptions: async () => undefined,
     purgeExpiredRetiredSubscriptions: async () => undefined,
     purgeExpiredThrottleRecords: async () => undefined,
     removeIfDeviceTokenMatches: async () => 'not-found',
@@ -154,6 +155,9 @@ function subscriptionTable(
       (async function* () {
         // Subscription-only tests never enumerate retired rows.
       })(),
+    listSilentSince: async function* () {
+      // Subscription-only tests never expire rows.
+    },
     listZonePages: async function* () {
       // Subscription-only tests never list a zone.
     },
@@ -1353,6 +1357,44 @@ describe('Azure Table mapping', () => {
     assert.match(retiredFilter, /2026-08-08/);
   });
 
+  it('lists rows whose last contact or registration is at or before the cutoff', async () => {
+    let filter = '';
+    const subscriptions = {
+      listEntities: (options: {
+        readonly queryOptions?: { readonly filter?: unknown };
+      }) => {
+        filter = String(options.queryOptions?.filter);
+        return (async function* () {
+          // No silent rows.
+        })();
+      },
+    };
+    const tableStore = createAzureReminderSubscriptionStore(
+      {
+        REMINDER_MANAGED_IDENTITY_CLIENT_ID: 'runtime-uami-client-id',
+        REMINDER_STORAGE_ACCOUNT_NAME: 'dlsvstorage',
+      },
+      {
+        createCredential: () => ({
+          getToken: async () => ({ expiresOnTimestamp: 0, token: 'test' }),
+        }),
+        createTableClient: (_endpoint, tableName) =>
+          tableName === 'ReminderSubscriptions'
+            ? (subscriptions as never)
+            : ({} as never),
+      },
+    );
+
+    await tableStore.expireSilentSubscriptions(
+      new Date('2026-11-07T03:17:00.000Z'),
+    );
+
+    assert.equal(
+      filter,
+      "PartitionKey eq 'subscriptions-v1' and (lastContactAt le datetime'2024-11-07T03:17:00.000Z' or registeredAt le datetime'2024-11-07T03:17:00.000Z')",
+    );
+  });
+
   it('lists a zone as pages of valid snapshots, without its retired rows', async () => {
     const zone = 'Australia/Sydney';
     const row = {
@@ -2022,6 +2064,34 @@ describe('generation-ordered subscription persistence', () => {
     let beforeDelete: (() => Promise<void>) | undefined;
     let beforeReplace: (() => Promise<void>) | undefined;
     const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const entityOf = (row: Record<string, unknown>) => ({
+      attemptGeneration: Number(row.attemptGeneration),
+      credentialHash:
+        typeof row.credentialHash === 'string' ? row.credentialHash : undefined,
+      deviceToken:
+        typeof row.deviceToken === 'string' ? row.deviceToken : undefined,
+      etag: String(row.etag),
+      homeTimeZone:
+        typeof row.homeTimeZone === 'string' ? row.homeTimeZone : undefined,
+      lastContactAt:
+        row.lastContactAt instanceof Date ? row.lastContactAt : undefined,
+      oneDayEnabled:
+        typeof row.oneDayEnabled === 'boolean' ? row.oneDayEnabled : undefined,
+      oneWeekEnabled:
+        typeof row.oneWeekEnabled === 'boolean'
+          ? row.oneWeekEnabled
+          : undefined,
+      partitionKey: String(row.partitionKey),
+      platform:
+        row.platform === 'android' || row.platform === 'ios'
+          ? (row.platform as 'android' | 'ios')
+          : undefined,
+      registeredAt:
+        row.registeredAt instanceof Date ? row.registeredAt : undefined,
+      retiredAt: row.retiredAt instanceof Date ? row.retiredAt : undefined,
+      rowKey: String(row.rowKey),
+      state: row.state === 'retired' ? ('retired' as const) : undefined,
+    });
     return {
       create: async (entity: Record<string, unknown>) => {
         await pause();
@@ -2046,38 +2116,7 @@ describe('generation-ordered subscription persistence', () => {
         await pause();
         const row = rows.get(`${partitionKey}/${rowKey}`);
         if (row === undefined) throw azureError(404);
-        return {
-          attemptGeneration: Number(row.attemptGeneration),
-          credentialHash:
-            typeof row.credentialHash === 'string'
-              ? row.credentialHash
-              : undefined,
-          deviceToken:
-            typeof row.deviceToken === 'string' ? row.deviceToken : undefined,
-          etag: String(row.etag),
-          homeTimeZone:
-            typeof row.homeTimeZone === 'string' ? row.homeTimeZone : undefined,
-          lastContactAt:
-            row.lastContactAt instanceof Date ? row.lastContactAt : undefined,
-          oneDayEnabled:
-            typeof row.oneDayEnabled === 'boolean'
-              ? row.oneDayEnabled
-              : undefined,
-          oneWeekEnabled:
-            typeof row.oneWeekEnabled === 'boolean'
-              ? row.oneWeekEnabled
-              : undefined,
-          partitionKey,
-          platform:
-            row.platform === 'android' || row.platform === 'ios'
-              ? (row.platform as 'android' | 'ios')
-              : undefined,
-          registeredAt:
-            row.registeredAt instanceof Date ? row.registeredAt : undefined,
-          retiredAt: row.retiredAt instanceof Date ? row.retiredAt : undefined,
-          rowKey,
-          state: row.state === 'retired' ? ('retired' as const) : undefined,
-        };
+        return entityOf(row);
       },
       // Azure's Merge mode: columns the entity omits keep their values.
       merge: async (entity: Record<string, unknown>, expectedEtag: string) => {
@@ -2111,6 +2150,19 @@ describe('generation-ordered subscription persistence', () => {
       },
       listZonePages: async function* () {
         // Persistence tests never list a zone.
+      },
+      // Azure's comparison is false for a missing column, so a row with
+      // neither time is never listed.
+      listSilentSince: async function* (cutoff: Date) {
+        for (const row of [...rows.values()]) {
+          if (
+            [row.lastContactAt, row.registeredAt].some(
+              (time) => time instanceof Date && time <= cutoff,
+            )
+          ) {
+            yield entityOf(row);
+          }
+        }
       },
       listRetiredExpired: async function* (now: Date) {
         for (const row of rows.values()) {
@@ -3694,6 +3746,142 @@ describe('generation-ordered subscription persistence', () => {
         assert.equal(etag, 'etag');
       });
     }
+  });
+  describe('expiring silent subscriptions', () => {
+    const now = new Date('2026-11-07T03:17:00.000Z');
+    // 24 months, as two fixed 365-day years.
+    const cutoff = now.getTime() - 2 * 365 * 24 * 60 * 60 * 1000;
+
+    async function storeWith(
+      rows: Record<
+        string,
+        { readonly lastContactAt?: Date; readonly registeredAt?: Date }
+      >,
+    ) {
+      const subscriptions = concurrentSubscriptionTable();
+      const registrationStore = createTableReminderSubscriptionStore(
+        subscriptions,
+        unusedThrottleTable(),
+      );
+      for (const [rowKey, times] of Object.entries(rows)) {
+        await subscriptions.create({
+          attemptGeneration: 1,
+          credentialHash: `credential-${rowKey}`,
+          deviceToken: `token-${rowKey}`,
+          homeTimeZone: 'Australia/Sydney',
+          oneDayEnabled: true,
+          oneWeekEnabled: true,
+          partitionKey: 'subscriptions-v1',
+          platform: 'ios',
+          rowKey,
+          ...times,
+        });
+      }
+      return { registrationStore, subscriptions };
+    }
+
+    function retiredRows(subscriptions: {
+      readonly rows: Map<string, Record<string, unknown>>;
+    }) {
+      return [...subscriptions.rows.values()]
+        .filter((row) => row.state === 'retired')
+        .map((row) => row.rowKey);
+    }
+
+    it('removes subscriptions at or beyond 24 months without contact, and no newer one', async () => {
+      const longAgo = new Date(cutoff - 1);
+      const { registrationStore, subscriptions } = await storeWith({
+        older: { lastContactAt: longAgo, registeredAt: longAgo },
+        'exactly-24-months': {
+          lastContactAt: new Date(cutoff),
+          registeredAt: longAgo,
+        },
+        newer: { lastContactAt: new Date(cutoff + 1), registeredAt: longAgo },
+      });
+
+      await registrationStore.expireSilentSubscriptions(now);
+
+      assert.deepEqual(retiredRows(subscriptions), [
+        'older',
+        'exactly-24-months',
+      ]);
+    });
+
+    it('judges a row saved before contact was recorded on its registration time', async () => {
+      const { registrationStore, subscriptions } = await storeWith({
+        'registered-at-cutoff': { registeredAt: new Date(cutoff) },
+        'registered-after-cutoff': { registeredAt: new Date(cutoff + 1) },
+        'no-time': {},
+        unreadable: {
+          lastContactAt: new Date(Number.NaN),
+          registeredAt: new Date(cutoff - 1),
+        },
+      });
+
+      await registrationStore.expireSilentSubscriptions(now);
+
+      assert.deepEqual(retiredRows(subscriptions), ['registered-at-cutoff']);
+    });
+
+    it('removes a subscription exactly as a user disable does', async () => {
+      const { registrationStore, subscriptions } = await storeWith({
+        disabled: { lastContactAt: now },
+        expired: { lastContactAt: new Date(cutoff) },
+      });
+      assert.equal(
+        await registrationStore.deleteSubscription(
+          'disabled',
+          'credential-disabled',
+        ),
+        'deleted',
+      );
+
+      await registrationStore.expireSilentSubscriptions(now);
+
+      const markerFields = (rowKey: string) => {
+        const {
+          etag: _etag,
+          retiredAt,
+          ...fields
+        } = subscriptions.rows.get(`subscriptions-v1/${rowKey}`) ?? {};
+        assert.ok(retiredAt instanceof Date);
+        return { ...fields, rowKey: 'installation' };
+      };
+      assert.deepEqual(markerFields('expired'), markerFields('disabled'));
+      // The app learns its registration has gone, as after a disable.
+      assert.equal(
+        await registrationStore.checkInSubscription(
+          'expired',
+          'credential-expired',
+          now,
+        ),
+        'not-found',
+      );
+    });
+
+    it('keeps a subscription that checks in while it is being removed', async () => {
+      const { registrationStore, subscriptions } = await storeWith({
+        silent: { lastContactAt: new Date(cutoff - 1) },
+      });
+      subscriptions.setBeforeReplace(async () => {
+        subscriptions.setBeforeReplace(undefined);
+        assert.equal(
+          await registrationStore.checkInSubscription(
+            'silent',
+            'credential-silent',
+            now,
+          ),
+          'accepted',
+        );
+      });
+
+      await registrationStore.expireSilentSubscriptions(now);
+
+      const row = subscriptions.rows.get('subscriptions-v1/silent');
+      assert.equal(row?.state, undefined);
+      assert.deepEqual(row?.lastContactAt, now);
+      assert.equal(row?.deviceToken, 'token-silent');
+    });
   });
 });
 

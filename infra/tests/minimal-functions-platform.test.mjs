@@ -93,7 +93,7 @@ describe('minimal Functions platform Bicep module', () => {
     );
   });
 
-  it('adds no reminder dispatch setting but the gate unless a caller opts in', () => {
+  it('adds no reminder dispatch setting but the gates unless a caller opts in', () => {
     const settings =
       compiledTemplate.definitions.ReminderDispatchSettings.properties;
     const { baseAppSettings, reminderDispatchAppSettings } =
@@ -106,10 +106,12 @@ describe('minimal Functions platform Bicep module', () => {
       'apnsTeamId',
       'apnsTopic',
       'enabled',
+      'subscriptionExpiryEnabled',
       'timeZoneDataManifestUrl',
       'timeZoneDataTrustedKeysJson',
     ]);
     assert.equal(compiledTemplate.parameters.reminderDispatch.nullable, true);
+    assert.equal(settings.subscriptionExpiryEnabled.nullable, true);
     assert.equal(
       compute().properties.parameters.reminderDispatch.value,
       "[parameters('reminderDispatch')]",
@@ -117,6 +119,10 @@ describe('minimal Functions platform Bicep module', () => {
     assert.equal(
       baseAppSettings.REMINDER_DISPATCH_ENABLED,
       "[if(coalesce(tryGet(parameters('reminderDispatch'), 'enabled'), false()), 'true', 'false')]",
+    );
+    assert.equal(
+      baseAppSettings.REMINDER_SUBSCRIPTION_EXPIRY_ENABLED,
+      "[if(coalesce(tryGet(parameters('reminderDispatch'), 'subscriptionExpiryEnabled'), false()), 'true', 'false')]",
     );
     assert.deepEqual(
       Object.keys(baseAppSettings).filter((name) =>
