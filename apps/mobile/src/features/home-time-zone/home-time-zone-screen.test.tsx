@@ -13,6 +13,8 @@ import appConfig from '../../../app.json';
 import { daylightSaviourPalettes } from '../../theme';
 import HomeTimeZoneScreen from './home-time-zone-screen';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
+import type { ChangeReminderEnableResult } from '../change-reminders/change-reminder-adapters';
+import { productionChangeReminderAdapters } from '../change-reminders/change-reminder-production-adapters';
 import {
   createTimeZoneDataPackManager,
   type TimeZoneDataPackManager,
@@ -620,6 +622,63 @@ describe('HomeTimeZoneScreen', () => {
       expect(refresh).toHaveBeenCalledWith('foreground');
       expect(adapters.localization.read).toHaveBeenCalledTimes(reads + 1);
     });
+
+    // Android sends the app to the background for its permission dialog. The
+    // permission result can arrive before or after the app is active again.
+    it.each([
+      ['after', ['background', 'active'], []],
+      ['before', ['background'], ['active']],
+    ] as const)(
+      'keeps the Aftermath through the permission dialog, answered %s the return',
+      async (_order, beforeAnswer, afterAnswer) => {
+        jest
+          .spyOn(productionChangeReminderAdapters, 'restore')
+          .mockResolvedValue({ kind: 'unregistered' });
+        let answer: (result: ChangeReminderEnableResult) => void = () => {};
+        jest
+          .spyOn(productionChangeReminderAdapters, 'enable')
+          .mockImplementation((_homeTimeZone, onPermissionDialog) => {
+            onPermissionDialog?.();
+            return new Promise((resolve) => {
+              answer = resolve;
+            });
+          });
+        const adapters = createAdapters({ savedZone: 'Australia/Sydney' });
+        const refresh = jest.spyOn(adapters.timeZoneDataPacks, 'refresh');
+        render(
+          <HomeTimeZoneScreen adapters={adapters} now={duringAftermath} />,
+        );
+        await screen.findByTestId('aftermath-civil-time-report');
+        fireEvent.press(
+          await screen.findByRole('button', {
+            name: 'Warn me before time misbehaves',
+          }),
+        );
+        fireEvent.press(
+          screen.getByRole('button', { name: 'Enable reminders' }),
+        );
+        const motionReads = jest.mocked(AccessibilityInfo.isReduceMotionEnabled)
+          .mock.calls.length;
+
+        setAppState(...beforeAnswer);
+        await act(async () => answer({ kind: 'permission-denied' }));
+        setAppState(...afterAnswer);
+
+        expect(screen.getByTestId('aftermath-civil-time-report')).toBeTruthy();
+        // The enable finished in the same section, not a remounted one.
+        expect(screen.getByRole('button', { name: 'Ask again' })).toBeTruthy();
+        expect(AccessibilityInfo.isReduceMotionEnabled).toHaveBeenCalledTimes(
+          motionReads,
+        );
+        expect(refresh).toHaveBeenCalledTimes(1);
+        expect(refresh).toHaveBeenCalledWith('foreground');
+
+        setAppState('background', 'active');
+
+        expect(screen.getByTestId('ordinary-civil-time-report')).toBeTruthy();
+        expect(refresh).toHaveBeenCalledTimes(2);
+      },
+    );
 
     it('resumes the next-event report after a cold restart', async () => {
       const adapters = createAdapters({ savedZone: 'Australia/Sydney' });

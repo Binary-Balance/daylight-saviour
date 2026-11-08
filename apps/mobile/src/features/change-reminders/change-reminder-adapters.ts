@@ -139,8 +139,14 @@ export type StoredChangeReminderState =
   | StoredV3ChangeReminderRegistration;
 
 export interface ChangeReminderAdapters {
+  /**
+   * `onPermissionDialog` runs just before a system permission dialog that
+   * sends the app to the background, so the return from it is not taken for
+   * a new opening of the app.
+   */
   readonly enable: (
     homeTimeZone: string,
+    onPermissionDialog?: () => void,
   ) => Promise<ChangeReminderEnableResult>;
   /** Updates the authenticated registration without requesting permission. */
   readonly updateHomeTimeZone?: (

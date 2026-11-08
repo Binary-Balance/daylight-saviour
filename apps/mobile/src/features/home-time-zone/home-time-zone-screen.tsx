@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {
   AppState,
   Pressable,
@@ -178,8 +184,8 @@ function ZoneChooser({
 // iOS also reports `inactive` for system alerts and the notification centre.
 // Becoming active again from there is not a new opening of the app, so only
 // a return from the background counts. Android reports `background` whenever
-// the activity pauses, which should include its permission dialog, and AppState
-// cannot tell that from leaving the app, so a return from that dialog counts.
+// the activity pauses, including for its permission dialog; the session skips
+// the opening for that return.
 function onReturnFromBackground(onReturn: () => void) {
   let wasBackgrounded = false;
   return AppState.addEventListener('change', (nextState) => {
@@ -212,6 +218,12 @@ export default function HomeTimeZoneScreen({
     session.getSnapshot,
   );
 
+  // Stable, because the reminder section restarts its session for a new one.
+  const onPermissionDialog = useCallback(
+    () => session.dispatch({ type: 'permission-dialog' }),
+    [session],
+  );
+
   useEffect(() => {
     const stop = session.start();
     const appStateSubscription = onReturnFromBackground(() =>
@@ -234,6 +246,7 @@ export default function HomeTimeZoneScreen({
           session.dispatch({ eventAt, type: 'acknowledge-aftermath' })
         }
         onChooseZone={() => session.dispatch({ type: 'choose-zone' })}
+        onPermissionDialog={onPermissionDialog}
         onRetryDataPack={() => session.dispatch({ type: 'manual-refresh' })}
         openingAcknowledgedEventAt={snapshot.openingAcknowledgedEventAt}
         secondaryCopySeed={snapshot.secondaryCopySeed}

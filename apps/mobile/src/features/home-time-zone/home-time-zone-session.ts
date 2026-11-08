@@ -49,6 +49,7 @@ export type HomeTimeZoneSessionEvent =
   | { readonly type: 'select-zone'; readonly zoneId: string }
   | { readonly type: 'acknowledge-aftermath'; readonly eventAt: string }
   | { readonly type: 'manual-refresh' }
+  | { readonly type: 'permission-dialog' }
   | { readonly type: 'foreground' };
 
 export interface HomeTimeZoneSession {
@@ -109,6 +110,11 @@ export function createHomeTimeZoneSession({
   // Kept outside the flow so a change reaches whichever state is current when
   // a pending restoration or save finishes, not the one that began it.
   let uses24hourClock = false;
+  // AppState cannot tell a return from a permission dialog from a return to
+  // the app, so the next return after one is not a new opening. Set before
+  // the dialog and consumed by the return, so it holds whether the return or
+  // the permission result arrives first.
+  let returningFromPermissionDialog = false;
   let stopDataPackSubscription: (() => void) | null = null;
   const subscriptions = new Set<{ readonly listener: () => void }>();
 
@@ -386,8 +392,15 @@ export function createHomeTimeZoneSession({
       case 'manual-refresh':
         void adapters.timeZoneDataPacks.refresh('manual').catch(ignoreFailure);
         return;
+      case 'permission-dialog':
+        returningFromPermissionDialog = true;
+        return;
       case 'foreground':
-        startOpening();
+        if (returningFromPermissionDialog) {
+          returningFromPermissionDialog = false;
+        } else {
+          startOpening();
+        }
         refreshHourCycle();
         void adapters.timeZoneDataPacks
           .refresh('foreground')
