@@ -439,10 +439,10 @@ it next makes contact. Each removal reads the row again and carries its ETag,
 so a check-in or update that races it keeps the subscription. A subscription
 for a Home Time Zone with no Change Event gets no warning, but still expires.
 
-Each enabled run logs `reminder-subscriptions-expired count=<n>` with the
-number it removed, even zero, so a quiet run differs from one that did not run.
-The event names no token or installation ID. A disabled run logs nothing about
-expiry.
+Each enabled run that finishes logs `reminder-subscriptions-expired count=<n>`
+with the number it removed, even zero, so a quiet run differs from one that did
+not run; a run that fails shows as a function error instead. The event names no
+token or installation ID. A disabled run logs nothing about expiry.
 
 Expiry is off by default and must stay off until scheduled dispatch can deliver
 the warning, or users lose reminders without notice. For the same reason, turn
