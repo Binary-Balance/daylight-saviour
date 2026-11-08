@@ -1,4 +1,11 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Animated,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import type { DaylightSaviourPalette } from '../src/theme';
@@ -26,18 +33,68 @@ function contentFor(context: ChangeReminderTapContext) {
   return exhaustive;
 }
 
+// The notice sits on every reminder tap, so it draws the eye once with a
+// soft glow that fades back to the card's normal look. Nothing loops. Above
+// 0.15 the dark heading drops below 4.5:1 contrast while the glow fades.
+const glowStartOpacity = 0.15;
+const glowDurationMs = 1600;
+
 export default function ChangeReminderNotificationContext({
   context,
   palette,
+  reducedMotion,
 }: {
   readonly context: ChangeReminderTapContext | null;
   readonly palette: DaylightSaviourPalette;
+  readonly reducedMotion: boolean | null;
 }) {
   if (context === null) return null;
-  const content = contentFor(context);
+  // Each tap mounts a fresh notice, because the tap is cleared while the app
+  // is in the background. Glow and announcement therefore play on mount.
+  return (
+    <Notice
+      content={contentFor(context)}
+      palette={palette}
+      reducedMotion={reducedMotion}
+    />
+  );
+}
+
+function Notice({
+  content,
+  palette,
+  reducedMotion,
+}: {
+  readonly content: { readonly body: string; readonly heading: string };
+  readonly palette: DaylightSaviourPalette;
+  readonly reducedMotion: boolean | null;
+}) {
+  const label = `${content.heading}. ${content.body}`;
+  const [glowOpacity] = useState(() => new Animated.Value(0));
+  const glowPlayed = useRef(false);
+
+  // The report re-renders every second, so this is keyed on the label
+  // string, not the context object. iOS does not announce an alert role.
+  useEffect(() => {
+    AccessibilityInfo.announceForAccessibility(label);
+  }, [label]);
+
+  // On a cold start the tap can arrive before the reduced-motion preference
+  // is known (null). Glow once when it first reads as off; never with it on.
+  useEffect(() => {
+    if (reducedMotion !== false || glowPlayed.current) return;
+    glowPlayed.current = true;
+    glowOpacity.setValue(glowStartOpacity);
+    Animated.timing(glowOpacity, {
+      duration: glowDurationMs,
+      toValue: 0,
+      useNativeDriver: true,
+    }).start();
+  }, [glowOpacity, reducedMotion]);
+
   return (
     <View
-      accessibilityLabel={`${content.heading}. ${content.body}`}
+      accessibilityLabel={label}
       accessibilityRole="alert"
       accessible
       style={[
@@ -48,6 +105,18 @@ export default function ChangeReminderNotificationContext({
         },
       ]}
     >
+      <Animated.View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            backgroundColor: palette.decisionNoticeBorder,
+            opacity: glowOpacity,
+          },
+        ]}
+        testID="reminder-notice-glow"
+      />
       <Text style={[styles.heading, { color: palette.decisionNoticeText }]}>
         {content.heading}
       </Text>

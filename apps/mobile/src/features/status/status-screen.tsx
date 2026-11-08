@@ -100,6 +100,7 @@ export default function StatusScreen({
   const currentInstant = useCurrentInstant(now);
   const reducedMotion = useReducedMotion(reducedMotionOverride);
   const acknowledgedDuringOpening = useRef<string | null>(null);
+  const scrollView = useRef<ScrollView>(null);
   const viewModel = createStatusViewModel(
     dataPackSnapshot.pack,
     dataPackSnapshot.freshness,
@@ -125,6 +126,14 @@ export default function StatusScreen({
     }
   }, [aftermathEventAt, onAcknowledgeAftermath]);
 
+  // The report keeps its scroll position while the app is in the background,
+  // so a reminder tap would otherwise put its notice off screen.
+  useEffect(() => {
+    if (notificationTap !== null) {
+      scrollView.current?.scrollTo({ animated: false, y: 0 });
+    }
+  }, [notificationTap]);
+
   return (
     <SafeAreaView
       edges={['top', 'right', 'bottom', 'left']}
@@ -133,6 +142,7 @@ export default function StatusScreen({
       <ScrollView
         contentContainerStyle={styles.content}
         contentInsetAdjustmentBehavior="automatic"
+        ref={scrollView}
       >
         <CivilTimeReportHeader
           facts={{
@@ -144,6 +154,12 @@ export default function StatusScreen({
           palette={palette}
         />
 
+        <ChangeReminderNotificationContext
+          context={viewModel.notificationContext}
+          palette={palette}
+          reducedMotion={reducedMotion}
+        />
+
         {viewModel.availability === 'ready' ? (
           <DaylightSavingStatusHero
             facts={viewModel}
@@ -153,11 +169,6 @@ export default function StatusScreen({
             uses24hourClock={uses24hourClock}
           />
         ) : null}
-
-        <ChangeReminderNotificationContext
-          context={viewModel.notificationContext}
-          palette={palette}
-        />
 
         <ChangeEventSection
           palette={palette}
