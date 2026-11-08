@@ -4,7 +4,11 @@ import { describe, it } from 'node:test';
 import { createReminderCleanupTimerHandler } from './reminder-cleanup-timer.ts';
 import type { ReminderSubscriptionStore } from './reminder-subscriptions.ts';
 
-function runCleanup(environment: NodeJS.ProcessEnv, unreadableLedgerRows = 0) {
+function runCleanup(
+  environment: NodeJS.ProcessEnv,
+  unreadableLedgerRows = 0,
+  expired = 0,
+) {
   const calls: string[] = [];
   const logs: unknown[] = [];
   const record = (name: string) => async () => {
@@ -14,7 +18,10 @@ function runCleanup(environment: NodeJS.ProcessEnv, unreadableLedgerRows = 0) {
     environment,
     () =>
       ({
-        expireSilentSubscriptions: record('expire'),
+        expireSilentSubscriptions: async () => {
+          calls.push('expire');
+          return expired;
+        },
         purgeExpiredRetiredSubscriptions: record('purge-retired'),
         purgeExpiredThrottleRecords: record('purge-throttles'),
       }) as unknown as ReminderSubscriptionStore,
@@ -33,10 +40,12 @@ function runCleanup(environment: NodeJS.ProcessEnv, unreadableLedgerRows = 0) {
 describe('reminder cleanup timer', () => {
   for (const setting of [undefined, '', 'false', 'TRUE', ' true']) {
     it(`expires nothing when expiry is ${JSON.stringify(setting)}`, async () => {
-      const { calls } = await runCleanup(
+      const { calls, logs } = await runCleanup(
         setting === undefined
           ? {}
           : { REMINDER_SUBSCRIPTION_EXPIRY_ENABLED: setting },
+        0,
+        3,
       );
 
       assert.deepEqual(calls, [
@@ -44,6 +53,7 @@ describe('reminder cleanup timer', () => {
         'purge-retired',
         'purge-ledger',
       ]);
+      assert.deepEqual(logs, []);
     });
   }
 
@@ -57,6 +67,16 @@ describe('reminder cleanup timer', () => {
       'purge-retired',
       'purge-ledger',
       'expire',
+    ]);
+  });
+
+  it('logs how many subscriptions expiry removed, even none', async () => {
+    const enabled = { REMINDER_SUBSCRIPTION_EXPIRY_ENABLED: 'true' };
+    assert.deepEqual((await runCleanup(enabled, 0, 0)).logs, [
+      'reminder-subscriptions-expired count=0',
+    ]);
+    assert.deepEqual((await runCleanup(enabled, 0, 3)).logs, [
+      'reminder-subscriptions-expired count=3',
     ]);
   });
 

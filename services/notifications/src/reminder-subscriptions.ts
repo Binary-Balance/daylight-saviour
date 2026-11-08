@@ -174,8 +174,11 @@ export interface ReminderSubscriptionStore {
   ) => Promise<'removed' | 'not-found' | 'token-replaced'>;
   readonly purgeExpiredThrottleRecords: (now: Date) => Promise<void>;
   readonly purgeExpiredRetiredSubscriptions: (now: Date) => Promise<void>;
-  /** Removes subscriptions with no contact for 24 months (ADR 0022). */
-  readonly expireSilentSubscriptions: (now: Date) => Promise<void>;
+  /**
+   * Removes subscriptions with no contact for 24 months (ADR 0022) and
+   * returns how many it removed.
+   */
+  readonly expireSilentSubscriptions: (now: Date) => Promise<number>;
   readonly createSubscription: (
     record: ReminderSubscriptionRecord,
     registrationRequestId: string,
@@ -1111,6 +1114,7 @@ export function createTableReminderSubscriptionStore(
     },
     async expireSilentSubscriptions(now) {
       const cutoff = new Date(now.getTime() - expireAfterLastContactMs);
+      let removed = 0;
       for await (const listed of subscriptions.listSilentSince(cutoff)) {
         // The query also lists a row for an old registration time when its
         // last contact is recent, as for an app that checks in but never
@@ -1121,13 +1125,15 @@ export function createTableReminderSubscriptionStore(
         // silent when read again is the one listed. A check-in or update that
         // races the removal keeps the subscription. Retired markers have no
         // contact time, so they are never removed again.
-        await removeStoredSubscription(
+        const result = await removeStoredSubscription(
           subscriptions,
           listed.rowKey,
           (existing) =>
             silentSince(existing, cutoff) ? null : ('contacted' as const),
         );
+        if (result === 'removed') removed += 1;
       }
+      return removed;
     },
   };
 }
