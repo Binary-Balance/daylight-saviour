@@ -85,7 +85,7 @@ function store(
     listZoneSubscriptionPages: async function* () {
       // Handler tests never list a zone.
     },
-    expireSilentSubscriptions: async () => undefined,
+    expireSilentSubscriptions: async () => 0,
     purgeExpiredRetiredSubscriptions: async () => undefined,
     purgeExpiredThrottleRecords: async () => undefined,
     removeIfDeviceTokenMatches: async () => 'not-found',
@@ -3808,7 +3808,7 @@ describe('generation-ordered subscription persistence', () => {
         newer: { lastContactAt: new Date(cutoff + 1), registeredAt: longAgo },
       });
 
-      await registrationStore.expireSilentSubscriptions(now);
+      assert.equal(await registrationStore.expireSilentSubscriptions(now), 2);
 
       assert.deepEqual(retiredRows(subscriptions), [
         'older',
@@ -3827,7 +3827,7 @@ describe('generation-ordered subscription persistence', () => {
         },
       });
 
-      await registrationStore.expireSilentSubscriptions(now);
+      assert.equal(await registrationStore.expireSilentSubscriptions(now), 1);
 
       assert.deepEqual(retiredRows(subscriptions), ['registered-at-cutoff']);
     });
@@ -3845,7 +3845,7 @@ describe('generation-ordered subscription persistence', () => {
         'deleted',
       );
 
-      await registrationStore.expireSilentSubscriptions(now);
+      assert.equal(await registrationStore.expireSilentSubscriptions(now), 1);
 
       const markerFields = (rowKey: string) => {
         const {
@@ -3884,7 +3884,7 @@ describe('generation-ordered subscription persistence', () => {
         );
       });
 
-      await registrationStore.expireSilentSubscriptions(now);
+      assert.equal(await registrationStore.expireSilentSubscriptions(now), 0);
 
       const row = subscriptions.rows.get('subscriptions-v1/silent');
       assert.equal(row?.state, undefined);
@@ -3909,7 +3909,7 @@ describe('generation-ordered subscription persistence', () => {
         );
       });
 
-      await registrationStore.expireSilentSubscriptions(now);
+      assert.equal(await registrationStore.expireSilentSubscriptions(now), 0);
 
       const row = subscriptions.rows.get('subscriptions-v1/silent');
       assert.equal(row?.state, 'retired');
@@ -3937,7 +3937,7 @@ describe('generation-ordered subscription persistence', () => {
         unusedThrottleTable(),
       );
 
-      await registrationStore.expireSilentSubscriptions(now);
+      assert.equal(await registrationStore.expireSilentSubscriptions(now), 0);
     });
   });
 });

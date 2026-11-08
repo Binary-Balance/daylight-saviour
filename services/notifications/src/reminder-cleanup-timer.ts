@@ -31,7 +31,9 @@ export function createReminderCleanupTimerHandler(
     // off until an operator enables it once dispatch can deliver the warning.
     // It runs last, so a failure here cannot stop the purges.
     if (environment.REMINDER_SUBSCRIPTION_EXPIRY_ENABLED === 'true') {
-      await subscriptions.expireSilentSubscriptions(now);
+      const expired = await subscriptions.expireSilentSubscriptions(now);
+      // Logged even at zero, so a quiet run differs from one that never ran.
+      context.log(`reminder-subscriptions-expired count=${expired}`);
     }
   };
 }
