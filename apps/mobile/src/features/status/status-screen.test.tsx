@@ -291,6 +291,46 @@ describe('StatusScreen facade', () => {
     expect(screen.queryByText(dormantCopy)).toBeNull();
   });
 
+  it('puts a reminder notice above the status hero and scrolls it into view', () => {
+    const scrollTo = jest.spyOn(ReactNative.ScrollView.prototype, 'scrollTo');
+    const tap = {
+      changeDirection: 'forward' as const,
+      changeEventAt: '2026-10-03T16:00:00.000Z',
+      homeTimeZone: 'Australia/Sydney',
+      reminderTiming: 'one-week' as const,
+    };
+    const { rerender, toJSON } = render(
+      <StatusScreen
+        now={new Date('2026-09-26T16:00:00.000Z')}
+        notificationTap={null}
+        reducedMotion
+      />,
+    );
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    rerender(
+      <StatusScreen
+        now={new Date('2026-09-26T16:00:00.000Z')}
+        notificationTap={tap}
+        reducedMotion
+      />,
+    );
+
+    expect(scrollTo).toHaveBeenCalledWith({ animated: false, y: 0 });
+    const order = explicitAccessibilityOrder(toJSON() as RenderNode);
+    const notice = order.findIndex((label) =>
+      label.startsWith('CHANGE REMINDER OPENED.'),
+    );
+    expect(notice).toBeGreaterThan(
+      order.findIndex((label) => label.startsWith('Home Time Zone,')),
+    );
+    expect(notice).toBeLessThan(
+      order.findIndex((label) =>
+        label.startsWith('Home Time Zone current time,'),
+      ),
+    );
+  });
+
   it('uses a report-unavailable alert when a tap opens unavailable civil-time data', () => {
     render(
       <StatusScreen
