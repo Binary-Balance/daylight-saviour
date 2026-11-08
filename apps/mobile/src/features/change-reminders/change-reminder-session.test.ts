@@ -147,7 +147,7 @@ describe('Change Reminder session', () => {
       kind: 'enabled',
       preferences: { oneDayEnabled: true, oneWeekEnabled: true },
     });
-    expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
+    expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney', undefined);
     stop();
   });
 
@@ -237,7 +237,7 @@ describe('Change Reminder session', () => {
       kind: 'enabled',
       preferences: { oneDayEnabled: true, oneWeekEnabled: true },
     });
-    expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
+    expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney', undefined);
     stop();
   });
 

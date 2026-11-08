@@ -185,6 +185,7 @@ describe('production Change Reminder adapters', () => {
   });
 
   it('requests iOS permission before registering its device token', async () => {
+    const onPermissionDialog = jest.fn();
     const test = harness({
       currentToken: iosDeviceToken,
       existingPermission: {
@@ -195,9 +196,13 @@ describe('production Change Reminder adapters', () => {
       platform: 'ios',
     });
 
-    await expect(test.adapters.enable('Australia/Sydney')).resolves.toEqual({
+    await expect(
+      test.adapters.enable('Australia/Sydney', onPermissionDialog),
+    ).resolves.toEqual({
       kind: 'enabled',
     });
+    // iOS reports its dialog as `inactive`, which never counts as a return.
+    expect(onPermissionDialog).not.toHaveBeenCalled();
     expect(test.calls).toEqual([
       'permission:get',
       'permission:request',
@@ -212,6 +217,36 @@ describe('production Change Reminder adapters', () => {
     expect(
       JSON.parse(String(test.dependencies.fetch.mock.calls[0]?.[1]?.body)),
     ).toMatchObject({ deviceToken: iosDeviceToken, platform: 'ios' });
+  });
+
+  it('signals the Android permission dialog just before it opens', async () => {
+    const test = harness({
+      existingPermission: {
+        canAskAgain: true,
+        granted: false,
+        status: PermissionStatus.DENIED,
+      },
+    });
+
+    await test.adapters.enable('Australia/Sydney', () =>
+      test.calls.push('dialog'),
+    );
+
+    expect(test.calls.slice(0, 4)).toEqual([
+      'channel',
+      'permission:get',
+      'dialog',
+      'permission:request',
+    ]);
+  });
+
+  it('does not signal a permission dialog when permission is granted', async () => {
+    const onPermissionDialog = jest.fn();
+    const test = harness();
+
+    await test.adapters.enable('Australia/Sydney', onPermissionDialog);
+
+    expect(onPermissionDialog).not.toHaveBeenCalled();
   });
 
   it('uses returned canAskAgain for first denial', async () => {

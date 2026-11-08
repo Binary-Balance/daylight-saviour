@@ -117,9 +117,11 @@ function enabledSnapshot(
 export function createChangeReminderSession({
   adapters,
   homeTimeZone,
+  onPermissionDialog,
 }: {
   readonly adapters: ChangeReminderAdapters;
   readonly homeTimeZone: string;
+  readonly onPermissionDialog?: (() => void) | undefined;
 }): ChangeReminderSession {
   let active = false;
   let generation = 0;
@@ -282,7 +284,7 @@ export function createChangeReminderSession({
     const expectedGeneration = beginOperation();
     publish({ kind: 'saving' });
     void adapters
-      .enable(homeTimeZone)
+      .enable(homeTimeZone, onPermissionDialog)
       .then((result) => {
         if (current(expectedGeneration))
           publish(

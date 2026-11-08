@@ -842,6 +842,7 @@ export function createProductionChangeReminderAdapters({
 
   async function performEnable(
     homeTimeZone: string,
+    onPermissionDialog: (() => void) | undefined,
   ): Promise<ChangeReminderEnableResult> {
     if (platform === 'web') return { kind: 'unavailable' };
     try {
@@ -855,6 +856,10 @@ export function createProductionChangeReminderAdapters({
       if (!existing.granted && !existing.canAskAgain) {
         return { kind: 'os-blocked' };
       }
+      // Android pauses the activity for its dialog, which React Native reports
+      // as `background`. iOS reports `inactive`, which is never taken for a
+      // new opening, so signalling there would wrongly skip the next real one.
+      if (!existing.granted && platform === 'android') onPermissionDialog?.();
       const permission = existing.granted
         ? existing
         : await notifications.requestPermissionsAsync();
@@ -1196,7 +1201,7 @@ export function createProductionChangeReminderAdapters({
         registration: saved,
       });
     },
-    enable(homeTimeZone) {
+    enable(homeTimeZone, onPermissionDialog) {
       if (enableInFlight !== null) {
         return enableInFlight.homeTimeZone === homeTimeZone
           ? enableInFlight.promise
@@ -1204,7 +1209,9 @@ export function createProductionChangeReminderAdapters({
       }
       const canonicalZoneId = normalizeAustralianZoneId(homeTimeZone);
       if (canonicalZoneId !== null) latestHomeTimeZoneIntent = canonicalZoneId;
-      const promise = enqueue(() => performEnable(homeTimeZone)).finally(() => {
+      const promise = enqueue(() =>
+        performEnable(homeTimeZone, onPermissionDialog),
+      ).finally(() => {
         if (enableInFlight?.promise === promise) enableInFlight = null;
       });
       enableInFlight = { homeTimeZone, promise };

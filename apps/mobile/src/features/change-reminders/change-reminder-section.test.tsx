@@ -64,7 +64,7 @@ it('does not request a reminder before explicit confirmation', async () => {
   await act(async () => {
     fireEvent.press(screen.getByRole('button', { name: 'Enable reminders' }));
   });
-  expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
+  expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney', undefined);
   expect(
     await screen.findByText(
       /one-week and one-day Change Reminders are enabled/i,
@@ -277,7 +277,7 @@ it('renders restored pending state as retryable without claiming enablement', as
   expect(await screen.findByText(/registration did not finish/i)).toBeTruthy();
   expect(screen.queryByText(/reminders are enabled/i)).toBeNull();
   fireEvent.press(screen.getByRole('button', { name: 'Retry registration' }));
-  expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney');
+  expect(boundary.enable).toHaveBeenCalledWith('Australia/Sydney', undefined);
   expect(
     await screen.findByText(
       /one-week and one-day Change Reminders are enabled/i,

@@ -27,6 +27,7 @@ interface StatusScreenProps {
   readonly notificationTap?: ReviewedNotificationTap | null;
   readonly onAcknowledgeAftermath?: (eventAt: string) => void;
   readonly onChooseZone?: () => void;
+  readonly onPermissionDialog?: () => void;
   readonly onRetryDataPack?: () => void | Promise<void>;
   // The caller does not update this when an Aftermath is acknowledged, so the
   // Aftermath stays on screen.
@@ -86,6 +87,7 @@ export default function StatusScreen({
   notificationTap = null,
   onAcknowledgeAftermath,
   onChooseZone,
+  onPermissionDialog,
   onRetryDataPack,
   openingAcknowledgedEventAt = null,
   reducedMotion: reducedMotionOverride,
@@ -166,6 +168,7 @@ export default function StatusScreen({
         <ChangeReminderSection
           adapters={productionChangeReminderAdapters}
           homeTimeZone={viewModel.zoneId}
+          onPermissionDialog={onPermissionDialog}
           palette={palette}
           testBuild={changeReminderTestBuildEnabled()}
           verifiedNoEvent={

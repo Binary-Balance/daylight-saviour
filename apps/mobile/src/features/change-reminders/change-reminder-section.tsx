@@ -75,10 +75,16 @@ function useRegistrationAnnouncements(
 function useChangeReminderSession(
   adapters: ChangeReminderAdapters,
   homeTimeZone: string,
+  onPermissionDialog: (() => void) | undefined,
 ) {
   const session = useMemo(
-    () => createChangeReminderSession({ adapters, homeTimeZone }),
-    [adapters, homeTimeZone],
+    () =>
+      createChangeReminderSession({
+        adapters,
+        homeTimeZone,
+        onPermissionDialog,
+      }),
+    [adapters, homeTimeZone, onPermissionDialog],
   );
   const snapshot = useSyncExternalStore(
     session.subscribe,
@@ -280,12 +286,16 @@ function CardMessage({
 export default function ChangeReminderSection({
   adapters,
   homeTimeZone,
+  onPermissionDialog,
   palette,
   testBuild = false,
   verifiedNoEvent = false,
 }: {
   readonly adapters: ChangeReminderAdapters;
   readonly homeTimeZone: string;
+  // Keep it stable: a new one starts a new session, losing an enable in
+  // progress.
+  readonly onPermissionDialog?: (() => void) | undefined;
   readonly palette: DaylightSaviourPalette;
   readonly testBuild?: boolean;
   readonly verifiedNoEvent?: boolean;
@@ -293,6 +303,7 @@ export default function ChangeReminderSection({
   const { dispatch, snapshot } = useChangeReminderSession(
     adapters,
     homeTimeZone,
+    onPermissionDialog,
   );
   const installationId = useTestInstallationId(adapters, snapshot, testBuild);
 
