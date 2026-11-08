@@ -34,8 +34,9 @@ function contentFor(context: ChangeReminderTapContext) {
 }
 
 // The notice sits on every reminder tap, so it draws the eye once with a
-// soft glow that fades back to the card's normal look. Nothing loops.
-const glowStartOpacity = 0.3;
+// soft glow that fades back to the card's normal look. Nothing loops. Above
+// 0.15 the dark heading drops below 4.5:1 contrast while the glow fades.
+const glowStartOpacity = 0.15;
 const glowDurationMs = 1600;
 
 export default function ChangeReminderNotificationContext({
@@ -107,7 +108,6 @@ function Notice({
       <Animated.View
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
-        pointerEvents="none"
         style={[
           StyleSheet.absoluteFill,
           {

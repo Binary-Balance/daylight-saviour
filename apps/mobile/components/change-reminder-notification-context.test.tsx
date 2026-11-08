@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react-native';
 import * as ReactNative from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { daylightSaviourPalettes } from '../src/theme';
 import ChangeReminderNotificationContext from './change-reminder-notification-context';
@@ -17,6 +18,13 @@ function Notice({ reducedMotion }: { readonly reducedMotion: boolean | null }) {
       reducedMotion={reducedMotion}
     />
   );
+}
+
+function glowOpacity() {
+  return StyleSheet.flatten(
+    screen.getByTestId('reminder-notice-glow', { includeHiddenElements: true })
+      .props.style,
+  ).opacity;
 }
 
 let timing: jest.SpiedFunction<typeof ReactNative.Animated.timing>;
@@ -61,6 +69,7 @@ it('glows once as it appears and settles within two seconds', () => {
   expect(config).toMatchObject({ toValue: 0, useNativeDriver: true });
   expect(config.duration).toBeGreaterThanOrEqual(1000);
   expect(config.duration).toBeLessThanOrEqual(2000);
+  expect(glowOpacity()).toBe(0.15);
   expect(
     screen.getByTestId('reminder-notice-glow', { includeHiddenElements: true })
       .props.accessibilityElementsHidden,
@@ -70,6 +79,7 @@ it('glows once as it appears and settles within two seconds', () => {
 it('waits for the reduced-motion preference before glowing', () => {
   const { rerender } = render(<Notice reducedMotion={null} />);
   expect(timing).not.toHaveBeenCalled();
+  expect(glowOpacity()).toBe(0);
 
   rerender(<Notice reducedMotion={false} />);
   rerender(<Notice reducedMotion={true} />);
@@ -84,6 +94,7 @@ it.each([true, null])(
     render(<Notice reducedMotion={reducedMotion} />);
 
     expect(timing).not.toHaveBeenCalled();
+    expect(glowOpacity()).toBe(0);
     expect(screen.getByRole('alert', { name: passedLabel })).toBeTruthy();
   },
 );
