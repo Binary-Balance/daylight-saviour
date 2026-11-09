@@ -36,12 +36,14 @@
           "color": "#FFB238"
         }
       ],
+      "./build/plain-launch-screen.cjs",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F4EEDC",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#F7F8FA",
+          "dark": {
+            "backgroundColor": "#081426"
+          }
         }
       ],
       "expo-localization"

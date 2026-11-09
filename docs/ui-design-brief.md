@@ -49,12 +49,12 @@ Candidate colour tokens, subject to on-device contrast validation:
 | Decorative rules | `#AAB2BC` | `#405067` |
 | Neutral control boundaries | `#87919D` | `#405067` |
 | Solar-gold text | `#9A6700` | Signal coral `#FF6A4D` |
-| Solar-gold structure | `#C99A22` | `#405067` |
+| Solar-gold structure | `#C99A22` | Warm gold `#FFB238` |
 | Fictional phase stamp | Signal red `#E5482D` | Signal coral `#FF6A4D` |
 
-In light appearance, Solar Gold guides the eye from active Time-Zone Data Pack provenance through the utility-header divider to the next Change Event's direction, top rule, and left rail. Its text token meets 4.5:1 contrast against both Civic White and white record surfaces; neutral control boundaries meet 3:1 while cool rules remain decorative. Signal red is reserved for fictional phase stamps so it remains recognisably stamped. Settings, Home Time Zone controls, and unrelated rules remain neutral. Colour never carries meaning alone: direction, pack provenance, and status remain textual. Prefer rules and tonal surfaces over shadows; avoid beige, cream, manila, parchment, sepia, gradients, metallic effects, sun motifs other than the app's mark, and implied government affiliation.
+In light appearance, Solar Gold guides the eye from the utility-header divider to the next Change Event's direction, top rule, and left rail. Its text token meets 4.5:1 contrast against both Civic White and white record surfaces; neutral control boundaries meet 3:1 while cool rules remain decorative. Signal red is reserved for fictional phase stamps so it remains recognisably stamped. Settings, Home Time Zone controls, and unrelated rules remain neutral. Colour never carries meaning alone: direction and status remain textual. Prefer rules and tonal surfaces over shadows; avoid beige, cream, manila, parchment, sepia, gradients, metallic effects, sun motifs other than the app's mark, and implied government affiliation.
 
-The app icon sets two more cues. Warm gold `#FFB238` may mark structure and text in dark appearance; in light appearance it may only fill decorative shapes. Designs may use a signal coral element that has jumped outwards, like the icon's 2 o'clock ray, as a cue for a Forward Change. The launch screen is a plain background in the current theme's colour, matching the first screen; Android 12 and later adds the app icon itself. See ADR 0018.
+The app icon sets two more cues. Warm gold `#FFB238` may mark structure and text in dark appearance; in light appearance it may only fill decorative shapes. Dark appearance uses it for the utility-header divider and the Change Event top rule and left rail, where it reaches at least 3:1, so the rails echo the icon's rays while direction text stays signal coral. Light appearance uses it only in the reminder notice glow. Designs may use a signal coral element that has jumped outwards, like the icon's 2 o'clock ray, as a cue for a Forward Change. The launch screen is a plain background in the current theme's colour, matching the first screen; Android 12 and later adds the app icon itself. See ADR 0018.
 
 ## Semantic Motion
 

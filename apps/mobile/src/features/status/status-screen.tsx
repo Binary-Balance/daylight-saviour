@@ -153,7 +153,6 @@ export default function StatusScreen({
         <CivilTimeReportHeader
           facts={{
             friendlyZoneLabel: viewModel.friendlyZoneLabel,
-            packVersion: viewModel.packVersion,
             zoneId: viewModel.zoneId,
           }}
           onChooseZone={onChooseZone}

@@ -161,6 +161,13 @@ describe('StatusScreen facade', () => {
       expect(screen.getByText('Backward Change')).toBeTruthy();
       expect(screen.getByText('In 1 second')).toBeTruthy();
       expect(screen.getByLabelText(/bundled data current/)).toBeTruthy();
+      // The pack version belongs to the freshness footer only; the header
+      // repeated it until PUB-266.
+      expect(
+        screen.getAllByText(new RegExp(bundledSnapshot.pack.packVersion), {
+          includeHiddenElements: true,
+        }),
+      ).toHaveLength(1);
       expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
     },
   );

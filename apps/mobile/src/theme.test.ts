@@ -37,7 +37,7 @@ describe('daylightSaviourPalettes', () => {
       secondaryInk: '#B6C0CF',
       signalRed: '#FF6A4D',
       solarGold: '#FF6A4D',
-      solarGoldStructure: '#405067',
+      solarGoldStructure: '#FFB238',
       surface: '#101F35',
     });
   });
@@ -72,8 +72,14 @@ describe('daylightSaviourPalettes', () => {
     },
   );
 
-  it('keeps dark neutral controls above contrast thresholds', () => {
+  it('keeps dark gold rules and neutral controls above contrast thresholds', () => {
     const palette = daylightSaviourPalettes.dark;
+    expect(
+      contrastRatio(palette.solarGoldStructure, palette.background),
+    ).toBeGreaterThanOrEqual(3);
+    expect(
+      contrastRatio(palette.solarGoldStructure, palette.surface),
+    ).toBeGreaterThanOrEqual(3);
     expect(
       contrastRatio(palette.controlBoundary, palette.background),
     ).toBeGreaterThanOrEqual(3);

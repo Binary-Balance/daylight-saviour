@@ -15,7 +15,6 @@ describe('CivilTimeReportHeader', () => {
         <CivilTimeReportHeader
           facts={{
             friendlyZoneLabel: 'Casey Station, Australian Antarctic Territory',
-            packVersion: '2026a-australian-v1',
             zoneId: 'Antarctica/Casey',
           }}
           onChooseZone={chooseZone}
@@ -24,7 +23,7 @@ describe('CivilTimeReportHeader', () => {
       );
 
       expect(
-        screen.getByText('DAYLIGHT SAVIOUR · CIVIL TIME RECORD', {
+        screen.getByText('DAYLIGHT SAVIOUR · KEEPING CIVIL TIME CIVIL', {
           includeHiddenElements: true,
         }),
       ).toBeTruthy();
@@ -40,20 +39,6 @@ describe('CivilTimeReportHeader', () => {
             .props.style,
         ).color,
       ).toBe(palette.ink);
-      expect(
-        StyleSheet.flatten(
-          screen.getByText('2026a-australian-v1', {
-            includeHiddenElements: true,
-          }).props.style,
-        ).color,
-      ).toBe(palette.solarGold);
-      expect(
-        StyleSheet.flatten(
-          screen.getByTestId('utility-identity', {
-            includeHiddenElements: true,
-          }).props.style,
-        ),
-      ).toMatchObject({ flexShrink: 1, gap: 4 });
       expect(StyleSheet.flatten(zone.props.style).borderColor).toBe(
         palette.controlBoundary,
       );
@@ -67,7 +52,6 @@ describe('CivilTimeReportHeader', () => {
       <CivilTimeReportHeader
         facts={{
           friendlyZoneLabel: 'Sydney, Canberra & most of NSW',
-          packVersion: '2026a-australian-v1',
           zoneId: 'Australia/Sydney',
         }}
         palette={daylightSaviourPalettes.light}

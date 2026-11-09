@@ -33,7 +33,8 @@ export const daylightSaviourPalettes = {
     secondaryInk: '#B6C0CF',
     signalRed: '#FF6A4D',
     solarGold: '#FF6A4D',
-    solarGoldStructure: '#405067',
+    // The app icon's warm gold, so the Change Event rails echo its rays.
+    solarGoldStructure: '#FFB238',
     surface: '#101F35',
   },
 } as const;
