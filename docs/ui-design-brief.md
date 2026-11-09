@@ -10,7 +10,7 @@ Daylight Saviour should feel like civil-time paperwork designed by someone with 
 
 Use one safe-area-aware column on an 8-point grid with roughly 20–24 logical pixels of horizontal margin.
 
-1. **Utility header:** small `DAYLIGHT SAVIOUR` document label, subtle rule/reference mark, and accessible settings control.
+1. **Utility header:** small `DAYLIGHT SAVIOUR` document label, subtle rule, and accessible settings control.
 2. **Home Time Zone:** full-width control showing friendly geography first and IANA identifier as metadata.
 3. **Status hero:** large Home Time Zone clock without seconds, literal Daylight Saving Status, restrained fictional stamp, then one humorous line.
 4. **Change Event section:** unambiguous date, local-time transformation, direction word and arrow, UTC offset equation, explicit offset amount, countdown, and Home Time Zone qualifier.

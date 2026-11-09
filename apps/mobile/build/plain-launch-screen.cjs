@@ -1,20 +1,18 @@
-const { join } = require('node:path');
-const {
-  XML,
-  withAndroidStyles,
-  withFinalizedMod,
-} = require('expo/config-plugins');
+const { withAndroidStyles, withMod } = require('expo/config-plugins');
 
 // expo-splash-screen 57.0.11 mishandles a launch screen with no image:
 // - Android keeps windowSplashScreenAnimatedIcon pointing at a
 //   splashscreen_logo drawable it never writes, so resource linking fails.
 //   Dropping the item is no better: core-splashscreen then shows Android's
 //   generic sym_def_app_icon. Point it at the launcher icon instead, which is
-//   what Android 12 and later shows by default.
+//   what Android 12 and later shows by default. Below Android 12,
+//   core-splashscreen masks the already-masked adaptive icon again, so the
+//   rays are likely cropped there; accepted for a sub-second screen.
 // - iOS leaves the storyboard on systemBackgroundColor (white or black) and
 //   keeps the removed logo's constraints and image resource.
 // List this plugin before expo-splash-screen in app.json: a later plugin's
-// mods run first, so its Android styles change would otherwise be overwritten.
+// mods run first, so these edits would otherwise be overwritten (Android) or
+// refused, since expo-splash-screen adds the storyboard reader last (iOS).
 // Delete this plugin once expo-splash-screen handles a plain background.
 
 const STORYBOARD_LOGO_ID = 'EXPO-SplashScreen';
@@ -72,25 +70,15 @@ function withPlainLaunchScreen(config) {
     modConfig.modResults = setSplashIconToLauncherIcon(modConfig.modResults);
     return modConfig;
   });
-  // expo-splash-screen locks its storyboard mod, so edit the written file
-  // after every other mod has run.
-  return withFinalizedMod(config, [
-    'ios',
-    async (modConfig) => {
-      const { platformProjectRoot, projectName } = modConfig.modRequest;
-      const path = join(
-        platformProjectRoot,
-        projectName,
-        'SplashScreen.storyboard',
-      );
-      const storyboard = await XML.readXMLAsync({ path });
-      await XML.writeXMLAsync({
-        path,
-        xml: setStoryboardBackground(storyboard),
-      });
+  // expo-splash-screen supplies the parsed storyboard under this mod name.
+  return withMod(config, {
+    action: (modConfig) => {
+      modConfig.modResults = setStoryboardBackground(modConfig.modResults);
       return modConfig;
     },
-  ]);
+    mod: 'splashScreenStoryboard',
+    platform: 'ios',
+  });
 }
 
 module.exports = withPlainLaunchScreen;
