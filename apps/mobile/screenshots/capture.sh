@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Runs every screen flow in light and dark appearance at the default text size.
+# It leaves the device in dark appearance with a fixed status bar.
 # Usage: capture.sh <android|ios> <device-name> <output-directory>
 # Maestro's own reports, useful when a flow fails, go in maestro-reports
 # beside the output directory. Expects one booted emulator or simulator with
@@ -32,6 +33,18 @@ case "$platform" in
     ;;
 esac
 
+run_flows() {
+  if [ "$platform" = android ]; then
+    # Reconnecting loses the reverse mapping the app uses to reach Metro.
+    adb wait-for-device
+    adb reverse tcp:8081 tcp:8081
+  fi
+  maestro test \
+    --env "PREFIX=$platform-$device-$1-text-default-$evidence" \
+    --test-output-dir "$reports/$1" \
+    "$flows"
+}
+
 for appearance in light dark; do
   if [ "$platform" = android ]; then
     adb shell cmd uimode night "$([ "$appearance" = dark ] && echo yes || echo no)"
@@ -47,14 +60,8 @@ for appearance in light dark; do
   else
     xcrun simctl ui booted appearance "$appearance"
   fi
-  run_flows() {
-    maestro test \
-      --env "PREFIX=$platform-$device-$appearance-text-default-$evidence" \
-      --test-output-dir "$reports/$appearance" \
-      "$flows"
-  }
   # A hosted emulator once dropped its adb connection between two flows.
-  run_flows || run_flows
+  run_flows "$appearance" || run_flows "$appearance"
 done
 # Maestro keeps each flow's screenshots in its own report folder.
 find "$reports" -path '*/takeScreenshot/*.png' -exec mv {} "$output" \;

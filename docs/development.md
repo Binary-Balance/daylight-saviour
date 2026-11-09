@@ -20,6 +20,7 @@
 | CMake                 | 3.22.1            |
 | Xcode                 | 26.6 (17F113)     |
 | CocoaPods             | 1.17.0            |
+| Maestro               | 2.12.0            |
 
 `.nvmrc`, `package.json`, `package-lock.json`, Expo configuration, and generated Gradle files are authoritative. Update this table in the same pull request when changing them.
 
@@ -165,7 +166,7 @@ sdkmanager \
   "cmake;3.22.1"
 ```
 
-No emulator or system image is required for compilation. Runtime testing can use a physical Android device or later CI/device infrastructure. iOS compilation uses hosted macOS infrastructure.
+No emulator or system image is required for compilation. Runtime testing can use a physical Android device or the [App screenshots](#app-screenshots) workflow's hosted emulator. iOS compilation uses hosted macOS infrastructure.
 
 ## Android build architecture
 
@@ -226,16 +227,23 @@ that runs the common flow, reaches the screen and ends with
 `takeScreenshot: ${PREFIX}-<screen-name>`. `capture.sh` runs every flow in each
 appearance.
 
-To capture locally on an Android emulator, install Maestro, build the debug APK
-for the emulator's ABI, then start Metro with the flag and run the script from
-the repository root:
+To capture locally on an Android emulator, install Maestro and build the debug
+APK for the emulator's ABI. From the repository root, start Metro with the flag:
 
 ```sh
 EXPO_PUBLIC_SCREENSHOT_MODE=true npm exec --workspace=@daylight-saviour/mobile -- expo start --port 8081
+```
+
+Metro stays in the foreground, so run the rest in a second terminal:
+
+```sh
 adb install apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
-adb reverse tcp:8081 tcp:8081
 apps/mobile/screenshots/capture.sh android <device-name> /tmp/daylight-saviour-screenshots
 ```
+
+Metro also reads `apps/mobile/.env`, so remove or rename it first if it points
+at a real environment. The script leaves the device in dark appearance with a
+fixed status bar.
 
 ## Browser screenshot evidence
 
