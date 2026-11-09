@@ -601,7 +601,7 @@ export const civilTimeReport = Object.freeze({
   }),
   daylightSavingStatusHeading: 'DAYLIGHT SAVING STATUS',
   document: Object.freeze({
-    label: 'DAYLIGHT SAVIOUR · CIVIL TIME RECORD',
+    label: 'DAYLIGHT SAVIOUR · KEEPING CIVIL TIME CIVIL',
   }),
   homeTimeZoneHeading: 'HOME TIME ZONE',
   noEvent: Object.freeze({

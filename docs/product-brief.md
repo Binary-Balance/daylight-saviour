@@ -62,7 +62,7 @@ Motion is a first-class part of the experience. Directional transitions, kinetic
 
 The clock, typography, copy, and motion carry the app's personality without an explicit mascot. Forward Changes accelerate and skip; Backward Changes reverse and echo; zones without a Change Event settle into deliberate stillness.
 
-Visual direction is polished bureaucratic modernism: oversized editorial time, a crisp grid, restrained fictional-document motifs, dry signal-red status stamps, Civic White record surfaces, midnight navy, and Solar Gold report provenance and Change Event structure. Motion may distort the grid and typography around Forward and Backward Changes. The app icon's warm gold and jumped coral ray may carry into the screens. Cartoon clocks, other sun motifs, generic gradient-led styling, metallic styling, and obvious Australian clichés are excluded.
+Visual direction is polished bureaucratic modernism: oversized editorial time, a crisp grid, restrained fictional-document motifs, dry signal-red status stamps, Civic White record surfaces, midnight navy, and Solar Gold Change Event structure. Motion may distort the grid and typography around Forward and Backward Changes. The app icon's warm gold and jumped coral ray may carry into the screens. Cartoon clocks, other sun motifs, generic gradient-led styling, metallic styling, and obvious Australian clichés are excluded.
 
 The app provides polished light and dark themes that follow the operating system appearance setting. MVP does not need an independent in-app theme override. Status and direction remain understandable without relying on colour alone.
 

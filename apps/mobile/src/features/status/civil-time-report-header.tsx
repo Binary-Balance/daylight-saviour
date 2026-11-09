@@ -6,7 +6,6 @@ import type { DaylightSaviourPalette } from '../../theme';
 
 export interface CivilTimeReportHeaderFacts {
   readonly friendlyZoneLabel: string;
-  readonly packVersion: string;
   readonly zoneId: string;
 }
 
@@ -31,14 +30,9 @@ export default function CivilTimeReportHeader({
           { borderBottomColor: palette.solarGoldStructure },
         ]}
       >
-        <View style={styles.utilityIdentity} testID="utility-identity">
-          <Text style={[styles.documentLabel, { color: palette.secondaryInk }]}>
-            {copy.civilTimeReport.document.label}
-          </Text>
-          <Text style={[styles.reference, { color: palette.solarGold }]}>
-            {facts.packVersion}
-          </Text>
-        </View>
+        <Text style={[styles.documentLabel, { color: palette.secondaryInk }]}>
+          {copy.civilTimeReport.document.label}
+        </Text>
       </View>
 
       <Pressable
@@ -93,19 +87,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1.1,
     lineHeight: 18,
   },
-  reference: {
-    fontSize: 13,
-    fontWeight: '900',
-  },
   utilityHeader: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     minHeight: 48,
     paddingBottom: 16,
     paddingRight: 92,
-  },
-  utilityIdentity: {
-    flexShrink: 1,
-    gap: 4,
   },
   zone: {
     fontSize: 28,
