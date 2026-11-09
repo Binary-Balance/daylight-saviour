@@ -14,6 +14,9 @@ mkdir -p "$3"
 output=$(cd "$3" && pwd)
 reports=$(dirname "$output")/maestro-reports
 flows=$(dirname "$0")
+# Maestro adds a folder per run, so an earlier run's screenshots would
+# otherwise be collected too.
+rm -rf "$reports"
 
 case "$platform" in
   android)
@@ -37,7 +40,7 @@ run_flows() {
   if [ "$platform" = android ]; then
     # Reconnecting loses the reverse mapping the app uses to reach Metro.
     adb wait-for-device
-    adb reverse tcp:8081 tcp:8081
+    adb reverse tcp:8081 tcp:8081 || return
   fi
   maestro test \
     --env "PREFIX=$platform-$device-$1-text-default-$evidence" \

@@ -231,7 +231,7 @@ To capture locally on an Android emulator, install Maestro and build the debug
 APK for the emulator's ABI. From the repository root, start Metro with the flag:
 
 ```sh
-EXPO_PUBLIC_SCREENSHOT_MODE=true npm exec --workspace=@daylight-saviour/mobile -- expo start --port 8081
+EXPO_NO_DOTENV=1 EXPO_PUBLIC_SCREENSHOT_MODE=true npm exec --workspace=@daylight-saviour/mobile -- expo start --port 8081
 ```
 
 Metro stays in the foreground, so run the rest in a second terminal:
@@ -241,9 +241,9 @@ adb install apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
 apps/mobile/screenshots/capture.sh android <device-name> /tmp/daylight-saviour-screenshots
 ```
 
-Metro also reads `apps/mobile/.env`, so remove or rename it first if it points
-at a real environment. The script leaves the device in dark appearance with a
-fixed status bar.
+`EXPO_NO_DOTENV=1` stops Metro reading a local `apps/mobile/.env`, which could
+point at a real environment. The script leaves the device in dark appearance
+with a fixed status bar.
 
 ## Browser screenshot evidence
 
