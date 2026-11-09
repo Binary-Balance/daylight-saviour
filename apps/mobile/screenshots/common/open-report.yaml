@@ -3,10 +3,11 @@ appId: au.com.binarybalance.daylightsaviour
 ---
 - launchApp:
     clearState: true
-# A development build loads its bundle from Metro, which is slow the first time.
+# A development build loads its bundle from Metro. The first bundle took six
+# minutes on a hosted macOS runner.
 - extendedWaitUntil:
     visible: 'Choose another region|Choose Home Time Zone'
-    timeout: 180000
+    timeout: 600000
 # The device's own time zone decides which of the two screens appears.
 - runFlow:
     when:

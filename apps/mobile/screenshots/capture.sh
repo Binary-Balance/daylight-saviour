@@ -18,11 +18,7 @@ case "$platform" in
   android)
     evidence=emulator
     adb shell settings put system font_scale 1.0
-    # Demo mode shows a fixed clock and hides notification icons.
     adb shell settings put global sysui_demo_allowed 1
-    adb shell am broadcast -a com.android.systemui.demo -e command enter
-    adb shell am broadcast -a com.android.systemui.demo -e command clock -e hhmm 0941
-    adb shell am broadcast -a com.android.systemui.demo -e command notifications -e visible false
     ;;
   ios)
     evidence=simulator
@@ -43,13 +39,22 @@ for appearance in light dark; do
     # the new appearance, and its dialog would cover the app.
     sleep 10
     adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS
+    # Demo mode shows a fixed clock and hides notification icons. Hosted
+    # emulators dropped it when it was entered before the appearance change.
+    adb shell am broadcast -a com.android.systemui.demo -e command enter
+    adb shell am broadcast -a com.android.systemui.demo -e command clock -e hhmm 0941
+    adb shell am broadcast -a com.android.systemui.demo -e command notifications -e visible false
   else
     xcrun simctl ui booted appearance "$appearance"
   fi
-  maestro test \
-    --env "PREFIX=$platform-$device-$appearance-text-default-$evidence" \
-    --test-output-dir "$reports/$appearance" \
-    "$flows"
+  run_flows() {
+    maestro test \
+      --env "PREFIX=$platform-$device-$appearance-text-default-$evidence" \
+      --test-output-dir "$reports/$appearance" \
+      "$flows"
+  }
+  # A hosted emulator once dropped its adb connection between two flows.
+  run_flows || run_flows
 done
 # Maestro keeps each flow's screenshots in its own report folder.
 find "$reports" -path '*/takeScreenshot/*.png' -exec mv {} "$output" \;
