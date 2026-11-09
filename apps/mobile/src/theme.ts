@@ -22,8 +22,8 @@ export const daylightSaviourPalettes = {
     background: '#081426',
     controlBoundary: '#6F809B',
     decisionNoticeBorder: '#FF6A4D',
-    // Signal coral at 15% on the record surface; any stronger and the coral
-    // heading drops below 4.5:1.
+    // Signal coral at 15% on the record surface. From 20% the coral heading
+    // drops below 4.5:1.
     decisionNoticeGlow: '#342A39',
     decisionNoticeText: '#FF6A4D',
     ink: '#F6F0DE',
