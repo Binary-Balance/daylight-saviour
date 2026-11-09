@@ -34,9 +34,9 @@ function contentFor(context: ChangeReminderTapContext) {
 }
 
 // The notice sits on every reminder tap, so it draws the eye once with a
-// soft glow that fades back to the card's normal look. Nothing loops. Above
-// 0.15 the dark heading drops below 4.5:1 contrast while the glow fades.
-const glowStartOpacity = 0.15;
+// soft glow that fades back to the card's normal look. Nothing loops. The
+// fade waits a moment so it isn't spent while iOS is still opening the app.
+const glowDelayMs = 400;
 const glowDurationMs = 1600;
 
 export default function ChangeReminderNotificationContext({
@@ -84,8 +84,9 @@ function Notice({
   useEffect(() => {
     if (reducedMotion !== false || glowPlayed.current) return;
     glowPlayed.current = true;
-    glowOpacity.setValue(glowStartOpacity);
+    glowOpacity.setValue(1);
     Animated.timing(glowOpacity, {
+      delay: glowDelayMs,
       duration: glowDurationMs,
       toValue: 0,
       useNativeDriver: true,
@@ -111,7 +112,7 @@ function Notice({
         style={[
           StyleSheet.absoluteFill,
           {
-            backgroundColor: palette.decisionNoticeBorder,
+            backgroundColor: palette.decisionNoticeGlow,
             opacity: glowOpacity,
           },
         ]}
