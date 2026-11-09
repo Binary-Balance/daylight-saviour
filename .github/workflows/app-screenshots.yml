@@ -2,10 +2,6 @@ name: App screenshots
 
 on:
   workflow_dispatch:
-  # TEMPORARY: lets the branch run before the workflow exists on main.
-  push:
-    branches:
-      - pub-259-app-screenshots
 
 permissions:
   contents: read
