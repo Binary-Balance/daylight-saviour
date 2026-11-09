@@ -106,8 +106,9 @@ jobs:
           path: ${{ runner.temp }}/screenshots
           if-no-files-found: error
 
+      # A job that reaches its time limit is cancelled, not failed.
       - name: Upload diagnostics
-        if: ${{ failure() }}
+        if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: android-diagnostics
@@ -184,8 +185,9 @@ jobs:
           path: ${{ runner.temp }}/screenshots
           if-no-files-found: error
 
+      # A job that reaches its time limit is cancelled, not failed.
       - name: Upload diagnostics
-        if: ${{ failure() }}
+        if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ios-diagnostics

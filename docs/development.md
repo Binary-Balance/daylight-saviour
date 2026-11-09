@@ -242,8 +242,9 @@ apps/mobile/screenshots/capture.sh android <device-name> /tmp/daylight-saviour-s
 ```
 
 `EXPO_NO_DOTENV=1` stops Metro reading a local `apps/mobile/.env`, which could
-point at a real environment. The script leaves the device in dark appearance
-with a fixed status bar.
+point at a real environment. Use an empty output directory, since the script
+only adds files to it. It replaces `maestro-reports` beside the output
+directory, and leaves the device in dark appearance with a fixed status bar.
 
 ## Browser screenshot evidence
 

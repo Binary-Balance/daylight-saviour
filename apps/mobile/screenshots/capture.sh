@@ -3,20 +3,14 @@
 # It leaves the device in dark appearance with a fixed status bar.
 # Usage: capture.sh <android|ios> <device-name> <output-directory>
 # Maestro's own reports, useful when a flow fails, go in maestro-reports
-# beside the output directory. Expects one booted emulator or simulator with
+# beside the output directory, which each run clears. Expects one booted emulator or simulator with
 # the development build installed, and Metro running with
 # EXPO_PUBLIC_SCREENSHOT_MODE=true.
 set -euo pipefail
 
 platform=$1
 device=$2
-mkdir -p "$3"
-output=$(cd "$3" && pwd)
-reports=$(dirname "$output")/maestro-reports
 flows=$(dirname "$0")
-# Maestro adds a folder per run, so an earlier run's screenshots would
-# otherwise be collected too.
-rm -rf "$reports"
 
 case "$platform" in
   android)
@@ -35,6 +29,13 @@ case "$platform" in
     exit 1
     ;;
 esac
+
+mkdir -p "$3"
+output=$(cd "$3" && pwd)
+reports=$(dirname "$output")/maestro-reports
+# Maestro adds a folder per run, so an earlier run's screenshots would
+# otherwise be collected too.
+rm -rf "$reports"
 
 run_flows() {
   if [ "$platform" = android ]; then
