@@ -8,6 +8,7 @@ describe('daylightSaviourPalettes', () => {
       background: '#F7F8FA',
       controlBoundary: '#87919D',
       decisionNoticeBorder: '#AAB2BC',
+      decisionNoticeGlow: '#FFE4B9',
       decisionNoticeText: '#5B6678',
       ink: '#101B2D',
       noEventMark: '#5B6678',
@@ -27,6 +28,7 @@ describe('daylightSaviourPalettes', () => {
       background: '#081426',
       controlBoundary: '#6F809B',
       decisionNoticeBorder: '#FF6A4D',
+      decisionNoticeGlow: '#342A39',
       decisionNoticeText: '#FF6A4D',
       ink: '#F6F0DE',
       noEventMark: '#FF6A4D',
@@ -56,6 +58,19 @@ describe('daylightSaviourPalettes', () => {
       contrastRatio(palette.controlBoundary, palette.surface),
     ).toBeGreaterThanOrEqual(3);
   });
+
+  it.each(['light', 'dark'] as const)(
+    'keeps %s reminder notice text readable on its glow',
+    (appearance) => {
+      const palette = daylightSaviourPalettes[appearance];
+      expect(
+        contrastRatio(palette.decisionNoticeText, palette.decisionNoticeGlow),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(palette.ink, palette.decisionNoticeGlow),
+      ).toBeGreaterThanOrEqual(4.5);
+    },
+  );
 
   it('keeps dark neutral controls above contrast thresholds', () => {
     const palette = daylightSaviourPalettes.dark;

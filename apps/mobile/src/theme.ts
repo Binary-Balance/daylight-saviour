@@ -4,6 +4,8 @@ export const daylightSaviourPalettes = {
     background: '#F7F8FA',
     controlBoundary: '#87919D',
     decisionNoticeBorder: '#AAB2BC',
+    // The app icon's warm gold at 35% on the record surface.
+    decisionNoticeGlow: '#FFE4B9',
     decisionNoticeText: '#5B6678',
     ink: '#101B2D',
     noEventMark: '#5B6678',
@@ -20,6 +22,9 @@ export const daylightSaviourPalettes = {
     background: '#081426',
     controlBoundary: '#6F809B',
     decisionNoticeBorder: '#FF6A4D',
+    // Signal coral at 15% on the record surface; any stronger and the coral
+    // heading drops below 4.5:1.
+    decisionNoticeGlow: '#342A39',
     decisionNoticeText: '#FF6A4D',
     ink: '#F6F0DE',
     noEventMark: '#FF6A4D',

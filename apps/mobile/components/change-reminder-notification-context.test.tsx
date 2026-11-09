@@ -67,9 +67,10 @@ it('glows once as it appears and settles within two seconds', () => {
   expect(timing).toHaveBeenCalledTimes(1);
   const [, config] = timing.mock.calls[0]!;
   expect(config).toMatchObject({ toValue: 0, useNativeDriver: true });
-  expect(config.duration).toBeGreaterThanOrEqual(1000);
-  expect(config.duration).toBeLessThanOrEqual(2000);
-  expect(glowOpacity()).toBe(0.15);
+  const settlesAfter = (config.delay ?? 0) + (config.duration ?? 0);
+  expect(settlesAfter).toBeGreaterThanOrEqual(1000);
+  expect(settlesAfter).toBeLessThanOrEqual(2000);
+  expect(glowOpacity()).toBe(1);
   expect(
     screen.getByTestId('reminder-notice-glow', { includeHiddenElements: true })
       .props.accessibilityElementsHidden,
