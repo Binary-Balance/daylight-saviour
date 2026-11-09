@@ -9,7 +9,8 @@ set -euo pipefail
 
 platform=$1
 device=$2
-output=$(realpath -m "$3")
+mkdir -p "$3"
+output=$(cd "$3" && pwd)
 reports=$(dirname "$output")/maestro-reports
 flows=$(dirname "$0")
 
@@ -35,7 +36,6 @@ case "$platform" in
     ;;
 esac
 
-mkdir -p "$output"
 for appearance in light dark; do
   if [ "$platform" = android ]; then
     adb shell cmd uimode night "$([ "$appearance" = dark ] && echo yes || echo no)"
