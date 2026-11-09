@@ -16,10 +16,16 @@ import DaylightSavingStatusHero from './daylight-saving-status-hero';
 import SettingsSheet from './settings-sheet';
 import ChangeReminderSection from '../change-reminders/change-reminder-section';
 import { productionChangeReminderAdapters } from '../change-reminders/change-reminder-production-adapters';
+import { screenshotChangeReminderAdapters } from '../change-reminders/change-reminder-screenshot-adapters';
 import { changeReminderTestBuildEnabled } from '../change-reminders/change-reminder-test-build';
+import { screenshotModeEnabled } from '../screenshots/screenshot-mode';
 import { createStatusViewModel } from './status-view-model';
 import type { TimeZoneDataPackSnapshot } from '../time-zone-data/time-zone-data-manager';
 import type { ReviewedNotificationTap } from '../change-reminders/change-reminder-notification-runtime';
+
+const changeReminderAdapters = screenshotModeEnabled()
+  ? screenshotChangeReminderAdapters
+  : productionChangeReminderAdapters;
 
 interface StatusScreenProps {
   readonly dataPackSnapshot: TimeZoneDataPackSnapshot;
@@ -177,7 +183,7 @@ export default function StatusScreen({
         />
 
         <ChangeReminderSection
-          adapters={productionChangeReminderAdapters}
+          adapters={changeReminderAdapters}
           homeTimeZone={viewModel.zoneId}
           onPermissionDialog={onPermissionDialog}
           palette={palette}

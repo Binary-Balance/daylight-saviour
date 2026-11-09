@@ -20,6 +20,7 @@
 | CMake                 | 3.22.1            |
 | Xcode                 | 26.6 (17F113)     |
 | CocoaPods             | 1.17.0            |
+| Maestro               | 2.12.0            |
 
 `.nvmrc`, `package.json`, `package-lock.json`, Expo configuration, and generated Gradle files are authoritative. Update this table in the same pull request when changing them.
 
@@ -165,7 +166,7 @@ sdkmanager \
   "cmake;3.22.1"
 ```
 
-No emulator or system image is required for compilation. Runtime testing can use a physical Android device or later CI/device infrastructure. iOS compilation uses hosted macOS infrastructure.
+No emulator or system image is required for compilation. Runtime testing can use a physical Android device or the [App screenshots](#app-screenshots) workflow's hosted emulator. iOS compilation uses hosted macOS infrastructure.
 
 ## Android build architecture
 
@@ -186,13 +187,64 @@ Any future or approved release command must also supply the
 Do not omit the architecture property. Build another architecture only when the
 current work has an explicit, documented need for it, such as an `x86_64`
 emulator or a release that explicitly supports that ABI. Build only the required
-architecture rather than the full ABI list.
+architecture rather than the full ABI list. The App screenshots workflow builds
+`x86_64` only, because hosted Linux runners can run only an `x86_64` emulator.
 
 JavaScript/TypeScript changes normally need Metro, tests, typecheck, lint, and
 web export only. Preserve caches unless validating reproducibility or responding
 to native changes. `npm ci`, clean Expo prebuild, `gradlew clean`, native
 dependency changes, and changes to Expo, React Native, Gradle, Android Gradle
 Plugin, NDK, or CMake invalidate expensive build outputs.
+
+## App screenshots
+
+The manual **App screenshots** workflow captures the app on an Android
+emulator and an iOS simulator, in light and dark appearance. Run it from the
+Actions tab, or:
+
+```sh
+gh workflow run app-screenshots.yml
+```
+
+The run keeps two artifacts, `android-screenshots` and `ios-screenshots`. Each
+file is named for its platform, device, appearance, text size, evidence kind
+and screen, for example
+`android-pixel-7-api-35-dark-text-default-emulator-civil-time-report.png`.
+These are emulator and simulator captures, not physical-device evidence.
+
+The workflow builds development builds with
+`EXPO_PUBLIC_SCREENSHOT_MODE=true` and no other public configuration. Screenshot
+mode replaces Change Reminder registration with local stand-ins, so the app
+contacts no service and asks for no notification permission. It works only when
+`__DEV__` is true. Release bundles, including every store build, cannot enable
+it.
+
+[Maestro](https://maestro.mobile.dev) drives the app.
+`apps/mobile/screenshots/common/open-report.yaml` starts a fresh install and
+opens the Civil Time Report for Sydney. Each other flow in
+`apps/mobile/screenshots/` captures one screen. To add a screen, add a flow
+that runs the common flow, reaches the screen and ends with
+`takeScreenshot: ${PREFIX}-<screen-name>`. `capture.sh` runs every flow in each
+appearance.
+
+To capture locally on an Android emulator, install Maestro and build the debug
+APK for the emulator's ABI. From the repository root, start Metro with the flag:
+
+```sh
+EXPO_NO_DOTENV=1 EXPO_PUBLIC_SCREENSHOT_MODE=true npm exec --workspace=@daylight-saviour/mobile -- expo start --port 8081
+```
+
+Metro stays in the foreground, so run the rest in a second terminal:
+
+```sh
+adb install apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+apps/mobile/screenshots/capture.sh android <device-name> /tmp/daylight-saviour-screenshots
+```
+
+`EXPO_NO_DOTENV=1` stops Metro reading a local `apps/mobile/.env`, which could
+point at a real environment. Use an empty output directory, since the script
+only adds files to it. It replaces `maestro-reports` beside the output
+directory, and leaves the device in dark appearance with a fixed status bar.
 
 ## Browser screenshot evidence
 

@@ -1,0 +1,13 @@
+appId: au.com.binarybalance.daylightsaviour
+---
+- runFlow: common/open-report.yaml
+- scrollUntilVisible:
+    element: 'Warn me before time misbehaves'
+- tapOn: 'Warn me before time misbehaves'
+- scrollUntilVisible:
+    element: 'Enable reminders'
+- tapOn: 'Enable reminders'
+- scrollUntilVisible:
+    element: 'One-day Change Reminder'
+- waitForAnimationToEnd
+- takeScreenshot: ${PREFIX}-change-reminders
