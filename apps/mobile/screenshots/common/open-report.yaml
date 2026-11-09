@@ -1,0 +1,21 @@
+# Starts from a fresh install and opens the Civil Time Report for Sydney.
+appId: au.com.binarybalance.daylightsaviour
+---
+- launchApp:
+    clearState: true
+# A development build loads its bundle from Metro, which is slow the first time.
+- extendedWaitUntil:
+    visible: 'Choose another region|Choose Home Time Zone'
+    timeout: 180000
+# The device's own time zone decides which of the two screens appears.
+- runFlow:
+    when:
+      visible: 'Choose another region'
+    commands:
+      - tapOn: 'Choose another region'
+- tapOn: 'Search Australian Home Time Zones'
+- inputText: 'Sydney'
+- tapOn: 'Sydney, Canberra & most of NSW, Australia/Sydney'
+- extendedWaitUntil:
+    visible: 'DAYLIGHT SAVING STATUS'
+    timeout: 30000

@@ -1,0 +1,5 @@
+appId: au.com.binarybalance.daylightsaviour
+---
+- runFlow: common/open-report.yaml
+- waitForAnimationToEnd
+- takeScreenshot: ${PREFIX}-civil-time-report

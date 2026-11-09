@@ -1,0 +1,194 @@
+name: App screenshots
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Screenshot mode works only in development builds, which load their
+  # JavaScript from Metro. No other public configuration is set, so the build
+  # has no registration endpoint or remote data source.
+  EXPO_PUBLIC_SCREENSHOT_MODE: 'true'
+  MAESTRO_VERSION: 2.12.0
+  MAESTRO_SHA256: a6044a84542f522f434c5dc3d609e60c7446d423f3ed1b2ae513f5c48663ec5e
+  MAESTRO_CLI_NO_ANALYTICS: '1'
+  MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: 'true'
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+        with:
+          distribution: temurin
+          java-version: '17.0.19+10'
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '14742923'
+          packages: ''
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Maestro
+        run: |
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/maestro.zip" \
+            "https://github.com/mobile-dev-inc/Maestro/releases/download/cli-$MAESTRO_VERSION/maestro.zip"
+          echo "$MAESTRO_SHA256  $RUNNER_TEMP/maestro.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Install Android packages
+        run: >-
+          sdkmanager
+          "platform-tools"
+          "platforms;android-36"
+          "build-tools;35.0.0"
+          "build-tools;36.0.0"
+          "ndk;27.1.12297006"
+          "cmake;3.22.1"
+
+      - name: Generate Android project
+        run: npm run native:generate:android
+
+      # Hosted Linux runners emulate x86_64 Android only.
+      - name: Build Android debug APK
+        env:
+          NODE_ENV: development
+        run: apps/mobile/android/gradlew -p apps/mobile/android assembleDebug --no-daemon -PreactNativeArchitectures=x86_64
+
+      - name: Start Metro
+        run: |
+          nohup npm exec --workspace=@daylight-saviour/mobile -- expo start --port 8081 \
+            > "$RUNNER_TEMP/metro.log" 2>&1 &
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Capture screenshots
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          script: |
+            adb install apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+            adb reverse tcp:8081 tcp:8081
+            apps/mobile/screenshots/capture.sh android pixel-7-api-35 ${{ runner.temp }}/screenshots
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: android-screenshots
+          path: ${{ runner.temp }}/screenshots
+          if-no-files-found: error
+
+      - name: Upload diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: android-diagnostics
+          path: |
+            ${{ runner.temp }}/metro.log
+            ${{ runner.temp }}/maestro-reports
+
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      SIMULATOR: iPhone 17
+      XCODE_VERSION: '26.6'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Select Xcode
+        run: sudo xcode-select --switch "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Maestro
+        run: |
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/maestro.zip" \
+            "https://github.com/mobile-dev-inc/Maestro/releases/download/cli-$MAESTRO_VERSION/maestro.zip"
+          echo "$MAESTRO_SHA256  $RUNNER_TEMP/maestro.zip" | shasum -a 256 --check
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Generate iOS project
+        run: npm exec --workspace=@daylight-saviour/mobile -- expo prebuild --platform ios --clean --no-install
+
+      - name: Install iOS dependencies
+        working-directory: apps/mobile/ios
+        run: pod install
+
+      - name: Build iOS simulator app
+        run: |
+          xcodebuild \
+            -workspace apps/mobile/ios/DaylightSaviour.xcworkspace \
+            -scheme DaylightSaviour \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,name=$SIMULATOR" \
+            -derivedDataPath "$RUNNER_TEMP/derived-data" \
+            build
+
+      - name: Start Metro
+        run: |
+          nohup npm exec --workspace=@daylight-saviour/mobile -- expo start --port 8081 \
+            > "$RUNNER_TEMP/metro.log" 2>&1 &
+
+      - name: Start simulator
+        run: |
+          xcrun simctl boot "$SIMULATOR"
+          xcrun simctl bootstatus "$SIMULATOR"
+          xcrun simctl install booted "$RUNNER_TEMP/derived-data/Build/Products/Debug-iphonesimulator/DaylightSaviour.app"
+
+      - name: Capture screenshots
+        run: apps/mobile/screenshots/capture.sh ios iphone-17 "$RUNNER_TEMP/screenshots"
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ios-screenshots
+          path: ${{ runner.temp }}/screenshots
+          if-no-files-found: error
+
+      - name: Upload diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ios-diagnostics
+          path: |
+            ${{ runner.temp }}/metro.log
+            ${{ runner.temp }}/maestro-reports
