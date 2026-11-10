@@ -240,7 +240,8 @@ being warned once the installation has made contact.
 
 On Android the device shows FCM's notification body, in the foreground through
 Expo as well as in the background, so the app only has to accept the warned body
-as reviewed copy.
+as reviewed copy. A tap from the Android tray reaches the app without any copy,
+so the app judges it on the reminder fields alone.
 
 ### Kill switch
 
