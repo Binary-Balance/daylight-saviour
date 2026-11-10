@@ -98,14 +98,6 @@ const reminderFields = [
   'reminderTiming',
 ] as const satisfies readonly (keyof ChangeReminderNotification)[];
 
-function dataRecord(
-  content: ChangeReminderNotificationContent,
-): Readonly<Record<string, unknown>> {
-  return typeof content.data === 'object' && content.data !== null
-    ? (content.data as Record<string, unknown>)
-    : {};
-}
-
 // An Android tray tap reaches the app through its launch intent. Firebase
 // keeps the notification's title and body out of that intent and adds its
 // own keys beside the reminder fields (PUB-246), so the copy cannot be
@@ -115,22 +107,10 @@ function trayTap(
   content: ChangeReminderNotificationContent,
 ): ReviewedNotificationTap | null {
   if (content.title != null || content.body != null) return null;
-  const data = dataRecord(content);
+  if (typeof content.data !== 'object' || content.data === null) return null;
+  const data = content.data as Record<string, unknown>;
   return parseChangeReminderTap(
     Object.fromEntries(reminderFields.map((field) => [field, data[field]])),
-  );
-}
-
-// Release builds offer no other view of what a tap delivers (PUB-246). Key
-// names and whether copy arrived are enough to tell; values stay off the
-// log. Remove this once PUB-246 records the device evidence.
-function logTapShape(content: ChangeReminderNotificationContent) {
-  console.info(
-    `Change Reminder tap: ${JSON.stringify({
-      body: content.body != null,
-      dataKeys: Object.keys(dataRecord(content)).sort(),
-      title: content.title != null,
-    })}`,
   );
 }
 
@@ -168,7 +148,6 @@ export function createChangeReminderNotificationRuntime({
     if (response.actionIdentifier !== notifications.defaultActionIdentifier)
       return;
     const content = response.notification.request.content;
-    logTapShape(content);
     const tap =
       reviewedTap(content) ?? (trayTapsLackCopy ? trayTap(content) : null);
     if (tap !== null) {
