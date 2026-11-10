@@ -32,10 +32,29 @@ function response(overrides: Partial<ChangeReminderNotificationContent> = {}) {
   };
 }
 
+// What an Android tray tap delivers: Firebase keeps the title and body out of
+// the launch intent and adds its own keys beside the reminder fields.
+const trayContent: ChangeReminderNotificationContent = {
+  body: null,
+  data: {
+    ...payload,
+    collapse_key: 'com.example.app',
+    from: '123456789',
+    'google.delivered_priority': 'high',
+    'google.message_id': '0:1762000000000000%abc',
+    'google.original_priority': 'high',
+    'google.sent_time': 1762000000000,
+    'google.ttl': 2419200,
+  },
+  title: null,
+};
+
 function harness({
   coldResponse = null,
+  trayTapsLackCopy = false,
 }: {
   readonly coldResponse?: ReturnType<typeof response> | null;
+  readonly trayTapsLackCopy?: boolean;
 } = {}) {
   let responseListener:
     | ((next: ReturnType<typeof response>) => void)
@@ -71,6 +90,7 @@ function harness({
     runtime: createChangeReminderNotificationRuntime({
       notifications,
       onTap: (tap) => taps.push(tap),
+      trayTapsLackCopy,
     }),
     taps,
     remove,
@@ -78,6 +98,14 @@ function harness({
 }
 
 describe('Change Reminder notification runtime', () => {
+  beforeEach(() => {
+    jest.spyOn(console, 'info').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('binds iOS to the reviewed native notification hook', () => {
     expect(useIosChangeReminderTap).toBe(useNativeChangeReminderTap);
   });
@@ -184,6 +212,52 @@ describe('Change Reminder notification runtime', () => {
     test.emitResponse({ ...response(), actionIdentifier: 'dismiss' });
     test.emitResponse(response({ title: 'Unreviewed title' }));
     expect(test.taps).toHaveLength(1);
+  });
+
+  it('opens an Android tray tap judged on the reminder fields alone', async () => {
+    const test = harness({
+      coldResponse: response(trayContent),
+      trayTapsLackCopy: true,
+    });
+    await test.runtime.start();
+    test.emitResponse(response(trayContent));
+
+    expect(test.taps).toEqual([
+      {
+        changeDirection: 'forward',
+        changeEventAt: '2026-10-03T16:00:00.000Z',
+        homeTimeZone: 'Australia/Sydney',
+        reminderTiming: 'one-week',
+      },
+      expect.objectContaining({ reminderTiming: 'one-week' }),
+    ]);
+    expect(console.info).toHaveBeenCalledWith(
+      'Change Reminder tap: {"body":false,"dataKeys":["changeDirection","changeEventAt","collapse_key","from","google.delivered_priority","google.message_id","google.original_priority","google.sent_time","google.ttl","homeTimeZone","reminderKind","reminderTiming"],"title":false}',
+    );
+  });
+
+  it('ignores a tap without copy where taps carry it, or with bad fields', async () => {
+    const elsewhere = harness({ coldResponse: response(trayContent) });
+    await elsewhere.runtime.start();
+    expect(elsewhere.taps).toEqual([]);
+
+    const android = harness({ trayTapsLackCopy: true });
+    await android.runtime.start();
+    const { reminderKind: _omitted, ...withoutKind } =
+      trayContent.data as Record<string, unknown>;
+    android.emitResponse(response({ ...trayContent, data: withoutKind }));
+    android.emitResponse(
+      response({
+        ...trayContent,
+        data: { ...payload, reminderTiming: 'soon' },
+      }),
+    );
+    android.emitResponse(response({ ...trayContent, data: null }));
+    android.emitResponse(
+      response({ ...trayContent, title: 'Change Reminder' }),
+    );
+    android.emitResponse(response({ ...trayContent, body: 'Unreviewed body' }));
+    expect(android.taps).toEqual([]);
   });
 
   it('keeps a warm response when an older cold response resolves later', async () => {

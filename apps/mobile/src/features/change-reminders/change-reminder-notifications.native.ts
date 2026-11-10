@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
 import {
@@ -32,6 +32,7 @@ export function useProductionChangeReminderTap() {
             Notifications.setNotificationHandler(handler),
         },
         onTap: visit.receive,
+        trayTapsLackCopy: Platform.OS === 'android',
       }),
     [visit],
   );
