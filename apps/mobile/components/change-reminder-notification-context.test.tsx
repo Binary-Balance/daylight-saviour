@@ -8,13 +8,19 @@ import ChangeReminderNotificationContext from './change-reminder-notification-co
 const passedLabel =
   "REMINDER EVENT PASSED. This reminder's Change Event passed 48 hours ago or more. Current Civil Time Report details are shown instead.";
 
-function Notice({ reducedMotion }: { readonly reducedMotion: boolean | null }) {
+function Notice({
+  appearance = 'light',
+  reducedMotion,
+}: {
+  readonly appearance?: 'dark' | 'light';
+  readonly reducedMotion: boolean | null;
+}) {
   // A fresh context object on every render, as the status view model makes
   // one each second.
   return (
     <ChangeReminderNotificationContext
       context={{ kind: 'aged-out' }}
-      palette={daylightSaviourPalettes.light}
+      palette={daylightSaviourPalettes[appearance]}
       reducedMotion={reducedMotion}
     />
   );
@@ -85,6 +91,22 @@ it('glows once as it appears and settles within two seconds', () => {
   ).toBe(true);
 });
 
+it('fades the heading to its glow colour with the glow', () => {
+  render(<Notice appearance="dark" reducedMotion={false} />);
+
+  const heading = screen.getByTestId('reminder-notice-glow-heading', {
+    includeHiddenElements: true,
+  });
+  expect(StyleSheet.flatten(heading.props.style)).toMatchObject({
+    color: daylightSaviourPalettes.dark.decisionNoticeGlowText,
+    opacity: 1,
+  });
+  expect(heading.props.accessibilityElementsHidden).toBe(true);
+  expect(glowStyle().backgroundColor).toBe(
+    daylightSaviourPalettes.dark.decisionNoticeGlow,
+  );
+});
+
 it('waits for the reduced-motion preference before glowing', () => {
   const { rerender } = render(<Notice reducedMotion={null} />);
   expect(timing).not.toHaveBeenCalled();
@@ -104,6 +126,13 @@ it.each([true, null])(
 
     expect(timing).not.toHaveBeenCalled();
     expect(glowOpacity()).toBe(0);
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId('reminder-notice-glow-heading', {
+          includeHiddenElements: true,
+        }).props.style,
+      ).opacity,
+    ).toBe(0);
     expect(screen.getByRole('alert', { name: passedLabel })).toBeTruthy();
   },
 );
