@@ -231,11 +231,16 @@ export default function DaylightSavingStatusHero({
   );
 }
 
+const CLOCK_LETTER_SPACING = -4;
+
 const styles = StyleSheet.create({
   clock: {
     fontVariant: ['tabular-nums'],
     fontWeight: '900',
-    letterSpacing: -4,
+    letterSpacing: CLOCK_LETTER_SPACING,
+    // iOS also applies the spacing after the last digit, so the text box ended
+    // short of its ink and clipped the right edge of a final 6.
+    paddingRight: -CLOCK_LETTER_SPACING,
   },
   clockLine: {
     alignItems: 'baseline',

@@ -147,6 +147,30 @@ describe('DaylightSavingStatusHero', () => {
     },
   );
 
+  it.each([1, 2])(
+    'leaves room for the last digit at text scale %d',
+    (fontScale) => {
+      ReactNative.Dimensions.set({
+        screen: { fontScale, height: 789, scale: 1, width: 320 },
+        window: { fontScale, height: 789, scale: 1, width: 320 },
+      });
+
+      render(
+        <DaylightSavingStatusHero
+          facts={{ ...facts, clock: '10:16 pm' }}
+          palette={daylightSaviourPalettes.light}
+          uses24hourClock={false}
+        />,
+      );
+
+      const { letterSpacing, paddingRight } = ReactNative.StyleSheet.flatten(
+        screen.getByTestId('clock-value').props.style,
+      );
+      expect(letterSpacing).toBeLessThan(0);
+      expect(paddingRight).toBe(-letterSpacing);
+    },
+  );
+
   it('preserves the literal clock token while stacking it at maximum text scale', () => {
     ReactNative.Dimensions.set({
       screen: { fontScale: 2, height: 789, scale: 1, width: 320 },
