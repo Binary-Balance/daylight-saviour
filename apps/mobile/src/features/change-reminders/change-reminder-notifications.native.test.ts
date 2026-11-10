@@ -103,6 +103,8 @@ describe('useProductionChangeReminderTap', () => {
       .mocked(AppState.addEventListener)
       .mockImplementation(() => ({ remove: jest.fn() }));
     AppState.currentState = originalAppState;
+    // Puts back Platform.OS after a test replaces it.
+    jest.restoreAllMocks();
   });
 
   async function mount() {

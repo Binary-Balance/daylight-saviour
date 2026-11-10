@@ -45,7 +45,7 @@ const trayContent: ChangeReminderNotificationContent = {
     'google.delivered_priority': 'high',
     'google.message_id': '0:1762000000000000%abc',
     'google.original_priority': 'high',
-    'google.product_id': 111881503,
+    'google.product_id': 123,
     'google.sent_time': 1762000000000,
   },
   title: null,
