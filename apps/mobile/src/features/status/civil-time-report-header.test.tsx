@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 
 import { daylightSaviourPalettes } from '../../theme';
 import CivilTimeReportHeader from './civil-time-report-header';
@@ -46,6 +46,26 @@ describe('CivilTimeReportHeader', () => {
       expect(chooseZone).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('shows a notice between the document label and the Home Time Zone', () => {
+    const { toJSON } = render(
+      <CivilTimeReportHeader
+        facts={{
+          friendlyZoneLabel: 'Sydney, Canberra & most of NSW',
+          zoneId: 'Australia/Sydney',
+        }}
+        notice={<Text>Notice</Text>}
+        palette={daylightSaviourPalettes.light}
+      />,
+    );
+
+    const rendered = JSON.stringify(toJSON());
+    const label = rendered.indexOf('DAYLIGHT SAVIOUR');
+    const notice = rendered.indexOf('"Notice"');
+    expect(label).toBeGreaterThanOrEqual(0);
+    expect(notice).toBeGreaterThan(label);
+    expect(notice).toBeLessThan(rendered.indexOf('Home Time Zone'));
+  });
 
   it('renders non-actionable scope without button semantics', () => {
     render(

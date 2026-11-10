@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
@@ -11,12 +11,15 @@ export interface CivilTimeReportHeaderFacts {
 
 interface CivilTimeReportHeaderProps {
   readonly facts: CivilTimeReportHeaderFacts;
+  /** Shown between the document label and the Home Time Zone card. */
+  readonly notice?: ReactNode;
   readonly onChooseZone?: (() => void) | undefined;
   readonly palette: DaylightSaviourPalette;
 }
 
 export default function CivilTimeReportHeader({
   facts,
+  notice,
   onChooseZone,
   palette,
 }: CivilTimeReportHeaderProps) {
@@ -34,6 +37,8 @@ export default function CivilTimeReportHeader({
           {copy.civilTimeReport.document.label}
         </Text>
       </View>
+
+      {notice}
 
       <Pressable
         accessibilityHint={

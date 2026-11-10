@@ -6,6 +6,8 @@ export const daylightSaviourPalettes = {
     decisionNoticeBorder: '#AAB2BC',
     // The app icon's warm gold at 35% on the record surface.
     decisionNoticeGlow: '#FFE4B9',
+    // The heading already reads on the light glow, so it keeps its colour.
+    decisionNoticeGlowText: '#5B6678',
     decisionNoticeText: '#5B6678',
     ink: '#101B2D',
     noEventMark: '#5B6678',
@@ -22,9 +24,11 @@ export const daylightSaviourPalettes = {
     background: '#081426',
     controlBoundary: '#6F809B',
     decisionNoticeBorder: '#FF6A4D',
-    // Signal coral at 15% on the record surface. From 20% the coral heading
-    // drops below 4.5:1.
-    decisionNoticeGlow: '#342A39',
+    // Signal coral at 45% on the record surface. At 15% the glow was too
+    // faint to see on a phone (PUB-283), and coral text drops below 4.5:1
+    // from 20%, so the heading crossfades to ink with the glow.
+    decisionNoticeGlow: '#7C4140',
+    decisionNoticeGlowText: '#F6F0DE',
     decisionNoticeText: '#FF6A4D',
     ink: '#F6F0DE',
     noEventMark: '#FF6A4D',

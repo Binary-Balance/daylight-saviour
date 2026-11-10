@@ -118,9 +118,24 @@ function Notice({
         ]}
         testID="reminder-notice-glow"
       />
-      <Text style={[styles.heading, { color: palette.decisionNoticeText }]}>
-        {content.heading}
-      </Text>
+      <View>
+        <Text style={[styles.heading, { color: palette.decisionNoticeText }]}>
+          {content.heading}
+        </Text>
+        {/* Fades with the glow, so the heading keeps its contrast on it. */}
+        <Animated.Text
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={[
+            styles.heading,
+            StyleSheet.absoluteFill,
+            { color: palette.decisionNoticeGlowText, opacity: glowOpacity },
+          ]}
+          testID="reminder-notice-glow-heading"
+        >
+          {content.heading}
+        </Animated.Text>
+      </View>
       <Text style={[styles.body, { color: palette.ink }]}>{content.body}</Text>
     </View>
   );

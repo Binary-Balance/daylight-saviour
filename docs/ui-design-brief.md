@@ -11,11 +11,12 @@ Daylight Saviour should feel like civil-time paperwork designed by someone with 
 Use one safe-area-aware column on an 8-point grid with roughly 20–24 logical pixels of horizontal margin.
 
 1. **Utility header:** small `DAYLIGHT SAVIOUR` document label, subtle rule, and accessible settings control.
-2. **Home Time Zone:** full-width control showing friendly geography first and IANA identifier as metadata.
-3. **Status hero:** large Home Time Zone clock without seconds, literal Daylight Saving Status, restrained fictional stamp, then one humorous line.
-4. **Change Event section:** unambiguous date, local-time transformation, direction word and arrow, UTC offset equation, explicit offset amount, countdown, and Home Time Zone qualifier.
-5. **Change Reminders:** compact state card showing both timing preferences or contextual opt-in action.
-6. **Freshness footer:** plain verified/checking/stale state opening pack details and manual retry.
+2. **Reminder notice:** only after a Change Reminder tap opens the app. It glows once, unless reduced motion is on.
+3. **Home Time Zone:** full-width control showing friendly geography first and IANA identifier as metadata.
+4. **Status hero:** large Home Time Zone clock without seconds, literal Daylight Saving Status, restrained fictional stamp, then one humorous line.
+5. **Change Event section:** unambiguous date, local-time transformation, direction word and arrow, UTC offset equation, explicit offset amount, countdown, and Home Time Zone qualifier.
+6. **Change Reminders:** compact state card showing both timing preferences or contextual opt-in action.
+7. **Freshness footer:** plain verified/checking/stale state opening pack details and manual retry.
 
 No-event zones receive an intentional Change Event record stating that no event is scheduled within current verified data. Never show an empty countdown. Expired data replaces affected claims with a prominent refresh-required state rather than claiming no event exists.
 
@@ -106,7 +107,7 @@ Use two stages. In-app sheet first explains both default timings, Home Time Zone
 
 ## Accessibility
 
-Focus order follows zone, status, event, countdown, reminders, freshness, settings. Expose status and event as headings. Hide decorative rules, stamps, echoes, and duplicate digits from accessibility tree. Clock updates never create live-region chatter. Layouts stack at large text sizes and avoid fixed text heights. Direction, amount, reminder state, errors, and actions remain textual; humour never carries required meaning.
+Focus order follows any reminder notice, then zone, status, event, countdown, reminders, freshness, settings. Expose status and event as headings. Hide decorative rules, stamps, echoes, and duplicate digits from accessibility tree. Clock updates never create live-region chatter. Layouts stack at large text sizes and avoid fixed text heights. Direction, amount, reminder state, errors, and actions remain textual; humour never carries required meaning.
 
 ## Settled Design Decisions
 

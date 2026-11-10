@@ -155,14 +155,15 @@ export default function StatusScreen({
             friendlyZoneLabel: viewModel.friendlyZoneLabel,
             zoneId: viewModel.zoneId,
           }}
+          notice={
+            <ChangeReminderNotificationContext
+              context={viewModel.notificationContext}
+              palette={palette}
+              reducedMotion={reducedMotion}
+            />
+          }
           onChooseZone={onChooseZone}
           palette={palette}
-        />
-
-        <ChangeReminderNotificationContext
-          context={viewModel.notificationContext}
-          palette={palette}
-          reducedMotion={reducedMotion}
         />
 
         {viewModel.availability === 'ready' ? (

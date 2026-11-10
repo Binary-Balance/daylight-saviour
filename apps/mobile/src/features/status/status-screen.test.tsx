@@ -298,7 +298,7 @@ describe('StatusScreen facade', () => {
     expect(screen.queryByText(dormantCopy)).toBeNull();
   });
 
-  it('puts a reminder notice above the status hero and scrolls it into view', () => {
+  it('puts a reminder notice above the Home Time Zone and scrolls it into view', () => {
     const scrollTo = jest.spyOn(ReactNative.ScrollView.prototype, 'scrollTo');
     const tap = {
       changeDirection: 'forward' as const,
@@ -328,13 +328,9 @@ describe('StatusScreen facade', () => {
     const notice = order.findIndex((label) =>
       label.startsWith('CHANGE REMINDER OPENED.'),
     );
-    expect(notice).toBeGreaterThan(
-      order.findIndex((label) => label.startsWith('Home Time Zone,')),
-    );
+    expect(notice).toBeGreaterThanOrEqual(0);
     expect(notice).toBeLessThan(
-      order.findIndex((label) =>
-        label.startsWith('Home Time Zone current time,'),
-      ),
+      order.findIndex((label) => label.startsWith('Home Time Zone,')),
     );
   });
 
