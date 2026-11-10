@@ -91,7 +91,7 @@ it('glows once as it appears and settles within two seconds', () => {
   ).toBe(true);
 });
 
-it('fades the heading to its glow colour with the glow', () => {
+it('starts the heading in its glow colour and fades it with the glow', () => {
   render(<Notice appearance="dark" reducedMotion={false} />);
 
   const heading = screen.getByTestId('reminder-notice-glow-heading', {
