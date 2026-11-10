@@ -25,8 +25,8 @@ export const daylightSaviourPalettes = {
     controlBoundary: '#6F809B',
     decisionNoticeBorder: '#FF6A4D',
     // Signal coral at 45% on the record surface. At 15% the glow was too
-    // faint to see on a phone (PUB-283), but coral text drops below 4.5:1 on
-    // anything stronger, so the heading crossfades to ink with the glow.
+    // faint to see on a phone (PUB-283), and coral text drops below 4.5:1
+    // from 20%, so the heading crossfades to ink with the glow.
     decisionNoticeGlow: '#7C4140',
     decisionNoticeGlowText: '#F6F0DE',
     decisionNoticeText: '#FF6A4D',
