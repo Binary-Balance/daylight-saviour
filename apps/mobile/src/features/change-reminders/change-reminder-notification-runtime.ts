@@ -90,12 +90,59 @@ function reviewedTap(
   return null;
 }
 
+const reminderFields = [
+  'changeDirection',
+  'changeEventAt',
+  'homeTimeZone',
+  'reminderKind',
+  'reminderTiming',
+] as const satisfies readonly (keyof ChangeReminderNotification)[];
+
+function dataRecord(
+  content: ChangeReminderNotificationContent,
+): Readonly<Record<string, unknown>> {
+  return typeof content.data === 'object' && content.data !== null
+    ? (content.data as Record<string, unknown>)
+    : {};
+}
+
+// An Android tray tap reaches the app through its launch intent. Firebase
+// keeps the notification's title and body out of that intent and adds its
+// own keys beside the reminder fields (PUB-246), so the copy cannot be
+// checked. Only a tap that carries no copy at all is judged on the reminder
+// fields alone.
+function trayTap(
+  content: ChangeReminderNotificationContent,
+): ReviewedNotificationTap | null {
+  if (content.title != null || content.body != null) return null;
+  const data = dataRecord(content);
+  return parseChangeReminderTap(
+    Object.fromEntries(reminderFields.map((field) => [field, data[field]])),
+  );
+}
+
+// Release builds offer no other view of what a tap delivers (PUB-246). Key
+// names and whether copy arrived are enough to tell; values stay off the
+// log. Remove this once PUB-246 records the device evidence.
+function logTapShape(content: ChangeReminderNotificationContent) {
+  console.info(
+    `Change Reminder tap: ${JSON.stringify({
+      body: content.body != null,
+      dataKeys: Object.keys(dataRecord(content)).sort(),
+      title: content.title != null,
+    })}`,
+  );
+}
+
 export function createChangeReminderNotificationRuntime({
   notifications,
   onTap,
+  trayTapsLackCopy,
 }: {
   readonly notifications: ChangeReminderNotifications;
   readonly onTap: (tap: ReviewedNotificationTap) => void;
+  /** True on Android, where a tap from the tray arrives without its copy. */
+  readonly trayTapsLackCopy: boolean;
 }) {
   const failClosed = {
     shouldPlaySound: false,
@@ -121,7 +168,9 @@ export function createChangeReminderNotificationRuntime({
     if (response.actionIdentifier !== notifications.defaultActionIdentifier)
       return;
     const content = response.notification.request.content;
-    const tap = reviewedTap(content);
+    logTapShape(content);
+    const tap =
+      reviewedTap(content) ?? (trayTapsLackCopy ? trayTap(content) : null);
     if (tap !== null) {
       onTap(tap);
     }

@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react-native';
-import { AppState, type AppStateStatus } from 'react-native';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import { useProductionChangeReminderTap } from './change-reminder-notifications.native';
@@ -80,6 +80,7 @@ describe('useProductionChangeReminderTap', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(console, 'info').mockImplementation(() => undefined);
     notifications.addNotificationResponseReceivedListener.mockImplementation(
       (listener) => {
         respond = listener;
@@ -103,6 +104,7 @@ describe('useProductionChangeReminderTap', () => {
       .mocked(AppState.addEventListener)
       .mockImplementation(() => ({ remove: jest.fn() }));
     AppState.currentState = originalAppState;
+    jest.restoreAllMocks();
   });
 
   async function mount() {
@@ -156,6 +158,35 @@ describe('useProductionChangeReminderTap', () => {
 
     expect(result.current.tap).toEqual(expectedTap);
   });
+
+  it.each([
+    ['android', expectedTap],
+    ['ios', null],
+  ] as const)(
+    'on %s, judges a tap without copy on its reminder fields alone',
+    async (os, expected) => {
+      jest.replaceProperty(Platform, 'OS', os);
+      const { result } = await mount();
+      const tray = reminderResponse();
+
+      act(() =>
+        respond({
+          ...tray,
+          notification: {
+            request: {
+              content: {
+                body: null,
+                data: { ...reminderPayload, 'google.message_id': '0:1' },
+                title: null,
+              },
+            },
+          },
+        }),
+      );
+
+      expect(result.current.tap).toEqual(expected);
+    },
+  );
 
   it('ignores a response to anything but the default notification action', async () => {
     const { result } = await mount();
