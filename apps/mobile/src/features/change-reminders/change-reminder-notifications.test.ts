@@ -198,6 +198,9 @@ describe('Change Reminder notification runtime', () => {
     const test = harness({ coldResponse: response() });
     await test.runtime.start();
 
+    expect(console.info).toHaveBeenCalledWith(
+      'Change Reminder tap: {"body":true,"dataKeys":["changeDirection","changeEventAt","homeTimeZone","reminderKind","reminderTiming"],"title":true}',
+    );
     expect(
       test.notifications.clearLastNotificationResponseAsync,
     ).toHaveBeenCalledTimes(1);
@@ -253,6 +256,7 @@ describe('Change Reminder notification runtime', () => {
       }),
     );
     android.emitResponse(response({ ...trayContent, data: null }));
+    android.emitResponse(response({ ...trayContent, data: undefined }));
     android.emitResponse(
       response({ ...trayContent, title: 'Change Reminder' }),
     );
