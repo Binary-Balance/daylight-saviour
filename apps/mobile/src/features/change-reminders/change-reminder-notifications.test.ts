@@ -32,19 +32,21 @@ function response(overrides: Partial<ChangeReminderNotificationContent> = {}) {
   };
 }
 
-// What an Android tray tap delivers: Firebase keeps the title and body out of
-// the launch intent and adds its own keys beside the reminder fields.
+// What an Android tray tap delivers, with the key set a physical phone logged
+// (PUB-246): Firebase keeps the title and body out of the launch intent and
+// adds its own keys beside the reminder fields. Values are made up.
 const trayContent: ChangeReminderNotificationContent = {
   body: null,
   data: {
     ...payload,
     collapse_key: 'com.example.app',
     from: '123456789',
+    'gcm.n.analytics_data': {},
     'google.delivered_priority': 'high',
     'google.message_id': '0:1762000000000000%abc',
     'google.original_priority': 'high',
+    'google.product_id': 123,
     'google.sent_time': 1762000000000,
-    'google.ttl': 2419200,
   },
   title: null,
 };
@@ -98,14 +100,6 @@ function harness({
 }
 
 describe('Change Reminder notification runtime', () => {
-  beforeEach(() => {
-    jest.spyOn(console, 'info').mockImplementation(() => undefined);
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
   it('binds iOS to the reviewed native notification hook', () => {
     expect(useIosChangeReminderTap).toBe(useNativeChangeReminderTap);
   });
@@ -198,9 +192,6 @@ describe('Change Reminder notification runtime', () => {
     const test = harness({ coldResponse: response() });
     await test.runtime.start();
 
-    expect(console.info).toHaveBeenCalledWith(
-      'Change Reminder tap: {"body":true,"dataKeys":["changeDirection","changeEventAt","homeTimeZone","reminderKind","reminderTiming"],"title":true}',
-    );
     expect(
       test.notifications.clearLastNotificationResponseAsync,
     ).toHaveBeenCalledTimes(1);
@@ -234,9 +225,6 @@ describe('Change Reminder notification runtime', () => {
       },
       expect.objectContaining({ reminderTiming: 'one-week' }),
     ]);
-    expect(console.info).toHaveBeenCalledWith(
-      'Change Reminder tap: {"body":false,"dataKeys":["changeDirection","changeEventAt","collapse_key","from","google.delivered_priority","google.message_id","google.original_priority","google.sent_time","google.ttl","homeTimeZone","reminderKind","reminderTiming"],"title":false}',
-    );
   });
 
   it('ignores a tap without copy where taps carry it, or with bad fields', async () => {

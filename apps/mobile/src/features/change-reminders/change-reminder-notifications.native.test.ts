@@ -80,7 +80,6 @@ describe('useProductionChangeReminderTap', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.spyOn(console, 'info').mockImplementation(() => undefined);
     notifications.addNotificationResponseReceivedListener.mockImplementation(
       (listener) => {
         respond = listener;
@@ -104,6 +103,7 @@ describe('useProductionChangeReminderTap', () => {
       .mocked(AppState.addEventListener)
       .mockImplementation(() => ({ remove: jest.fn() }));
     AppState.currentState = originalAppState;
+    // Puts back Platform.OS after a test replaces it.
     jest.restoreAllMocks();
   });
 
