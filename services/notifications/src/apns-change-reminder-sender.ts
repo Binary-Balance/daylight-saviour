@@ -302,7 +302,6 @@ function assertReviewedFacts(
 }
 
 function expirationHeader(lifetime: ChangeReminderLifetime, now: Date) {
-  if (lifetime.kind === 'immediate') return '0';
   // Whole seconds, rounded down so APNs never holds it past its expiry. Zero
   // would mean immediate delivery, not an expired message.
   const expiresAtSeconds = Math.floor(lifetime.expiresAt.getTime() / 1000);

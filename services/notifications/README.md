@@ -82,14 +82,14 @@ guarantee when a device displays an accepted notification. See
 [FCM message lifespan](https://firebase.google.com/docs/cloud-messaging/customize-messages/setting-message-lifespan)
 and [APNs requests](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns).
 
-The FCM sender requires an explicit message lifetime. A controlled smoke send
-is `immediate` and sets a zero TTL, so FCM delivers it at once or drops it. A
-queued send passes its expiry, and the sender sets the TTL from the whole
-seconds left just before the request. It rejects an invalid expiry or one more
-than FCM's four-week maximum away. If the expiry has passed by the time of the
-request, it sends nothing and reports the send as expired. The APNs sender
-takes the same lifetime: `immediate` sets `apns-expiration: 0`, and a queued
-send sets the expiry in whole seconds, rounded down.
+The FCM sender requires an explicit message expiry. A queued send expires at
+its delivery deadline, and a controlled smoke send 15 minutes after it is sent,
+so the provider holds and retries both but never delivers a test notification
+long after the test. The sender sets the TTL from the whole seconds left just
+before the request. It rejects an invalid expiry or one more than FCM's
+four-week maximum away. If the expiry has passed by the time of the request, it
+sends nothing and reports the send as expired. The APNs sender takes the same
+expiry and sets `apns-expiration` in whole seconds, rounded down.
 
 The FCM transport bounds each request, including its response body, to 10
 seconds, and stops waiting even if `fetch` ignores the abort. A

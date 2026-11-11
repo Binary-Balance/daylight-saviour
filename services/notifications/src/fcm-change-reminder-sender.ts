@@ -51,13 +51,13 @@ export interface FcmAccessTokenProvider {
 
 /**
  * FCM keeps an undelivered message for four weeks unless the request sets a
- * TTL, so every send states its lifetime. `immediate` sends a zero TTL: FCM
- * delivers at once or drops the message. `until` lets FCM hold the message
- * no later than `expiresAt`. The APNs sender gives both the same meaning.
+ * TTL, so every send states its lifetime. `until` lets FCM hold the message
+ * no later than `expiresAt`. The APNs sender gives it the same meaning.
  */
-export type ChangeReminderLifetime =
-  | { readonly kind: 'immediate' }
-  | { readonly kind: 'until'; readonly expiresAt: Date };
+export type ChangeReminderLifetime = {
+  readonly kind: 'until';
+  readonly expiresAt: Date;
+};
 
 /**
  * Bounds a scheduled send. A controlled smoke send has no delivery plan to
@@ -326,7 +326,6 @@ function assertReviewedFacts(
 }
 
 function assertLifetime(lifetime: ChangeReminderLifetime, now: Date) {
-  if (lifetime.kind === 'immediate') return;
   if (lifetime.kind !== 'until' || !(lifetime.expiresAt instanceof Date))
     throw new Error('Invalid FCM message lifetime');
   const remainingMs = lifetime.expiresAt.getTime() - now.getTime();
@@ -340,7 +339,6 @@ function messageTtl(
   lifetime: ChangeReminderLifetime,
   now: Date,
 ): `${number}s` | undefined {
-  if (lifetime.kind === 'immediate') return '0s';
   const remainingMs = lifetime.expiresAt.getTime() - now.getTime();
   // Round down so FCM never holds the message past its expiry.
   return remainingMs > 0 ? `${Math.floor(remainingMs / 1000)}s` : undefined;

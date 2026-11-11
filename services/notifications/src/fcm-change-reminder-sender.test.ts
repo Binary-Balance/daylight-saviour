@@ -31,11 +31,12 @@ const facts = {
   timing: 'one-week' as const,
 };
 
-const immediate = { kind: 'immediate' } as const;
-
 function until(expiresAt: Date) {
   return { kind: 'until', expiresAt } as const;
 }
+
+// The lifetime of a controlled test send.
+const lifetime = until(new Date(now.getTime() + 15 * 60 * 1000));
 
 const unregisteredDetails = [
   {
@@ -137,7 +138,7 @@ describe('FCM Change Reminder sender', () => {
       ),
     );
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, { kind: 'accepted' });
     assert.deepEqual(test.requests, [
@@ -154,7 +155,7 @@ describe('FCM Change Reminder sender', () => {
                 sound: 'default',
               },
               priority: 'HIGH',
-              ttl: '0s',
+              ttl: '900s',
             },
             data: {
               changeDirection: 'forward',
@@ -317,7 +318,7 @@ describe('FCM Change Reminder sender', () => {
     });
   }
 
-  for (const [name, lifetime] of [
+  for (const [name, invalidLifetime] of [
     ['an invalid date', until(new Date(Number.NaN))],
     [
       'an expiry beyond the four-week FCM maximum',
@@ -327,6 +328,7 @@ describe('FCM Change Reminder sender', () => {
       'a non-date expiry',
       { kind: 'until', expiresAt: '2026-07-27T00:00:00.000Z' },
     ],
+    ['the removed immediate lifetime', { kind: 'immediate' }],
     [
       'an unknown lifetime kind',
       { kind: 'provider-default', expiresAt: new Date(now.getTime() + 1_000) },
@@ -348,7 +350,7 @@ describe('FCM Change Reminder sender', () => {
         test.instance.send(
           subscription,
           facts,
-          lifetime as unknown as ChangeReminderLifetime,
+          invalidLifetime as unknown as ChangeReminderLifetime,
         ),
         { message: 'Invalid FCM message lifetime' },
       );
@@ -538,7 +540,7 @@ describe('FCM Change Reminder sender', () => {
         test.instance.send(
           invalidSubscription as never,
           invalidFacts as never,
-          immediate,
+          lifetime,
         ),
         { message },
       );
@@ -553,7 +555,7 @@ describe('FCM Change Reminder sender', () => {
       },
     });
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, { kind: 'uncertain' });
     assert.deepEqual(test.removalRequests, []);
@@ -563,7 +565,7 @@ describe('FCM Change Reminder sender', () => {
   it('classifies a transient provider rejection without removing a subscription', async () => {
     const test = sender(response(503, fcmError(503, 'UNAVAILABLE')));
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, { kind: 'transient-rejection' });
     assert.deepEqual(test.removalRequests, []);
@@ -575,7 +577,7 @@ describe('FCM Change Reminder sender', () => {
       response(404, fcmError(404, 'NOT_FOUND', unregisteredDetails)),
     );
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, {
       kind: 'permanent-invalid-token',
@@ -590,7 +592,7 @@ describe('FCM Change Reminder sender', () => {
   it('keeps a subscription when a provider response is malformed', async () => {
     const test = sender(response(200, sensitiveProviderResponse));
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, { kind: 'malformed-response' });
     assert.deepEqual(test.removalRequests, []);
@@ -600,7 +602,7 @@ describe('FCM Change Reminder sender', () => {
   it('rejects unknown provider status values as malformed', async () => {
     const test = sender(response(400, fcmError(400, 'NOT_A_GOOGLE_STATUS')));
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, { kind: 'malformed-response' });
     assert.deepEqual(test.removalRequests, []);
@@ -616,7 +618,7 @@ describe('FCM Change Reminder sender', () => {
         response(status, fcmError(status, providerStatus, unregisteredDetails)),
       );
 
-      const result = await test.instance.send(subscription, facts, immediate);
+      const result = await test.instance.send(subscription, facts, lifetime);
 
       assert.deepEqual(result, { kind: 'malformed-response' });
       assert.deepEqual(test.removalRequests, []);
@@ -627,7 +629,7 @@ describe('FCM Change Reminder sender', () => {
   it('distinguishes a permanent non-token provider rejection', async () => {
     const test = sender(response(400, fcmError(400, 'INVALID_ARGUMENT')));
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, { kind: 'permanent-rejection' });
     assert.deepEqual(test.removalRequests, []);
@@ -642,7 +644,7 @@ describe('FCM Change Reminder sender', () => {
     ] as const) {
       const test = sender(response(status, fcmError(status, providerStatus)));
 
-      const result = await test.instance.send(subscription, facts, immediate);
+      const result = await test.instance.send(subscription, facts, lifetime);
 
       assert.deepEqual(result, { kind: 'transient-rejection' });
       assert.deepEqual(test.removalRequests, []);
@@ -659,7 +661,7 @@ describe('FCM Change Reminder sender', () => {
     ] as const) {
       const test = sender(response(status, fcmError(status, providerStatus)));
 
-      const result = await test.instance.send(subscription, facts, immediate);
+      const result = await test.instance.send(subscription, facts, lifetime);
 
       assert.deepEqual(result, { kind: 'permanent-rejection' });
       assert.deepEqual(test.removalRequests, []);
@@ -674,7 +676,7 @@ describe('FCM Change Reminder sender', () => {
       },
     });
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, { kind: 'transient-rejection' });
     assert.deepEqual(test.requests, []);
@@ -702,7 +704,7 @@ describe('FCM Change Reminder sender', () => {
       },
     );
 
-    assert.deepEqual(await test.instance.send(subscription, facts, immediate), {
+    assert.deepEqual(await test.instance.send(subscription, facts, lifetime), {
       kind: 'transient-rejection',
     });
     assert.deepEqual(test.requests, []);
@@ -722,7 +724,7 @@ describe('FCM Change Reminder sender', () => {
       },
     );
 
-    assert.deepEqual(await test.instance.send(subscription, facts, immediate), {
+    assert.deepEqual(await test.instance.send(subscription, facts, lifetime), {
       kind: 'accepted',
     });
     assert.equal(test.requests.length, 1);
@@ -733,7 +735,7 @@ describe('FCM Change Reminder sender', () => {
       response(404, fcmError(404, 'NOT_FOUND', unregisteredDetails)),
     );
 
-    await test.instance.send(subscription, facts, immediate);
+    await test.instance.send(subscription, facts, lifetime);
 
     const serialisedLogs = JSON.stringify(test.logs);
     assert.doesNotMatch(serialisedLogs, new RegExp(fullDeviceToken));
@@ -752,7 +754,7 @@ describe('FCM Change Reminder sender', () => {
       },
     );
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, {
       kind: 'permanent-invalid-token',
@@ -783,7 +785,7 @@ describe('FCM Change Reminder sender', () => {
       },
     );
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, {
       kind: 'permanent-invalid-token',
@@ -799,7 +801,7 @@ describe('FCM Change Reminder sender', () => {
       },
     );
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, {
       kind: 'permanent-invalid-token',
@@ -840,7 +842,7 @@ describe('FCM Change Reminder sender', () => {
     it(`reports a provider error with ${name} as malformed`, async () => {
       const test = sender(response(503, body));
 
-      const result = await test.instance.send(subscription, facts, immediate);
+      const result = await test.instance.send(subscription, facts, lifetime);
 
       assert.deepEqual(result, { kind: 'malformed-response' });
       assert.deepEqual(test.removalRequests, []);
@@ -851,7 +853,7 @@ describe('FCM Change Reminder sender', () => {
   it('reports a response body that is not text as malformed', async () => {
     const test = sender(response(503, undefined as never));
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, { kind: 'malformed-response' });
     assert.deepEqual(test.logs, ['fcm-change-reminder-malformed-response']);
@@ -867,7 +869,7 @@ describe('FCM Change Reminder sender', () => {
     it(`classifies a provider error with ${name}`, async () => {
       const test = sender(response(503, body));
 
-      const result = await test.instance.send(subscription, facts, immediate);
+      const result = await test.instance.send(subscription, facts, lifetime);
 
       assert.deepEqual(result, { kind: 'transient-rejection' });
     });
@@ -877,13 +879,13 @@ describe('FCM Change Reminder sender', () => {
     // JSON allows trailing whitespace, so padding keeps the body valid.
     const atLimit = sender(response(200, acceptedBody.padEnd(64 * 1024)));
     assert.deepEqual(
-      await atLimit.instance.send(subscription, facts, immediate),
+      await atLimit.instance.send(subscription, facts, lifetime),
       { kind: 'accepted' },
     );
 
     const overLimit = sender(response(200, acceptedBody.padEnd(64 * 1024 + 1)));
     assert.deepEqual(
-      await overLimit.instance.send(subscription, facts, immediate),
+      await overLimit.instance.send(subscription, facts, lifetime),
       { kind: 'malformed-response' },
     );
   });
@@ -913,7 +915,7 @@ describe('FCM Change Reminder sender', () => {
     it(`does not take ${name} in the details for an unregistered token`, async () => {
       const test = sender(response(404, fcmError(404, 'NOT_FOUND', details)));
 
-      const result = await test.instance.send(subscription, facts, immediate);
+      const result = await test.instance.send(subscription, facts, lifetime);
 
       assert.deepEqual(result, { kind: 'permanent-rejection' });
       assert.deepEqual(test.removalRequests, []);
@@ -932,7 +934,7 @@ describe('FCM Change Reminder sender', () => {
       ),
     );
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, {
       kind: 'permanent-invalid-token',
@@ -951,7 +953,7 @@ describe('FCM Change Reminder sender', () => {
         response(status, fcmError(status, providerStatus, unregisteredDetails)),
       );
 
-      const result = await test.instance.send(subscription, facts, immediate);
+      const result = await test.instance.send(subscription, facts, lifetime);
 
       assert.deepEqual(result, { kind: 'malformed-response' });
       assert.deepEqual(test.removalRequests, []);
@@ -986,7 +988,7 @@ describe('FCM Change Reminder sender', () => {
         accessToken: async () => accessToken as never,
       });
 
-      const result = await test.instance.send(subscription, facts, immediate);
+      const result = await test.instance.send(subscription, facts, lifetime);
 
       assert.deepEqual(result, { kind: 'transient-rejection' });
       assert.deepEqual(test.requests, []);
@@ -1003,7 +1005,7 @@ describe('FCM Change Reminder sender', () => {
       }),
     });
 
-    const result = await test.instance.send(subscription, facts, immediate);
+    const result = await test.instance.send(subscription, facts, lifetime);
 
     assert.deepEqual(result, { kind: 'accepted' });
     assert.equal(test.requests[0]?.accessToken, value);
@@ -1222,14 +1224,14 @@ describe('FCM Change Reminder warning', () => {
   // The payload as it was sent before the warning existed. Comparing bytes,
   // not objects, also catches a change in key order.
   const unwarnedJson =
-    '{"message":{"android":{"notification":{"channel_id":"change-reminders","sound":"default"},"priority":"HIGH","ttl":"0s"},"data":{"changeDirection":"forward","changeEventAt":"2026-10-04T16:00:00.000Z","homeTimeZone":"Australia/Sydney","reminderKind":"change-reminder","reminderTiming":"one-week"},"notification":{"body":"Your Home Time Zone changes soon.","title":"Change Reminder"},"token":"fcm-token:with_valid.characters-123"}}';
+    '{"message":{"android":{"notification":{"channel_id":"change-reminders","sound":"default"},"priority":"HIGH","ttl":"900s"},"data":{"changeDirection":"forward","changeEventAt":"2026-10-04T16:00:00.000Z","homeTimeZone":"Australia/Sydney","reminderKind":"change-reminder","reminderTiming":"one-week"},"notification":{"body":"Your Home Time Zone changes soon.","title":"Change Reminder"},"token":"fcm-token:with_valid.characters-123"}}';
 
   async function sentPayload(
     reviewedFacts: ReviewedChangeReminderFacts,
     target: FcmChangeReminderSubscription = subscription,
   ) {
     const test = sender(response(200, acceptedBody));
-    await test.instance.send(target, reviewedFacts, immediate);
+    await test.instance.send(target, reviewedFacts, lifetime);
     return test.requests[0]?.payload;
   }
 
@@ -1254,7 +1256,7 @@ describe('FCM Change Reminder warning', () => {
             sound: 'default',
           },
           priority: 'HIGH',
-          ttl: '0s',
+          ttl: '900s',
         },
         data: {
           changeDirection: 'forward',
