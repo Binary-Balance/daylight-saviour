@@ -23,6 +23,7 @@ import {
 import {
   createFcmChangeReminderSender,
   createFetchFcmHttpTransport,
+  type ChangeReminderLifetime,
   type FcmChangeReminderSender,
   type FcmChangeReminderSubscription,
   type FcmSubscriptionRemover,
@@ -316,6 +317,19 @@ function apnsEnvironment(value: string): 'production' | 'sandbox' {
   throw new Error('Invalid APNs environment');
 }
 
+// A test notification must not arrive long after the test, but a zero
+// lifetime let providers silently drop sends that a real reminder, held and
+// retried until its deadline, would have survived. Fifteen minutes keeps the
+// retry path without a late surprise.
+const testSendLifetimeMs = 15 * 60 * 1000;
+
+function testSendLifetime(): ChangeReminderLifetime {
+  return {
+    kind: 'until',
+    expiresAt: new Date(Date.now() + testSendLifetimeMs),
+  };
+}
+
 async function sendToAndroid(
   runtime: ControlledReminderSmokeRuntime,
   target: FcmChangeReminderSubscription,
@@ -328,11 +342,7 @@ async function sendToAndroid(
   ) {
     return outcome(503, 'unavailable');
   }
-  // A smoke send proves delivery now. FCM must not hold it for an
-  // offline device and deliver it after the test.
-  const result = await runtime.sender.send(target, facts, {
-    kind: 'immediate',
-  });
+  const result = await runtime.sender.send(target, facts, testSendLifetime());
   return result.kind === 'accepted'
     ? outcome(202, 'accepted')
     : outcome(503, 'unavailable');
@@ -350,9 +360,11 @@ async function sendToIos(
   ) {
     return outcome(503, 'unavailable');
   }
-  const result = await runtime.apnsSender.send(target, facts, {
-    kind: 'immediate',
-  });
+  const result = await runtime.apnsSender.send(
+    target,
+    facts,
+    testSendLifetime(),
+  );
   if (result.kind === 'accepted') return outcome(202, 'accepted');
   // This fixed outcome is deliberately narrower than the sender result:
   // only APNs 410/Unregistered plus conditional removal proves the stale

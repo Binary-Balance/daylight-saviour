@@ -24,6 +24,11 @@ import type {
 } from './fcm-change-reminder-sender.ts';
 
 const installationId = 'a'.repeat(43);
+const sentAt = new Date('2026-07-26T00:00:00.000Z');
+const fifteenMinutesAfterSend = {
+  expiresAt: new Date('2026-07-26T00:15:00.000Z'),
+  kind: 'until',
+} as const;
 const deviceToken = 'fcm-token:with_valid.characters-123';
 const facts = {
   changeDirection: 'forward',
@@ -196,6 +201,7 @@ function runtime(
     readonly apnsSend?: (
       subscription: ApnsChangeReminderSubscription,
       facts: ReviewedChangeReminderFacts,
+      lifetime: ChangeReminderLifetime,
     ) => Promise<ApnsChangeReminderResult>;
     readonly runtimeEnabled?: boolean;
     readonly testSendEnabled?: boolean;
@@ -363,7 +369,8 @@ describe('controlled Change Reminder smoke handler', () => {
     });
   });
 
-  it('sends reviewed facts to the exact stored Android subscription', async () => {
+  it('sends reviewed facts to the exact stored Android subscription', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: sentAt });
     let actual:
       | {
           readonly facts: unknown;
@@ -392,7 +399,7 @@ describe('controlled Change Reminder smoke handler', () => {
         homeTimeZone: 'Australia/Sydney',
         timing: 'one-week',
       },
-      lifetime: { kind: 'immediate' },
+      lifetime: fifteenMinutesAfterSend,
       subscription: { deviceToken, installationId },
     });
   });
@@ -428,13 +435,14 @@ describe('controlled Change Reminder smoke handler', () => {
     assert.equal(sends, 2);
   });
 
-  it('routes a stored iOS subscription through the explicitly enabled APNs sender', async () => {
+  it('routes a stored iOS subscription through the explicitly enabled APNs sender', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: sentAt });
     let sent: unknown;
     const result = await createControlledReminderSmokeHandler(
       runtime({
         apnsRuntimeEnabled: true,
-        apnsSend: async (subscription) => {
-          sent = subscription;
+        apnsSend: async (subscription, _facts, lifetime) => {
+          sent = { lifetime, subscription };
           return { kind: 'accepted' };
         },
         getSubscription: async () => ({
@@ -446,7 +454,10 @@ describe('controlled Change Reminder smoke handler', () => {
     )(request(facts), context());
 
     assert.equal(result.status, 202);
-    assert.deepEqual(sent, { deviceToken: 'b'.repeat(64), installationId });
+    assert.deepEqual(sent, {
+      lifetime: fifteenMinutesAfterSend,
+      subscription: { deviceToken: 'b'.repeat(64), installationId },
+    });
   });
 
   it('reports only a removed APNs Unregistered token with a fixed outcome', async () => {
