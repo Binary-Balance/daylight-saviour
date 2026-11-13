@@ -113,7 +113,9 @@ afterEach(() => {
 
 it('shows nothing where no sleep setting exists', async () => {
   renderSection(null);
-  await screen.findByText(enabledBody);
+  // The file's first render takes about 2 s on a cold Jest cache, longer
+  // than findBy's default wait, while React Native's lazy modules compile.
+  await screen.findByText(enabledBody, {}, { timeout: 5_000 });
   expect(screen.queryByText(reminders.androidPause.heading)).toBeNull();
 });
 
