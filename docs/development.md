@@ -6,8 +6,8 @@
 | --------------------- | ----------------- |
 | Node.js               | 24.21.0           |
 | npm                   | 11.19.0           |
-| Expo                  | 57.0.32           |
-| Expo Router           | 57.0.30           |
+| Expo                  | 57.0.33           |
+| Expo Router           | 57.0.31           |
 | React                 | 19.2.3            |
 | React Native          | 0.86.3            |
 | TypeScript            | 6.0.3             |
@@ -52,7 +52,7 @@ copy, a new direct dependent or a changed severity fails the audit. So does an
 exception that no longer matches an advisory, so a patched release forces its
 removal.
 
-The shipped `expo-router` 57.0.30 → `query-string` 7.1.3 →
+The shipped `expo-router` 57.0.31 → `query-string` 7.1.3 →
 `decode-uri-component` 0.2.2 chain
 ([GHSA-vcc3-ghjq-m6fr](https://github.com/advisories/GHSA-vcc3-ghjq-m6fr),
 [GHSA-qr28-fpjm-wq7f](https://github.com/advisories/GHSA-qr28-fpjm-wq7f)) is
@@ -67,16 +67,10 @@ requires. Remove this exception when Router adopts a compatible patched parser.
 `expo-router` 58.0.28 no longer depends on `query-string`, so an Expo 58 upgrade
 would do this.
 
-Two more advisories have no compatible patched release. Each affects only
-build, test and lint tooling, and none of these packages appears in the exported
-web or Android bundle:
+One more advisory has no compatible patched release. It affects only build, test
+and lint tooling, and none of these packages appears in the exported web or
+Android bundle:
 
-- `glob` 13.0.6 ([GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)),
-  in a copy nested under `@expo/fingerprint`: a search can keep walking the file
-  system after its `AbortSignal` fires. Versions 14.0.2 and later are patched,
-  but `@expo/fingerprint` requires glob 13. It passes no signal, so the flaw
-  cannot trigger. The root copy is the patched 14.0.3, and the 7.2.3 copies
-  under Jest are outside this advisory.
 - `minimatch` 10.2.6 ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)),
   in copies nested under `@expo/fingerprint` and
   `@typescript-eslint/typescript-estree`: a crafted pattern can grow until
@@ -86,7 +80,7 @@ web or Android bundle:
   packages. The root 3.1.5 copy, used by ESLint and Jest, is outside this
   advisory.
 
-Remove each exception when its dependents accept a patched release.
+Remove the exception when its dependents accept a patched release.
 
 Portable signed-pack verification pins `@noble/ed25519` 3.1.0 and
 `@noble/hashes` 2.2.0 in `@daylight-saviour/contracts`. Both are MIT,
