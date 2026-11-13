@@ -7,8 +7,9 @@ interface PauseSettingDevice {
 
 // The App info switch that lets Android pause an unused app, as labelled in
 // AOSP Settings: Android 12 and 13 renamed it, and Android 15 renamed it again
-// when app archiving arrived. Samsung kept its own name until then: a Samsung
-// phone on Android 13 showed it, and Galaxy S25 owners report Android 15's.
+// when app archiving arrived. Samsung uses its own name before Android 15
+// (seen on Android 13; 12 and 14 assumed). Galaxy S25 owners report Android
+// 15's.
 function pauseSettingLabel({
   androidApiLevel,
   samsung,

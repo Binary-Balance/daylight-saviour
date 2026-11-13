@@ -221,7 +221,9 @@ const shownMessages = () =>
 it('asks about Samsung after Android, then keeps both lines in that order', async () => {
   const boundary = sleepAdapters({ samsung: true });
   renderSection(boundary);
-  await screen.findByText(reminders.androidPause.heading);
+  await screen.findByText(
+    reminders.androidPause.body({ androidApiLevel: 34, samsung: true }),
+  );
   expect(screen.queryByText(reminders.samsungSleep.heading)).toBeNull();
 
   fireEvent.press(button(reminders.appSleepNotNow));
