@@ -89,8 +89,13 @@ function SemanticEventMotion({
     return () => animation.stop();
   }, [echoOpacity, eventKey, opacity, recipe, travel]);
 
+  // TalkBack reads a plain wrapper view as one block. That drops the heading
+  // roles inside it, and any part scrolled out of view: at large text the
+  // countdown was never read. Leaving each wrapper out of the accessibility
+  // tree keeps every fact a separate stop.
   return (
     <View
+      importantForAccessibility="no"
       style={styles.motionFrame}
       testID={
         recipe === null ? 'motion-awaiting-preference' : `motion-${recipe.kind}`
@@ -113,6 +118,7 @@ function SemanticEventMotion({
         </Animated.Text>
       ) : null}
       <Animated.View
+        importantForAccessibility="no"
         testID="semantic-event-content"
         style={{
           opacity,
@@ -251,6 +257,7 @@ export default function ChangeEventSection({
   if (report.event === null) {
     return (
       <View
+        importantForAccessibility="no"
         style={[
           styles.noEventCard,
           {
@@ -292,6 +299,7 @@ export default function ChangeEventSection({
       reducedMotion={reducedMotion}
     >
       <View
+        importantForAccessibility="no"
         style={[styles.eventCard, { borderColor: palette.solarGoldStructure }]}
         testID={`${report.phase}-civil-time-report`}
       >
