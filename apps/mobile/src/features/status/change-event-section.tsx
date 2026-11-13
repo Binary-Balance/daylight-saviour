@@ -89,10 +89,12 @@ function SemanticEventMotion({
     return () => animation.stop();
   }, [echoOpacity, eventKey, opacity, recipe, travel]);
 
-  // TalkBack reads a plain wrapper view as one block. That drops the heading
-  // roles inside it, and any part scrolled out of view: at large text the
-  // countdown was never read. Leaving each wrapper out of the accessibility
-  // tree keeps every fact a separate stop.
+  // React Native keeps a wrapper as a real Android view when it is animated
+  // or has a testID or border. TalkBack read such a wrapper and its text as
+  // one block, which dropped the heading roles inside it and any part
+  // scrolled out of view: at large text the countdown was never read.
+  // Leaving each wrapper out of the accessibility tree keeps every fact a
+  // separate stop.
   return (
     <View
       importantForAccessibility="no"

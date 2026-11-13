@@ -73,7 +73,7 @@ describe('ChangeEventSection', () => {
     },
   );
 
-  // TalkBack reads a plain wrapper as one block, losing the headings inside it
+  // TalkBack read these wrappers as one block, losing the headings inside them
   // and any part scrolled out of view.
   it.each([
     [

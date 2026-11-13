@@ -171,7 +171,7 @@ export default function DaylightSavingStatusHero({
         {copy.civilTimeReport.daylightSavingStatusHeading}
       </Text>
       {/* Left out of the accessibility tree so TalkBack reads the status itself,
-          as a heading, rather than this wrapper as plain text. */}
+          as a heading, rather than this animated wrapper as plain text. */}
       <Animated.View
         accessibilityLiveRegion="none"
         importantForAccessibility="no"
