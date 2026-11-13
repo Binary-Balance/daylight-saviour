@@ -15,6 +15,7 @@ import DataFreshnessSection from './data-freshness-section';
 import DaylightSavingStatusHero from './daylight-saving-status-hero';
 import SettingsSheet from './settings-sheet';
 import ChangeReminderSection from '../change-reminders/change-reminder-section';
+import { productionAppSleepAdapters } from '../change-reminders/app-sleep-production-adapters';
 import { productionChangeReminderAdapters } from '../change-reminders/change-reminder-production-adapters';
 import { screenshotChangeReminderAdapters } from '../change-reminders/change-reminder-screenshot-adapters';
 import { changeReminderTestBuildEnabled } from '../change-reminders/change-reminder-test-build';
@@ -26,6 +27,10 @@ import type { ReviewedNotificationTap } from '../change-reminders/change-reminde
 const changeReminderAdapters = screenshotModeEnabled()
   ? screenshotChangeReminderAdapters
   : productionChangeReminderAdapters;
+// Screenshots leave out the sleep guidance, which depends on the device.
+const appSleepAdapters = screenshotModeEnabled()
+  ? null
+  : productionAppSleepAdapters;
 
 interface StatusScreenProps {
   readonly dataPackSnapshot: TimeZoneDataPackSnapshot;
@@ -184,6 +189,7 @@ export default function StatusScreen({
 
         <ChangeReminderSection
           adapters={changeReminderAdapters}
+          appSleepAdapters={appSleepAdapters}
           homeTimeZone={viewModel.zoneId}
           onPermissionDialog={onPermissionDialog}
           palette={palette}

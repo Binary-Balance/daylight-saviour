@@ -66,7 +66,7 @@ export function TimingControls({
   );
 }
 
-function ActionButton({
+export function ActionButton({
   hint,
   label,
   onPress,

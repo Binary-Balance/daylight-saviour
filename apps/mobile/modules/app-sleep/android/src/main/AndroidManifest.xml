@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Android 11+ hides other apps' activities unless declared here, so
+       Samsung's "Never sleeping apps" list would never be found. -->
+  <queries>
+    <intent>
+      <action android:name="com.samsung.android.sm.ACTION_OPEN_CHECKABLE_LISTACTIVITY" />
+    </intent>
+  </queries>
+</manifest>
