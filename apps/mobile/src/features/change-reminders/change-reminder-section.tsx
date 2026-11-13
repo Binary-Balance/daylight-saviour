@@ -304,61 +304,80 @@ function appSleepCopy(prompt: AppSleepPrompt, androidApiLevel: number) {
       };
 }
 
+function AppSleepPromptMessage({
+  guidance: { androidApiLevel, answer, openSetting },
+  palette,
+  prompt,
+}: {
+  readonly guidance: AppSleepGuidance;
+  readonly palette: DaylightSaviourPalette;
+  readonly prompt: AppSleepPrompt;
+}) {
+  const content = appSleepCopy(prompt, androidApiLevel);
+  return (
+    <>
+      <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
+        {content.heading}
+      </Text>
+      <Text style={[styles.body, { color: palette.ink }]}>{content.body}</Text>
+      <View style={styles.actions}>
+        <ActionButton
+          hint={content.openHint}
+          label={content.open}
+          onPress={() => {
+            answer(prompt);
+            openSetting(prompt);
+          }}
+          palette={palette}
+          primary
+        />
+        <ActionButton
+          label={reminders.appSleepNotNow}
+          onPress={() => answer(prompt)}
+          palette={palette}
+        />
+      </View>
+    </>
+  );
+}
+
 // Explains, once, a setting that can stop reminders arriving, then keeps a
-// one-line reminder of it in the card.
+// one-line reminder of it in the card. Lines come first, so the Android line
+// stays above a waiting Samsung prompt.
 function AppSleepMessages({
-  guidance: { androidApiLevel, answer, lines, openSetting, prompt },
+  guidance,
   palette,
 }: {
   readonly guidance: AppSleepGuidance;
   readonly palette: DaylightSaviourPalette;
 }) {
-  if (prompt !== undefined) {
-    const content = appSleepCopy(prompt, androidApiLevel);
-    return (
-      <>
-        <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
-          {content.heading}
-        </Text>
-        <Text style={[styles.body, { color: palette.ink }]}>
-          {content.body}
-        </Text>
-        <View style={styles.actions}>
-          <ActionButton
-            hint={content.openHint}
-            label={content.open}
-            onPress={() => {
-              answer(prompt);
-              openSetting(prompt);
-            }}
-            palette={palette}
-            primary
-          />
-          <ActionButton
-            label={reminders.appSleepNotNow}
-            onPress={() => answer(prompt)}
-            palette={palette}
-          />
-        </View>
-      </>
-    );
-  }
-  return lines.map((line) => {
-    const content = appSleepCopy(line, androidApiLevel);
-    return (
-      <View key={line} style={styles.line}>
-        <Text style={[styles.body, { color: palette.ink }]}>
-          {content.line}
-        </Text>
-        <ActionButton
-          hint={content.openHint}
-          label={content.open}
-          onPress={() => openSetting(line)}
+  return (
+    <>
+      {guidance.lines.map((line) => {
+        const content = appSleepCopy(line, guidance.androidApiLevel);
+        return (
+          <View key={line} style={styles.line}>
+            <Text style={[styles.body, { color: palette.ink }]}>
+              {content.line}
+            </Text>
+            <ActionButton
+              hint={content.openHint}
+              label={content.open}
+              onPress={() => guidance.openSetting(line)}
+              palette={palette}
+            />
+          </View>
+        );
+      })}
+      {guidance.prompt === undefined ? null : (
+        <AppSleepPromptMessage
+          guidance={guidance}
           palette={palette}
+          prompt={guidance.prompt}
         />
-      </View>
-    );
-  });
+      )}
+    </>
+  );
 }
 
 export default function ChangeReminderSection({

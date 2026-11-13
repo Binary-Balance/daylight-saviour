@@ -35,9 +35,9 @@ async function readFacts(adapters: AppSleepAdapters): Promise<AppSleepFacts> {
 
 export interface AppSleepGuidance {
   readonly androidApiLevel: number;
-  /** The prompt to show, until the user answers it. */
+  /** The next prompt to show, until the user answers it. */
   readonly prompt: AppSleepPrompt | undefined;
-  /** Reminder lines for answered prompts, shown once no prompt is waiting. */
+  /** Reminder lines for answered prompts. */
   readonly lines: readonly AppSleepPrompt[];
   readonly answer: (prompt: AppSleepPrompt) => void;
   readonly openSetting: (prompt: AppSleepPrompt) => void;
@@ -60,38 +60,26 @@ export function useAppSleepGuidance(
 
   useEffect(() => {
     if (adapters === null) return;
-    let active = true;
     const refresh = () => {
-      void readFacts(adapters).then(
-        (next) => {
-          if (active) setFacts(next);
-        },
-        () => undefined,
-      );
+      void readFacts(adapters).then(setFacts, () => undefined);
     };
     refresh();
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') refresh();
     });
-    return () => {
-      active = false;
-      subscription.remove();
-    };
+    return () => subscription.remove();
   }, [adapters]);
 
   if (adapters === null) return null;
+  const answered = new Set([...(facts?.answered ?? []), ...answeredNow]);
   const applicable = prompts.filter((prompt) => facts?.applicable.has(prompt));
-  const prompt = applicable.find(
-    (candidate) =>
-      !facts?.answered.has(candidate) && !answeredNow.has(candidate),
-  );
   return {
     androidApiLevel: adapters.androidApiLevel,
-    answer: (answered) => {
-      setAnsweredNow((previous) => new Set(previous).add(answered));
-      void adapters.answeredPrompts.save(answered).catch(() => undefined);
+    answer: (prompt) => {
+      setAnsweredNow((previous) => new Set(previous).add(prompt));
+      void adapters.answeredPrompts.save(prompt).catch(() => undefined);
     },
-    lines: prompt === undefined ? applicable : [],
+    lines: applicable.filter((prompt) => answered.has(prompt)),
     openSetting: (setting) => {
       void (
         setting === 'android-pause'
@@ -99,6 +87,6 @@ export function useAppSleepGuidance(
           : adapters.openNeverSleepingApps()
       ).catch(() => undefined);
     },
-    prompt,
+    prompt: applicable.find((prompt) => !answered.has(prompt)),
   };
 }

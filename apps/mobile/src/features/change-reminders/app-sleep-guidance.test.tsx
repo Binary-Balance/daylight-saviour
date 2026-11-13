@@ -192,6 +192,12 @@ it('waits until reminders are on', async () => {
   expect(screen.queryByText(reminders.samsungSleep.line)).toBeNull();
 });
 
+const messagesAbout = /Daylight Saviour/;
+const shownMessages = () =>
+  screen
+    .getAllByText(messagesAbout)
+    .map((message) => String(message.props.children));
+
 it('asks about Samsung after Android, then keeps both lines in that order', async () => {
   const boundary = sleepAdapters({ samsung: true });
   renderSection(boundary);
@@ -200,8 +206,9 @@ it('asks about Samsung after Android, then keeps both lines in that order', asyn
 
   fireEvent.press(button(reminders.appSleepNotNow));
 
-  expect(screen.getByText(reminders.samsungSleep.body)).toBeTruthy();
-  expect(screen.queryByText(androidLine)).toBeNull();
+  expect(shownMessages()).toEqual([androidLine, reminders.samsungSleep.body]);
+  expect(screen.queryByText(reminders.androidPause.heading)).toBeNull();
+  expect(screen.getByText(reminders.samsungSleep.heading)).toBeTruthy();
   expect(button(reminders.samsungSleep.open).props.accessibilityHint).toBe(
     reminders.accessibility.openNeverSleepingAppsHint,
   );
@@ -213,11 +220,8 @@ it('asks about Samsung after Android, then keeps both lines in that order', asyn
   );
   expect(boundary.openNeverSleepingApps).toHaveBeenCalledTimes(1);
   expect(boundary.openPauseSetting).not.toHaveBeenCalled();
-  const lines = screen.getAllByText(/Daylight Saviour/);
-  expect(lines.map((line) => line.props.children)).toEqual([
-    androidLine,
-    reminders.samsungSleep.line,
-  ]);
+  expect(shownMessages()).toEqual([androidLine, reminders.samsungSleep.line]);
+  expect(screen.queryByText(reminders.samsungSleep.heading)).toBeNull();
 });
 
 it('always keeps the Samsung line, since its setting cannot be read', async () => {
@@ -294,24 +298,26 @@ it('treats a failed pause check as nothing to say', async () => {
   expect(screen.queryByText(reminders.androidPause.heading)).toBeNull();
 });
 
-it('stops listening and ignores late answers after unmounting', async () => {
+it('still asks about Samsung when the pause check fails', async () => {
+  renderSection(
+    sleepAdapters({
+      canPauseApp: async () => Promise.reject(new Error('native')),
+      samsung: true,
+    }),
+  );
+  expect(await screen.findByText(reminders.samsungSleep.heading)).toBeTruthy();
+  expect(screen.queryByText(reminders.androidPause.heading)).toBeNull();
+});
+
+it('stops listening after unmounting', async () => {
   const remove = jest.fn();
   jest
     .spyOn(AppState, 'addEventListener')
     .mockImplementation(() => ({ remove }));
-  let finish: (canPause: boolean) => void = () => undefined;
-  const rendered = renderSection(
-    sleepAdapters({
-      canPauseApp: () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    }),
-  );
-  await screen.findByText(enabledBody);
+  const rendered = renderSection(sleepAdapters());
+  await screen.findByText(reminders.androidPause.heading);
 
   rendered.unmount();
-  await act(async () => finish(true));
 
   // One listener for the reminder session and one for the sleep guidance.
   expect(remove).toHaveBeenCalledTimes(2);

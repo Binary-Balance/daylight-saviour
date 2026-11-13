@@ -10,13 +10,17 @@ const mockAppSleep = {
   openNeverSleepingApps: jest.fn(async () => undefined),
   openPauseSetting: jest.fn(async () => undefined),
 };
-const mockRequireNativeModule = jest.fn((_name: string) => mockAppSleep);
+const mockRequireOptionalNativeModule = jest.fn(
+  (_name: string): typeof mockAppSleep | null => mockAppSleep,
+);
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
   default: { getItem: mockGetItem, setItem: mockSetItem },
 }));
-jest.mock('expo', () => ({ requireNativeModule: mockRequireNativeModule }));
+jest.mock('expo', () => ({
+  requireOptionalNativeModule: mockRequireOptionalNativeModule,
+}));
 
 // Jest runs as iOS, so load the Android file directly.
 function loadAdapters() {
@@ -39,7 +43,18 @@ it('binds the local AppSleep module and the Android version', () => {
       .mockReturnValue(35);
     expect(loadAdapters().androidApiLevel).toBe(35);
   });
-  expect(mockRequireNativeModule).toHaveBeenCalledWith('AppSleep');
+  expect(mockRequireOptionalNativeModule).toHaveBeenCalledWith('AppSleep');
+});
+
+it('offers no guidance from a binary built without the module', () => {
+  mockRequireOptionalNativeModule.mockReturnValueOnce(null);
+  jest.isolateModules(() => {
+    expect(
+      jest.requireActual<typeof ProductionAdapters>(
+        './app-sleep-production-adapters.android',
+      ).productionAppSleepAdapters,
+    ).toBeNull();
+  });
 });
 
 it('passes each check and setting through to the module', async () => {
