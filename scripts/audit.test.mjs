@@ -17,11 +17,11 @@ const advisory = (name, url, severity) => ({
 });
 
 const audit = () => ({
-  metadata: { vulnerabilities: { high: 3, moderate: 3 } },
+  metadata: { vulnerabilities: { high: 3, moderate: 2 } },
   vulnerabilities: {
     '@expo/fingerprint': {
       severity: 'moderate',
-      via: ['glob', 'minimatch'],
+      via: ['minimatch'],
       effects: [],
       nodes: ['node_modules/@expo/fingerprint'],
     },
@@ -50,19 +50,6 @@ const audit = () => ({
       effects: [],
       nodes: ['node_modules/expo-router'],
     },
-    glob: {
-      severity: 'moderate',
-      via: [
-        advisory(
-          'glob',
-          'https://github.com/advisories/GHSA-3g3m-2fjr-6pw4',
-          'moderate',
-        ),
-        'minimatch',
-      ],
-      effects: ['@expo/fingerprint'],
-      nodes: nodesOf('glob'),
-    },
     minimatch: {
       severity: 'moderate',
       via: [
@@ -72,7 +59,7 @@ const audit = () => ({
           'moderate',
         ),
       ],
-      effects: ['@expo/fingerprint', 'glob'],
+      effects: ['@expo/fingerprint'],
       nodes: nodesOf('minimatch').reverse(),
     },
   },
@@ -81,7 +68,7 @@ const audit = () => ({
 const lock = {
   packages: {
     'node_modules/expo-router': {
-      version: '57.0.30',
+      version: '57.0.31',
       dependencies: { 'query-string': '^7.1.3' },
     },
     'node_modules/query-string': {
@@ -147,7 +134,7 @@ test('rejects an audit edge missing its reciprocal effect', () => {
 
 test('rejects an audit effect missing its reciprocal reference', () => {
   const report = audit();
-  report.vulnerabilities.glob.effects = ['@expo/fingerprint', 'evil'];
+  report.vulnerabilities.minimatch.effects = ['@expo/fingerprint', 'evil'];
   assert.throws(
     () => validateAudit(report, lock),
     /unreciprocated npm audit effects/i,
@@ -165,7 +152,7 @@ test('rejects a moderate-or-higher record without an advisory chain', () => {
 
 test('rejects a vulnerability record without a valid severity', () => {
   const report = audit();
-  report.vulnerabilities.evil = { severity: 'urgent', via: ['glob'] };
+  report.vulnerabilities.evil = { severity: 'urgent', via: ['minimatch'] };
   assert.throws(
     () => validateAudit(report, lock),
     /invalid npm audit vulnerabilities/i,
@@ -174,7 +161,7 @@ test('rejects a vulnerability record without a valid severity', () => {
 
 test('rejects an advisory without a valid severity', () => {
   const report = audit();
-  report.vulnerabilities.glob.via.push({
+  report.vulnerabilities.minimatch.via.push({
     name: 'other',
     dependency: 'other',
     url: 'https://example.test/other',
@@ -187,10 +174,10 @@ test('rejects an advisory without a valid severity', () => {
 
 test('requires every temporary exception to still apply', () => {
   const report = audit();
-  report.vulnerabilities.glob.via.shift();
+  report.vulnerabilities.minimatch.via.shift();
   assert.throws(
     () => validateAudit(report, lock),
-    /no longer apply: glob; remove them/i,
+    /no longer apply: minimatch; remove them/i,
   );
 });
 
@@ -205,16 +192,16 @@ test('requires each exception for a package with two advisories', () => {
 
 test('rejects an unlisted advisory on a package with an exception', () => {
   const report = audit();
-  report.vulnerabilities.glob.via.push(
-    advisory('glob', 'https://example.com/other', 'moderate'),
+  report.vulnerabilities.minimatch.via.push(
+    advisory('minimatch', 'https://example.com/other', 'moderate'),
   );
   assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
 });
 
 test('rejects an excepted advisory whose severity changed', () => {
   const report = audit();
-  report.vulnerabilities.glob.severity = 'critical';
-  report.vulnerabilities.glob.via[0].severity = 'critical';
+  report.vulnerabilities.minimatch.severity = 'critical';
+  report.vulnerabilities.minimatch.via[0].severity = 'critical';
   assert.throws(() => validateAudit(report, lock), /unexpected advisories/i);
 });
 
@@ -255,7 +242,7 @@ test('rejects an excepted package with a new direct dependent', () => {
       () =>
         validateAudit(
           audit(),
-          withPackage('node_modules/other', { [field]: { glob: '' } }),
+          withPackage('node_modules/other', { [field]: { minimatch: '' } }),
         ),
       /unexpected advisories/i,
       field,
@@ -274,7 +261,7 @@ test('rejects a changed decoder chain or lockfile version', () => {
     }),
     withPackage('node_modules/expo-router', {
       ...lock.packages['node_modules/expo-router'],
-      version: '57.0.31',
+      version: '57.0.32',
     }),
   ]) {
     assert.throws(

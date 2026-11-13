@@ -22,23 +22,6 @@ export const exceptions = [
     dependents: ['node_modules/query-string'],
   },
   {
-    name: 'glob',
-    url: 'https://github.com/advisories/GHSA-3g3m-2fjr-6pw4',
-    severity: 'moderate',
-    nodes: ['node_modules/@expo/fingerprint/node_modules/glob'],
-    dependents: [
-      'node_modules/@expo/cli',
-      'node_modules/@expo/config',
-      'node_modules/@expo/config-plugins',
-      'node_modules/@expo/fingerprint',
-      'node_modules/@expo/metro-config',
-      'node_modules/@jest/reporters',
-      'node_modules/jest-config',
-      'node_modules/jest-runtime',
-      'node_modules/test-exclude',
-    ],
-  },
-  {
     name: 'minimatch',
     url: 'https://github.com/advisories/GHSA-g3hv-75wg-m249',
     severity: 'moderate',
@@ -50,7 +33,6 @@ export const exceptions = [
       'node_modules/@eslint/config-array',
       'node_modules/@eslint/eslintrc',
       'node_modules/@expo/fingerprint',
-      'node_modules/@expo/fingerprint/node_modules/glob',
       'node_modules/@jest/reporters/node_modules/glob',
       'node_modules/@typescript-eslint/typescript-estree',
       'node_modules/eslint',
@@ -105,7 +87,7 @@ const isAllowedAdvisory = (packageName, vulnerability, advisory, lock) => {
 const hasLockedExpoRouterDecoder = (lock) => {
   const packages = lock?.packages;
   return (
-    packages?.['node_modules/expo-router']?.version === '57.0.30' &&
+    packages?.['node_modules/expo-router']?.version === '57.0.31' &&
     packages?.['node_modules/expo-router']?.dependencies?.['query-string'] ===
       '^7.1.3' &&
     packages['node_modules/query-string']?.version === '7.1.3' &&
