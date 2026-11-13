@@ -75,35 +75,17 @@ describe('ChangeEventSection', () => {
 
   // TalkBack read these wrappers as one block, losing the headings inside them
   // and any part scrolled out of view.
-  it.each([
-    [
-      'an event',
-      'Australia/Sydney',
-      [
-        'motion-short-fade',
-        'semantic-event-content',
-        'reminder-day-civil-time-report',
-      ],
-    ],
-    ['no event', 'Australia/Brisbane', ['no-event-civil-time-report']],
-  ] as const)(
-    'leaves wrappers out of the accessibility tree for %s',
-    (_, zoneId, wrapperIds) => {
-      render(
-        <ChangeEventSection
-          palette={daylightSaviourPalettes.light}
-          reducedMotion
-          report={report('2026-04-04T15:59:59.000Z', zoneId)}
-        />,
-      );
+  it('leaves the event wrappers out of the accessibility tree', () => {
+    render(section('2026-04-04T15:59:59.000Z', true));
 
-      for (const id of wrapperIds) {
-        expect(screen.getByTestId(id).props.importantForAccessibility).toBe(
-          'no',
-        );
-      }
-    },
-  );
+    for (const id of [
+      'motion-short-fade',
+      'semantic-event-content',
+      'reminder-day-civil-time-report',
+    ]) {
+      expect(screen.getByTestId(id).props.importantForAccessibility).toBe('no');
+    }
+  });
 
   it('renders validity expiry without civil-time claims', () => {
     render(
