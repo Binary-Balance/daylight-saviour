@@ -111,18 +111,21 @@ describe('Australian-English copy catalogue', () => {
     const { androidPause } = australianEnglish.changeReminders;
     assert.equal(Object.isFrozen(androidPause), true);
     assert.equal(
-      androidPause.body(31),
+      androidPause.body({ androidApiLevel: 31, samsung: false }),
       'Android pauses apps left unopened for a few months, and paused apps can’t receive reminders. To get reminders even when you haven’t opened Daylight Saviour in a while, turn off “Remove permissions and free up space”.',
     );
-    for (const [apiLevel, label] of [
-      [32, 'Remove permissions and free up space'],
-      [33, 'Pause app activity if unused'],
-      [34, 'Pause app activity if unused'],
-      [35, 'Manage app if unused'],
-      [36, 'Manage app if unused'],
+    for (const [androidApiLevel, samsung, label] of [
+      [32, false, 'Remove permissions and free up space'],
+      [33, false, 'Pause app activity if unused'],
+      [34, false, 'Pause app activity if unused'],
+      [35, false, 'Manage app if unused'],
+      [36, false, 'Manage app if unused'],
+      [31, true, 'Remove permissions if app is unused'],
+      [34, true, 'Remove permissions if app is unused'],
+      [35, true, 'Manage app if unused'],
     ]) {
       assert.equal(
-        androidPause.line(apiLevel),
+        androidPause.line({ androidApiLevel, samsung }),
         `Android may pause Daylight Saviour if it’s left unopened, which stops daylight saving reminders. Turn off “${label}”.`,
       );
     }

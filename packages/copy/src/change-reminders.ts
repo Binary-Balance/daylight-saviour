@@ -1,10 +1,21 @@
 import { changeReminderNotification } from './change-reminder-notification.ts';
 
+interface PauseSettingDevice {
+  readonly androidApiLevel: number;
+  readonly samsung: boolean;
+}
+
 // The App info switch that lets Android pause an unused app, as labelled in
 // AOSP Settings: Android 12 and 13 renamed it, and Android 15 renamed it again
-// when app archiving arrived.
-function pauseSettingLabel(androidApiLevel: number): string {
+// when app archiving arrived. Samsung uses its own name before Android 15
+// (seen on Android 13; 12 and 14 assumed). Galaxy S25 owners report Android
+// 15's.
+function pauseSettingLabel({
+  androidApiLevel,
+  samsung,
+}: PauseSettingDevice): string {
   if (androidApiLevel >= 35) return 'Manage app if unused';
+  if (samsung) return 'Remove permissions if app is unused';
   if (androidApiLevel >= 33) return 'Pause app activity if unused';
   return 'Remove permissions and free up space';
 }
@@ -20,11 +31,11 @@ export const changeReminders = Object.freeze({
     oneWeek: 'One-week Change Reminder',
   }),
   androidPause: Object.freeze({
-    body: (androidApiLevel: number) =>
-      `Android pauses apps left unopened for a few months, and paused apps can’t receive reminders. To get reminders even when you haven’t opened Daylight Saviour in a while, turn off “${pauseSettingLabel(androidApiLevel)}”.`,
+    body: (device: PauseSettingDevice) =>
+      `Android pauses apps left unopened for a few months, and paused apps can’t receive reminders. To get reminders even when you haven’t opened Daylight Saviour in a while, turn off “${pauseSettingLabel(device)}”.`,
     heading: 'KEEP DAYLIGHT SAVING REMINDERS ARRIVING',
-    line: (androidApiLevel: number) =>
-      `Android may pause Daylight Saviour if it’s left unopened, which stops daylight saving reminders. Turn off “${pauseSettingLabel(androidApiLevel)}”.`,
+    line: (device: PauseSettingDevice) =>
+      `Android may pause Daylight Saviour if it’s left unopened, which stops daylight saving reminders. Turn off “${pauseSettingLabel(device)}”.`,
     open: 'Open app settings',
   }),
   appSleepNotNow: 'Not now',
