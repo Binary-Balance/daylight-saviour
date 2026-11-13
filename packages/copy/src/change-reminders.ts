@@ -1,13 +1,33 @@
 import { changeReminderNotification } from './change-reminder-notification.ts';
 
+// The App info switch that lets Android pause an unused app, as labelled in
+// AOSP Settings: Android 12 and 13 renamed it, and Android 15 renamed it again
+// when app archiving arrived.
+function pauseSettingLabel(androidApiLevel: number): string {
+  if (androidApiLevel >= 35) return 'Manage app if unused';
+  if (androidApiLevel >= 33) return 'Pause app activity if unused';
+  return 'Remove permissions and free up space';
+}
+
 export const changeReminders = Object.freeze({
   accessibility: Object.freeze({
     enableHint:
       'Explains reminder timing before asking for notification permission',
+    openAppSettingsHint: 'Opens app info settings for Daylight Saviour',
+    openNeverSleepingAppsHint: 'Opens Samsung’s list of never sleeping apps',
     openSettingsHint: 'Opens device notification settings',
     oneDay: 'One-day Change Reminder',
     oneWeek: 'One-week Change Reminder',
   }),
+  androidPause: Object.freeze({
+    body: (androidApiLevel: number) =>
+      `Android pauses apps left unopened for a few months, and paused apps can’t receive reminders. To get reminders even when you haven’t opened Daylight Saviour in a while, turn off “${pauseSettingLabel(androidApiLevel)}”.`,
+    heading: 'KEEP DAYLIGHT SAVING REMINDERS ARRIVING',
+    line: (androidApiLevel: number) =>
+      `Android may pause Daylight Saviour if it’s left unopened, which stops daylight saving reminders. Turn off “${pauseSettingLabel(androidApiLevel)}”.`,
+    open: 'Open app settings',
+  }),
+  appSleepNotNow: 'Not now',
   disabled: Object.freeze({
     action: 'Enable Change Reminders',
     body: 'Change Reminders are disabled on this device. Enabling again will create a fresh reminder registration.',
@@ -114,6 +134,12 @@ export const changeReminders = Object.freeze({
   saving: Object.freeze({
     body: 'Waiting for confirmation. Reminders are not enabled yet.',
     heading: 'REGISTERING REMINDERS',
+  }),
+  samsungSleep: Object.freeze({
+    body: 'Samsung puts apps to sleep after a few weeks unopened, and sleeping apps can’t receive reminders. To get reminders even when you haven’t opened Daylight Saviour in a while, add it to “Never sleeping apps”.',
+    heading: 'KEEP DAYLIGHT SAVING REMINDERS ARRIVING ON SAMSUNG',
+    line: 'Check that Daylight Saviour is in “Never sleeping apps” so daylight saving reminders can arrive.',
+    open: 'Open Never sleeping apps',
   }),
   savingPreferences: 'Saving reminder timings…',
   savingZone: 'Updating reminders for your Home Time Zone…',

@@ -17,8 +17,14 @@ import {
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import type { DaylightSaviourPalette } from '../../theme';
+import type { AppSleepAdapters, AppSleepPrompt } from './app-sleep-adapters';
+import {
+  useAppSleepGuidance,
+  type AppSleepGuidance,
+} from './app-sleep-guidance';
 import type { ChangeReminderAdapters } from './change-reminder-adapters';
 import {
+  ActionButton,
   ConfirmDisableActions,
   DisableFailedActions,
   ExplainerActions,
@@ -283,8 +289,100 @@ function CardMessage({
   );
 }
 
+function appSleepCopy(prompt: AppSleepPrompt, androidApiLevel: number) {
+  return prompt === 'android-pause'
+    ? {
+        body: reminders.androidPause.body(androidApiLevel),
+        heading: reminders.androidPause.heading,
+        line: reminders.androidPause.line(androidApiLevel),
+        open: reminders.androidPause.open,
+        openHint: reminders.accessibility.openAppSettingsHint,
+      }
+    : {
+        ...reminders.samsungSleep,
+        openHint: reminders.accessibility.openNeverSleepingAppsHint,
+      };
+}
+
+function AppSleepPromptMessage({
+  guidance: { androidApiLevel, answer, openSetting },
+  palette,
+  prompt,
+}: {
+  readonly guidance: AppSleepGuidance;
+  readonly palette: DaylightSaviourPalette;
+  readonly prompt: AppSleepPrompt;
+}) {
+  const content = appSleepCopy(prompt, androidApiLevel);
+  return (
+    <>
+      <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
+        {content.heading}
+      </Text>
+      <Text style={[styles.body, { color: palette.ink }]}>{content.body}</Text>
+      <View style={styles.actions}>
+        <ActionButton
+          hint={content.openHint}
+          label={content.open}
+          onPress={() => {
+            answer(prompt);
+            openSetting(prompt);
+          }}
+          palette={palette}
+          primary
+        />
+        <ActionButton
+          label={reminders.appSleepNotNow}
+          onPress={() => answer(prompt)}
+          palette={palette}
+        />
+      </View>
+    </>
+  );
+}
+
+// Explains, once, a setting that can stop reminders arriving, then keeps a
+// one-line reminder of it in the card. Lines come first, so the Android line
+// stays above a waiting Samsung prompt.
+function AppSleepMessages({
+  guidance,
+  palette,
+}: {
+  readonly guidance: AppSleepGuidance;
+  readonly palette: DaylightSaviourPalette;
+}) {
+  return (
+    <>
+      {guidance.lines.map((line) => {
+        const content = appSleepCopy(line, guidance.androidApiLevel);
+        return (
+          <View key={line} style={styles.line}>
+            <Text style={[styles.body, { color: palette.ink }]}>
+              {content.line}
+            </Text>
+            <ActionButton
+              hint={content.openHint}
+              label={content.open}
+              onPress={() => guidance.openSetting(line)}
+              palette={palette}
+            />
+          </View>
+        );
+      })}
+      {guidance.prompt === undefined ? null : (
+        <AppSleepPromptMessage
+          guidance={guidance}
+          palette={palette}
+          prompt={guidance.prompt}
+        />
+      )}
+    </>
+  );
+}
+
 export default function ChangeReminderSection({
   adapters,
+  appSleepAdapters = null,
   homeTimeZone,
   onPermissionDialog,
   palette,
@@ -292,6 +390,7 @@ export default function ChangeReminderSection({
   verifiedNoEvent = false,
 }: {
   readonly adapters: ChangeReminderAdapters;
+  readonly appSleepAdapters?: AppSleepAdapters | null;
   readonly homeTimeZone: string;
   // Keep it stable: a new one starts a new session, losing an enable in
   // progress.
@@ -306,6 +405,7 @@ export default function ChangeReminderSection({
     onPermissionDialog,
   );
   const installationId = useTestInstallationId(adapters, snapshot, testBuild);
+  const appSleep = useAppSleepGuidance(appSleepAdapters);
 
   const card = cardOf(snapshot);
   const Actions = card.Actions;
@@ -341,6 +441,9 @@ export default function ChangeReminderSection({
           preferences={snapshot.preferences}
         />
       ) : null}
+      {snapshot.kind === 'enabled' && appSleep !== null ? (
+        <AppSleepMessages guidance={appSleep} palette={palette} />
+      ) : null}
       {Actions === undefined ? null : (
         <Actions
           adapters={adapters}
@@ -362,8 +465,10 @@ export default function ChangeReminderSection({
 }
 
 const styles = StyleSheet.create({
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   body: { fontSize: 17, lineHeight: 25 },
   card: { borderTopWidth: StyleSheet.hairlineWidth, gap: 12, paddingTop: 16 },
+  line: { gap: 8 },
   metadata: {
     fontSize: 12,
     fontWeight: '800',

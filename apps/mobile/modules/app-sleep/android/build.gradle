@@ -1,0 +1,15 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'au.com.binarybalance'
+version = '1.0.0'
+
+android {
+  namespace "au.com.binarybalance.appsleep"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}

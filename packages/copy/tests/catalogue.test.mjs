@@ -107,6 +107,38 @@ describe('Australian-English copy catalogue', () => {
     );
   });
 
+  it('names the App info switch Android shows on each version', () => {
+    const { androidPause } = australianEnglish.changeReminders;
+    assert.equal(Object.isFrozen(androidPause), true);
+    assert.equal(
+      androidPause.body(31),
+      'Android pauses apps left unopened for a few months, and paused apps can’t receive reminders. To get reminders even when you haven’t opened Daylight Saviour in a while, turn off “Remove permissions and free up space”.',
+    );
+    for (const [apiLevel, label] of [
+      [32, 'Remove permissions and free up space'],
+      [33, 'Pause app activity if unused'],
+      [34, 'Pause app activity if unused'],
+      [35, 'Manage app if unused'],
+      [36, 'Manage app if unused'],
+    ]) {
+      assert.equal(
+        androidPause.line(apiLevel),
+        `Android may pause Daylight Saviour if it’s left unopened, which stops daylight saving reminders. Turn off “${label}”.`,
+      );
+    }
+  });
+
+  it('points Samsung users at Never sleeping apps', () => {
+    const { samsungSleep } = australianEnglish.changeReminders;
+    assert.equal(Object.isFrozen(samsungSleep), true);
+    assert.deepEqual(samsungSleep, {
+      body: 'Samsung puts apps to sleep after a few weeks unopened, and sleeping apps can’t receive reminders. To get reminders even when you haven’t opened Daylight Saviour in a while, add it to “Never sleeping apps”.',
+      heading: 'KEEP DAYLIGHT SAVING REMINDERS ARRIVING ON SAMSUNG',
+      line: 'Check that Daylight Saviour is in “Never sleeping apps” so daylight saving reminders can arrive.',
+      open: 'Open Never sleeping apps',
+    });
+  });
+
   it('says registration is in progress and reminders are not enabled yet', () => {
     const { saving } = australianEnglish.changeReminders;
     assert.equal(Object.isFrozen(saving), true);
