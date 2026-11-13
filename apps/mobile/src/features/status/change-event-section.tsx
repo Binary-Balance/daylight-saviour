@@ -112,7 +112,12 @@ function SemanticEventMotion({
           {echo}
         </Animated.Text>
       ) : null}
+      {/* TalkBack read this view, or the event card inside it, as one block.
+          That dropped the headings inside and any part scrolled out of view:
+          at large text the countdown was never read. Leaving both out of the
+          accessibility tree keeps every fact a separate stop. */}
       <Animated.View
+        importantForAccessibility="no"
         testID="semantic-event-content"
         style={{
           opacity,
@@ -291,7 +296,9 @@ export default function ChangeEventSection({
       eventKey={`${report.event.instant}:${report.event.relation}`}
       reducedMotion={reducedMotion}
     >
+      {/* Left out of the accessibility tree: see SemanticEventMotion. */}
       <View
+        importantForAccessibility="no"
         style={[styles.eventCard, { borderColor: palette.solarGoldStructure }]}
         testID={`${report.phase}-civil-time-report`}
       >
