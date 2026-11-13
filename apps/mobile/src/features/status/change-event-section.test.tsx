@@ -79,7 +79,6 @@ describe('ChangeEventSection', () => {
     render(section('2026-04-04T15:59:59.000Z', true));
 
     for (const id of [
-      'motion-short-fade',
       'semantic-event-content',
       'reminder-day-civil-time-report',
     ]) {
