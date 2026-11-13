@@ -169,6 +169,12 @@ it('drops the line once the user turns the setting off', async () => {
   await screen.findByText(androidLine);
 
   canPause = false;
+  // Only a return to the app rereads the setting.
+  await act(async () =>
+    appStateListeners.forEach((listener) => listener('background')),
+  );
+  expect(screen.getByText(androidLine)).toBeTruthy();
+
   await returnToApp();
 
   expect(screen.queryByText(androidLine)).toBeNull();
