@@ -90,7 +90,15 @@ function renderSection(
   );
 }
 
-const androidLine = reminders.androidPause.line(34);
+const androidLine = reminders.androidPause.line({
+  androidApiLevel: 34,
+  samsung: false,
+});
+// Samsung names the pause setting differently before Android 15.
+const samsungAndroidLine = reminders.androidPause.line({
+  androidApiLevel: 34,
+  samsung: true,
+});
 const button = (name: string) => screen.getByRole('button', { name });
 
 let appStateListeners: ((state: string) => void)[];
@@ -123,7 +131,11 @@ it('explains Android’s pause setting once reminders are on', async () => {
   const boundary = sleepAdapters();
   renderSection(boundary);
 
-  expect(await screen.findByText(reminders.androidPause.body(34))).toBeTruthy();
+  expect(
+    await screen.findByText(
+      reminders.androidPause.body({ androidApiLevel: 34, samsung: false }),
+    ),
+  ).toBeTruthy();
   expect(screen.getByText(reminders.androidPause.heading)).toBeTruthy();
   expect(button(reminders.androidPause.open).props.accessibilityHint).toBe(
     reminders.accessibility.openAppSettingsHint,
@@ -214,7 +226,10 @@ it('asks about Samsung after Android, then keeps both lines in that order', asyn
 
   fireEvent.press(button(reminders.appSleepNotNow));
 
-  expect(shownMessages()).toEqual([androidLine, reminders.samsungSleep.body]);
+  expect(shownMessages()).toEqual([
+    samsungAndroidLine,
+    reminders.samsungSleep.body,
+  ]);
   expect(screen.queryByText(reminders.androidPause.heading)).toBeNull();
   expect(screen.getByText(reminders.samsungSleep.heading)).toBeTruthy();
   expect(button(reminders.samsungSleep.open).props.accessibilityHint).toBe(
@@ -228,7 +243,10 @@ it('asks about Samsung after Android, then keeps both lines in that order', asyn
   );
   expect(boundary.openNeverSleepingApps).toHaveBeenCalledTimes(1);
   expect(boundary.openPauseSetting).not.toHaveBeenCalled();
-  expect(shownMessages()).toEqual([androidLine, reminders.samsungSleep.line]);
+  expect(shownMessages()).toEqual([
+    samsungAndroidLine,
+    reminders.samsungSleep.line,
+  ]);
   expect(screen.queryByText(reminders.samsungSleep.heading)).toBeNull();
 });
 

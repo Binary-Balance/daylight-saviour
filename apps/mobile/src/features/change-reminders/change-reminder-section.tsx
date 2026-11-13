@@ -289,12 +289,12 @@ function CardMessage({
   );
 }
 
-function appSleepCopy(prompt: AppSleepPrompt, androidApiLevel: number) {
+function appSleepCopy(prompt: AppSleepPrompt, guidance: AppSleepGuidance) {
   return prompt === 'android-pause'
     ? {
-        body: reminders.androidPause.body(androidApiLevel),
+        body: reminders.androidPause.body(guidance),
         heading: reminders.androidPause.heading,
-        line: reminders.androidPause.line(androidApiLevel),
+        line: reminders.androidPause.line(guidance),
         open: reminders.androidPause.open,
         openHint: reminders.accessibility.openAppSettingsHint,
       }
@@ -305,7 +305,7 @@ function appSleepCopy(prompt: AppSleepPrompt, androidApiLevel: number) {
 }
 
 function AppSleepPromptMessage({
-  guidance: { androidApiLevel, answer, openSetting },
+  guidance,
   palette,
   prompt,
 }: {
@@ -313,7 +313,8 @@ function AppSleepPromptMessage({
   readonly palette: DaylightSaviourPalette;
   readonly prompt: AppSleepPrompt;
 }) {
-  const content = appSleepCopy(prompt, androidApiLevel);
+  const { answer, openSetting } = guidance;
+  const content = appSleepCopy(prompt, guidance);
   return (
     <>
       <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
@@ -354,7 +355,7 @@ function AppSleepMessages({
   return (
     <>
       {guidance.lines.map((line) => {
-        const content = appSleepCopy(line, guidance.androidApiLevel);
+        const content = appSleepCopy(line, guidance);
         return (
           <View key={line} style={styles.line}>
             <Text style={[styles.body, { color: palette.ink }]}>

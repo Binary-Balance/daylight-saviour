@@ -35,6 +35,8 @@ async function readFacts(adapters: AppSleepAdapters): Promise<AppSleepFacts> {
 
 export interface AppSleepGuidance {
   readonly androidApiLevel: number;
+  /** Samsung names the pause setting differently. */
+  readonly samsung: boolean;
   /** The next prompt to show, until the user answers it. */
   readonly prompt: AppSleepPrompt | undefined;
   /** Reminder lines for answered prompts. */
@@ -88,5 +90,6 @@ export function useAppSleepGuidance(
       ).catch(() => undefined);
     },
     prompt: applicable.find((prompt) => !answered.has(prompt)),
+    samsung: applicable.includes('samsung-sleep'),
   };
 }
