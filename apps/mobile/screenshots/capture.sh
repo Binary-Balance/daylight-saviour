@@ -39,12 +39,18 @@ set_text_size() {
   if [ "$platform" = android ]; then
     # 2.0 is the largest scale Android's settings offer.
     adb shell settings put system font_scale "$([ "$1" = largest ] && echo 2.0 || echo 1.0)"
+    # Demo mode shows a fixed clock and hides notification icons. Hosted
+    # emulators dropped it when the appearance or font scale changed after it.
+    adb shell am broadcast -a com.android.systemui.demo -e command enter
+    adb shell am broadcast -a com.android.systemui.demo -e command clock -e hhmm 0941
+    adb shell am broadcast -a com.android.systemui.demo -e command notifications -e visible false
   else
     # Large is the iOS default. The largest needs Larger Accessibility Sizes.
     xcrun simctl ui booted content_size \
       "$([ "$1" = largest ] && echo accessibility-extra-extra-extra-large || echo large)"
   fi
 }
+trap 'set_text_size default' EXIT
 
 # Usage: run_flows <appearance> <text-size>
 run_flows() {
@@ -66,11 +72,6 @@ for appearance in light dark; do
     # the new appearance, and its dialog would cover the app.
     sleep 10
     adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS
-    # Demo mode shows a fixed clock and hides notification icons. Hosted
-    # emulators dropped it when it was entered before the appearance change.
-    adb shell am broadcast -a com.android.systemui.demo -e command enter
-    adb shell am broadcast -a com.android.systemui.demo -e command clock -e hhmm 0941
-    adb shell am broadcast -a com.android.systemui.demo -e command notifications -e visible false
   else
     xcrun simctl ui booted appearance "$appearance"
   fi
@@ -80,6 +81,5 @@ for appearance in light dark; do
     run_flows "$appearance" "$text_size" || run_flows "$appearance" "$text_size"
   done
 done
-set_text_size default
 # Maestro keeps each flow's screenshots in its own report folder.
 find "$reports" -path '*/takeScreenshot/*.png' -exec mv {} "$output" \;

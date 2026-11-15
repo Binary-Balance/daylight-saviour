@@ -1,8 +1,9 @@
 appId: au.com.binarybalance.daylightsaviour
 ---
-# At the largest text size the event fills more than one screen, so this
-# stops at its direction and amount, then at its countdown. The largest iOS
-# report is about 17 screens long, so scrolls get two minutes.
+# At the largest text size the event fills several screens, so this stops at
+# each of its headings: the date, then the direction and local time, the UTC
+# offset and amount, and the countdown. The largest iOS report is about 17
+# screens long, so scrolls get two minutes.
 - runFlow: common/open-report.yaml
 - scrollUntilVisible:
     element: 'NEXT CHANGE EVENT|RECENT CHANGE EVENT'
@@ -11,8 +12,17 @@ appId: au.com.binarybalance.daylightsaviour
 - waitForAnimationToEnd
 - takeScreenshot: ${PREFIX}-change-event
 - scrollUntilVisible:
+    element: 'LOCAL TIME'
+    centerElement: true
+    timeout: 120000
+- takeScreenshot: ${PREFIX}-change-event-local-time
+- scrollUntilVisible:
+    element: 'UTC OFFSET'
+    centerElement: true
+    timeout: 120000
+- takeScreenshot: ${PREFIX}-change-event-utc-offset
+- scrollUntilVisible:
     element: 'COUNTDOWN|CHANGE COMPLETED'
     centerElement: true
     timeout: 120000
-- waitForAnimationToEnd
 - takeScreenshot: ${PREFIX}-change-event-countdown
