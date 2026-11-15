@@ -31,7 +31,8 @@ appId: au.com.binarybalance.daylightsaviour
     centerElement: true
     timeout: 120000
 - takeScreenshot: ${PREFIX}-change-event-amount
-# For two days after a change the report shows the time since it instead.
+# For two days after a change the report shows the time since it instead,
+# so this stop finds nothing and the screenshot shows where scrolling ended.
 - scrollUntilVisible:
     element:
       id: 'countdown-current'

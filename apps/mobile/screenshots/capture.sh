@@ -80,8 +80,10 @@ for appearance in light dark; do
     set_text_size "$text_size"
     # A hosted emulator once dropped its adb connection between two flows.
     # iOS has no such drop, and a repeated pass would outrun its time limit.
-    run_flows "$appearance" "$text_size" ||
-      { [ "$platform" = android ] && run_flows "$appearance" "$text_size"; }
+    if ! run_flows "$appearance" "$text_size"; then
+      [ "$platform" = android ] || exit 1
+      run_flows "$appearance" "$text_size"
+    fi
   done
 done
 # Maestro keeps each flow's screenshots in its own report folder.
