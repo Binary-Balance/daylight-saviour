@@ -50,7 +50,8 @@ set_text_size() {
       "$([ "$1" = largest ] && echo accessibility-extra-extra-extra-large || echo large)"
   fi
 }
-trap 'set_text_size default' EXIT
+# A reset that fails, say because adb dropped, must not fail a finished run.
+trap 'set_text_size default || true' EXIT
 
 # Usage: run_flows <appearance> <text-size>
 run_flows() {

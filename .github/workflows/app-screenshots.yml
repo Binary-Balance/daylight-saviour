@@ -150,7 +150,7 @@ jobs:
       # simulator for it.
       - name: Create simulator if missing
         run: |
-          xcrun simctl list devices available | grep -qF "$SIMULATOR (" ||
+          xcrun simctl list devices available | grep -qF -- "$SIMULATOR (" ||
             xcrun simctl create "$SIMULATOR" "$SIMULATOR"
 
       - name: Install dependencies

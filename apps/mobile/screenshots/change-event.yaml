@@ -1,28 +1,39 @@
 appId: au.com.binarybalance.daylightsaviour
 ---
-# At the largest text size the event fills several screens, so this stops at
-# each of its headings: the date, then the direction and local time, the UTC
-# offset and amount, and the countdown. The largest iOS report is about 17
-# screens long, so scrolls get two minutes.
+# At the largest text size each event fact can fill half a screen, so this
+# stops at each fact in turn: date, direction, local time, UTC offset, amount
+# and countdown. The largest iOS report is about 17 screens long, so scrolls
+# get two minutes.
 - runFlow: common/open-report.yaml
 - scrollUntilVisible:
-    element: 'NEXT CHANGE EVENT|RECENT CHANGE EVENT'
+    element: '\d{1,2} [A-Za-z]+ \d{4}'
     centerElement: true
     timeout: 120000
 - waitForAnimationToEnd
 - takeScreenshot: ${PREFIX}-change-event
 - scrollUntilVisible:
-    element: 'LOCAL TIME'
+    element: '(?i)(forward|backward) change'
+    centerElement: true
+    timeout: 120000
+- takeScreenshot: ${PREFIX}-change-event-direction
+- scrollUntilVisible:
+    element: '\d{1,2}:\d{2}.* → .*'
     centerElement: true
     timeout: 120000
 - takeScreenshot: ${PREFIX}-change-event-local-time
 - scrollUntilVisible:
-    element: 'UTC OFFSET'
+    element: 'UTC.* → UTC.*'
     centerElement: true
     timeout: 120000
 - takeScreenshot: ${PREFIX}-change-event-utc-offset
 - scrollUntilVisible:
-    element: 'COUNTDOWN|CHANGE COMPLETED'
+    element: 'Clocks move.*'
+    centerElement: true
+    timeout: 120000
+- takeScreenshot: ${PREFIX}-change-event-amount
+- scrollUntilVisible:
+    element:
+      id: 'countdown-current'
     centerElement: true
     timeout: 120000
 - takeScreenshot: ${PREFIX}-change-event-countdown
