@@ -129,6 +129,9 @@ jobs:
     timeout-minutes: 90
     env:
       SIMULATOR: ${{ inputs.ios_simulator }}
+      # Maestro's iOS driver missed its default start-up time on hosted
+      # runners twice.
+      MAESTRO_DRIVER_STARTUP_TIMEOUT: '180000'
       XCODE_VERSION: '26.6'
     steps:
       - name: Check out repository
