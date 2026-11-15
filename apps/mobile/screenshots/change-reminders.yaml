@@ -7,7 +7,9 @@ appId: au.com.binarybalance.daylightsaviour
 - scrollUntilVisible:
     element: 'Enable reminders'
 - tapOn: 'Enable reminders'
+# Centred so the switch shows too when large text stacks it below the label.
 - scrollUntilVisible:
     element: 'One-day Change Reminder'
+    centerElement: true
 - waitForAnimationToEnd
 - takeScreenshot: ${PREFIX}-change-reminders

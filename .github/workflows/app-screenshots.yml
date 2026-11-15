@@ -2,6 +2,12 @@ name: App screenshots
 
 on:
   workflow_dispatch:
+    inputs:
+      ios_simulator:
+        description: iOS simulator. iPhone SE (3rd generation) is the narrowest supported iPhone.
+        required: true
+        default: iPhone 17
+        type: string
 
 permissions:
   contents: read
@@ -120,7 +126,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     env:
-      SIMULATOR: iPhone 17
+      SIMULATOR: ${{ inputs.ios_simulator }}
       XCODE_VERSION: '26.6'
     steps:
       - name: Check out repository
@@ -176,7 +182,9 @@ jobs:
           xcrun simctl install booted "$RUNNER_TEMP/derived-data/Build/Products/Debug-iphonesimulator/DaylightSaviour.app"
 
       - name: Capture screenshots
-        run: apps/mobile/screenshots/capture.sh ios iphone-17 "$RUNNER_TEMP/screenshots"
+        run: |
+          device=$(echo "$SIMULATOR" | tr '[:upper:] ' '[:lower:]-' | tr -d '()')
+          apps/mobile/screenshots/capture.sh ios "$device" "$RUNNER_TEMP/screenshots"
 
       - name: Upload screenshots
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

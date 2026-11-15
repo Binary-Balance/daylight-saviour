@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs every screen flow in light and dark appearance at the default text size.
-# It leaves the device in dark appearance with a fixed status bar.
+# Runs every screen flow in light and dark appearance, at the default and the
+# largest text size. It leaves the device in dark appearance at the default
+# text size, with a fixed status bar.
 # Usage: capture.sh <android|ios> <device-name> <output-directory>
 # Maestro's own reports, useful when a flow fails, go in maestro-reports
 # beside the output directory, which each run clears. Expects one booted emulator or simulator with
@@ -15,13 +16,10 @@ flows=$(dirname "$0")
 case "$platform" in
   android)
     evidence=emulator
-    adb shell settings put system font_scale 1.0
     adb shell settings put global sysui_demo_allowed 1
     ;;
   ios)
     evidence=simulator
-    # Large is the iOS default text size.
-    xcrun simctl ui booted content_size large
     xcrun simctl status_bar booted override --time 9:41
     ;;
   *)
@@ -37,6 +35,18 @@ reports=$(dirname "$output")/maestro-reports
 # otherwise be collected too.
 rm -rf "$reports"
 
+set_text_size() {
+  if [ "$platform" = android ]; then
+    # 2.0 is the largest scale Android's settings offer.
+    adb shell settings put system font_scale "$([ "$1" = largest ] && echo 2.0 || echo 1.0)"
+  else
+    # Large is the iOS default. The largest needs Larger Accessibility Sizes.
+    xcrun simctl ui booted content_size \
+      "$([ "$1" = largest ] && echo accessibility-extra-extra-extra-large || echo large)"
+  fi
+}
+
+# Usage: run_flows <appearance> <text-size>
 run_flows() {
   if [ "$platform" = android ]; then
     # Reconnecting loses the reverse mapping the app uses to reach Metro.
@@ -44,8 +54,8 @@ run_flows() {
     adb reverse tcp:8081 tcp:8081 || return
   fi
   maestro test \
-    --env "PREFIX=$platform-$device-$1-text-default-$evidence" \
-    --test-output-dir "$reports/$1" \
+    --env "PREFIX=$platform-$device-$1-text-$2-$evidence" \
+    --test-output-dir "$reports/$1-$2" \
     "$flows"
 }
 
@@ -64,8 +74,12 @@ for appearance in light dark; do
   else
     xcrun simctl ui booted appearance "$appearance"
   fi
-  # A hosted emulator once dropped its adb connection between two flows.
-  run_flows "$appearance" || run_flows "$appearance"
+  for text_size in default largest; do
+    set_text_size "$text_size"
+    # A hosted emulator once dropped its adb connection between two flows.
+    run_flows "$appearance" "$text_size" || run_flows "$appearance" "$text_size"
+  done
 done
+set_text_size default
 # Maestro keeps each flow's screenshots in its own report folder.
 find "$reports" -path '*/takeScreenshot/*.png' -exec mv {} "$output" \;
