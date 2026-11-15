@@ -124,8 +124,8 @@ jobs:
 
   ios:
     runs-on: macos-26
-    # Scrolling at the largest text size and a slow first bundle took a
-    # passing run past 50 minutes.
+    # Long scrolls at the largest text size and a slow first bundle need
+    # more than an hour.
     timeout-minutes: 90
     env:
       SIMULATOR: ${{ inputs.ios_simulator }}

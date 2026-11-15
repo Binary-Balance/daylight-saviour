@@ -1,15 +1,20 @@
 appId: au.com.binarybalance.daylightsaviour
 ---
 - runFlow: common/open-report.yaml
+# The largest iOS report is about 17 screens long, so scrolls get two
+# minutes.
 - scrollUntilVisible:
     element: 'Warn me before time misbehaves'
+    timeout: 120000
 - tapOn: 'Warn me before time misbehaves'
 - scrollUntilVisible:
     element: 'Enable reminders'
+    timeout: 120000
 - tapOn: 'Enable reminders'
 # Centred so the switch shows too when large text stacks it below the label.
 - scrollUntilVisible:
     element: 'One-day Change Reminder'
     centerElement: true
+    timeout: 120000
 - waitForAnimationToEnd
 - takeScreenshot: ${PREFIX}-change-reminders
