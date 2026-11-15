@@ -268,9 +268,12 @@ const styles = StyleSheet.create({
   timing: {
     alignItems: 'center',
     flexDirection: 'row',
+    gap: 12,
     justifyContent: 'space-between',
     minHeight: 44,
   },
-  timingLabel: { fontSize: 17 },
+  // Text does not shrink by default. At the largest iOS text size the label
+  // took the whole row and pushed its switch off the screen.
+  timingLabel: { flexShrink: 1, fontSize: 17 },
   timings: { gap: 4 },
 });

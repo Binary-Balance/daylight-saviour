@@ -139,10 +139,12 @@ it.each(['light', 'dark'] as const)(
     );
 
     for (const label of ['One week before', 'One day before']) {
-      const { color } = StyleSheet.flatten(
+      const { color, flexShrink } = StyleSheet.flatten(
         (await screen.findByText(label)).props.style,
       );
       expect(color).toBe(palette.ink);
+      // Wraps beside its switch rather than pushing it off a narrow screen.
+      expect(flexShrink).toBe(1);
       expect(
         contrastRatio(String(color), palette.background),
       ).toBeGreaterThanOrEqual(4.5);
