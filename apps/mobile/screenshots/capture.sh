@@ -79,7 +79,9 @@ for appearance in light dark; do
   for text_size in default largest; do
     set_text_size "$text_size"
     # A hosted emulator once dropped its adb connection between two flows.
-    run_flows "$appearance" "$text_size" || run_flows "$appearance" "$text_size"
+    # iOS has no such drop, and a repeated pass would outrun its time limit.
+    run_flows "$appearance" "$text_size" ||
+      { [ "$platform" = android ] && run_flows "$appearance" "$text_size"; }
   done
 done
 # Maestro keeps each flow's screenshots in its own report folder.
