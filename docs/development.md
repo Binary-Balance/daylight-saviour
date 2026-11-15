@@ -194,12 +194,16 @@ Plugin, NDK, or CMake invalidate expensive build outputs.
 ## App screenshots
 
 The manual **App screenshots** workflow captures the app on an Android
-emulator and an iOS simulator, in light and dark appearance. Run it from the
-Actions tab, or:
+emulator and an iOS simulator, in light and dark appearance, at the default
+text size and the largest one each platform offers. Run it from the Actions
+tab, or:
 
 ```sh
 gh workflow run app-screenshots.yml
 ```
+
+The iOS simulator defaults to iPhone 17. For the narrowest supported iPhone,
+add `-f ios_simulator='iPhone SE (3rd generation)'`.
 
 The run keeps two artifacts, `android-screenshots` and `ios-screenshots`. Each
 file is named for its platform, device, appearance, text size, evidence kind
@@ -217,10 +221,11 @@ it.
 [Maestro](https://maestro.mobile.dev) drives the app.
 `apps/mobile/screenshots/common/open-report.yaml` starts a fresh install and
 opens the Civil Time Report for Sydney. Each other flow in
-`apps/mobile/screenshots/` captures one screen. To add a screen, add a flow
-that runs the common flow, reaches the screen and ends with
+`apps/mobile/screenshots/` captures one screen, stopping as often as the
+largest text size needs. To add a screen, add a flow that runs the common
+flow, reaches the screen and ends with
 `takeScreenshot: ${PREFIX}-<screen-name>`. `capture.sh` runs every flow in each
-appearance.
+appearance and text size.
 
 To capture locally on an Android emulator, install Maestro and build the debug
 APK for the emulator's ABI. From the repository root, start Metro with the flag:

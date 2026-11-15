@@ -3,20 +3,31 @@ appId: au.com.binarybalance.daylightsaviour
 ---
 - launchApp:
     clearState: true
-# A development build loads its bundle from Metro. The first bundle took six
-# minutes on a hosted macOS runner.
+# A development build loads its bundle from Metro. The first bundle has taken
+# up to 11 minutes on a hosted macOS runner.
 - extendedWaitUntil:
     visible: 'Choose another region|Choose Home Time Zone'
-    timeout: 600000
+    timeout: 900000
 # The device's own time zone decides which of the two screens appears.
 - runFlow:
     when:
       visible: 'Choose another region'
     commands:
       - tapOn: 'Choose another region'
+# At the largest iOS text size the heading fills about two screens.
+- scrollUntilVisible:
+    element: 'Search Australian Home Time Zones'
+    timeout: 60000
 - tapOn: 'Search Australian Home Time Zones'
 - inputText: 'Sydney'
+# At the largest text size the keyboard covers the results (#296). Return
+# closes it; Maestro's hideKeyboard fails on iOS.
+- pressKey: Enter
+- scrollUntilVisible:
+    element: 'Sydney, Canberra & most of NSW, Australia/Sydney'
 - tapOn: 'Sydney, Canberra & most of NSW, Australia/Sydney'
+# Settings is the report's first item; at the largest iOS text size the
+# status is a screen or two below it.
 - extendedWaitUntil:
-    visible: 'DAYLIGHT SAVING STATUS'
+    visible: 'Settings'
     timeout: 30000

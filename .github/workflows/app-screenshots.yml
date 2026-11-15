@@ -2,6 +2,12 @@ name: App screenshots
 
 on:
   workflow_dispatch:
+    inputs:
+      ios_simulator:
+        description: iOS simulator. iPhone SE (3rd generation) is the narrowest supported iPhone.
+        required: true
+        default: iPhone 17
+        type: string
 
 permissions:
   contents: read
@@ -118,9 +124,14 @@ jobs:
 
   ios:
     runs-on: macos-26
-    timeout-minutes: 60
+    # Long scrolls at the largest text size and a slow first bundle need
+    # more than an hour.
+    timeout-minutes: 90
     env:
-      SIMULATOR: iPhone 17
+      SIMULATOR: ${{ inputs.ios_simulator }}
+      # Maestro's iOS driver missed its default start-up time on hosted
+      # runners twice.
+      MAESTRO_DRIVER_STARTUP_TIMEOUT: '180000'
       XCODE_VERSION: '26.6'
     steps:
       - name: Check out repository
@@ -134,6 +145,13 @@ jobs:
 
       - name: Select Xcode
         run: sudo xcode-select --switch "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+
+      # The hosted image knows the iPhone SE (3rd generation) but has no
+      # simulator for it.
+      - name: Create simulator if missing
+        run: |
+          xcrun simctl list devices available | grep -qF -- "$SIMULATOR (" ||
+            xcrun simctl create "$SIMULATOR" "$SIMULATOR"
 
       - name: Install dependencies
         run: npm ci
@@ -176,7 +194,9 @@ jobs:
           xcrun simctl install booted "$RUNNER_TEMP/derived-data/Build/Products/Debug-iphonesimulator/DaylightSaviour.app"
 
       - name: Capture screenshots
-        run: apps/mobile/screenshots/capture.sh ios iphone-17 "$RUNNER_TEMP/screenshots"
+        run: |
+          device=$(echo "$SIMULATOR" | tr '[:upper:] ' '[:lower:]-' | tr -d '()')
+          apps/mobile/screenshots/capture.sh ios "$device" "$RUNNER_TEMP/screenshots"
 
       - name: Upload screenshots
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
