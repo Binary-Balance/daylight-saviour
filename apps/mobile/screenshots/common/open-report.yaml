@@ -16,6 +16,10 @@ appId: au.com.binarybalance.daylightsaviour
       - tapOn: 'Choose another region'
 - tapOn: 'Search Australian Home Time Zones'
 - inputText: 'Sydney'
+# At the largest text size the keyboard covers the results (#296).
+- hideKeyboard
+- scrollUntilVisible:
+    element: 'Sydney, Canberra & most of NSW, Australia/Sydney'
 - tapOn: 'Sydney, Canberra & most of NSW, Australia/Sydney'
 - extendedWaitUntil:
     visible: 'DAYLIGHT SAVING STATUS'

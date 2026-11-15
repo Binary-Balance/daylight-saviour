@@ -141,6 +141,13 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select --switch "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
 
+      # The hosted image knows the iPhone SE (3rd generation) but has no
+      # simulator for it.
+      - name: Create simulator if missing
+        run: |
+          xcrun simctl list devices available | grep -qF "$SIMULATOR (" ||
+            xcrun simctl create "$SIMULATOR" "$SIMULATOR"
+
       - name: Install dependencies
         run: npm ci
 
