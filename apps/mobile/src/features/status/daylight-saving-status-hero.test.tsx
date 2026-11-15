@@ -196,6 +196,8 @@ describe('DaylightSavingStatusHero', () => {
     const overflow = screen.getByTestId('clock-overflow');
     expect(ReactNative.StyleSheet.flatten(overflow.props.style)).toMatchObject({
       alignSelf: 'stretch',
+      // Growing, the default, pushed the rest of the report out of reach.
+      flexGrow: 0,
       maxWidth: '100%',
     });
     expect(overflow.props.horizontal).toBe(true);
@@ -242,6 +244,23 @@ describe('DaylightSavingStatusHero', () => {
       );
     },
   );
+
+  it('leaves the status wrapper out of the accessibility tree', () => {
+    render(
+      <DaylightSavingStatusHero
+        facts={facts}
+        palette={daylightSaviourPalettes.light}
+        reducedMotion
+        uses24hourClock={false}
+      />,
+    );
+
+    // Otherwise TalkBack reads the wrapper, and the status is not a heading.
+    expect(
+      screen.getByTestId('status-motion-short-fade').props
+        .importantForAccessibility,
+    ).toBe('no');
+  });
 
   it.each([
     [false, 180, 'status-motion-lock-in'],

@@ -170,8 +170,11 @@ export default function DaylightSavingStatusHero({
       <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
         {copy.civilTimeReport.daylightSavingStatusHeading}
       </Text>
+      {/* Left out of the accessibility tree so TalkBack reads the status itself,
+          as a heading, rather than this animated wrapper as plain text. */}
       <Animated.View
         accessibilityLiveRegion="none"
+        importantForAccessibility="no"
         style={styles.statusTransition}
         testID={
           reducedMotion === null
@@ -250,7 +253,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   clockLineLarge: { alignItems: 'flex-start', flexDirection: 'column', gap: 0 },
-  clockOverflow: { alignSelf: 'stretch', maxWidth: '100%' },
+  // A ScrollView grows to fill its parent by default. On Android that pushed
+  // the rest of the report out of reach at large text sizes.
+  clockOverflow: { alignSelf: 'stretch', flexGrow: 0, maxWidth: '100%' },
   clockMeridiem: {
     fontWeight: '800',
   },
