@@ -12,8 +12,15 @@ appId: au.com.binarybalance.daylightsaviour
     timeout: 120000
 - tapOn: 'Enable reminders'
 # Centred so the switch shows too when large text stacks it below the label.
+# At the largest iOS text size the enabled card is much shorter than the
+# explanation it replaces, which leaves the switch above the screen.
 - scrollUntilVisible:
     element: 'One-day Change Reminder'
+    centerElement: true
+    optional: true
+- scrollUntilVisible:
+    element: 'One-day Change Reminder'
+    direction: UP
     centerElement: true
     timeout: 120000
 - waitForAnimationToEnd
