@@ -47,6 +47,7 @@ let returnToApp: ((state: string) => void) | undefined;
 let announce: jest.SpiedFunction<
   typeof AccessibilityInfo.announceForAccessibility
 >;
+const spoken = () => announce.mock.calls.map(([message]) => message);
 
 beforeEach(() => {
   // React Native's Jest setup already mocks this, so calls outlive each test.
@@ -163,6 +164,44 @@ async function startRegistration(adapters: ChangeReminderAdapters) {
   );
 }
 
+// Registers, turns the one-week timing off, then turns the one-day timing off
+// and confirms the deletion.
+async function startDeletion(adapters: ChangeReminderAdapters) {
+  await startRegistration(adapters);
+  // By label: Android's switch is not matched by role in tests.
+  fireEvent(
+    await screen.findByLabelText(copy.changeReminders.accessibility.oneWeek),
+    'valueChange',
+    false,
+  );
+  await screen.findByText(
+    copy.changeReminders.enabled.body({
+      oneDayEnabled: true,
+      oneWeekEnabled: false,
+    }),
+  );
+  fireEvent(
+    screen.getByLabelText(copy.changeReminders.accessibility.oneDay),
+    'valueChange',
+    false,
+  );
+  announce.mockClear();
+  fireEvent.press(
+    await screen.findByRole('button', {
+      name: copy.changeReminders.disableConfirmation.confirm,
+    }),
+  );
+}
+
+// Registration, then the one-week timing turned off, then the given deletion.
+function deletionReplies(deletion: Response) {
+  return inOrder(
+    Promise.resolve(Response.json(registration)),
+    Promise.resolve(new Response(null, { status: 204 })),
+    Promise.resolve(deletion),
+  );
+}
+
 async function passDeadline() {
   await act(async () => {
     await jest.advanceTimersByTimeAsync(deadlineMs);
@@ -250,7 +289,6 @@ describe('announcements', () => {
     oneDayEnabled: true,
     oneWeekEnabled: true,
   });
-  const spoken = () => announce.mock.calls.map(([message]) => message);
 
   it.each(['android', 'ios'] as const)(
     'on %s announces registration starting and its confirmed outcome once each',
@@ -356,6 +394,45 @@ describe('announcements', () => {
     });
 
     await startRegistration(test.adapters);
+    await screen.findByRole('alert');
+
+    expect(spoken()).toEqual(expected);
+  });
+
+  it.each(['android', 'ios'] as const)(
+    'on %s announces deletion starting and its outcome once each',
+    async (platform) => {
+      jest.replaceProperty(Platform, 'OS', platform);
+      const test = setup({
+        fetchImplementation: deletionReplies(
+          new Response(null, { status: 204 }),
+        ),
+      });
+
+      await startDeletion(test.adapters);
+      await screen.findByText(copy.changeReminders.disabled.body);
+
+      expect(spoken()).toEqual([
+        copy.changeReminders.disabling,
+        copy.changeReminders.disabled.body,
+      ]);
+    },
+  );
+
+  it.each<[string, readonly string[]]>([
+    // Android's assertive region reads failures, so a second reading is noise.
+    ['android', [copy.changeReminders.disabling]],
+    [
+      'ios',
+      [copy.changeReminders.disabling, copy.changeReminders.disableFailed.body],
+    ],
+  ])('announces a failed deletion once on %s', async (platform, expected) => {
+    jest.replaceProperty(Platform, 'OS', platform as typeof Platform.OS);
+    const test = setup({
+      fetchImplementation: deletionReplies(Response.json({}, { status: 500 })),
+    });
+
+    await startDeletion(test.adapters);
     await screen.findByRole('alert');
 
     expect(spoken()).toEqual(expected);

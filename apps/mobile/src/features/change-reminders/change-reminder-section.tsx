@@ -45,10 +45,17 @@ import {
   type ChangeReminderSessionSnapshot,
 } from './change-reminder-session';
 
-// Announces registration starting and finishing, once each. Live regions do
-// not suit this: iOS ignores them, and on Android the enabled text would be read
-// on every launch and return to the app, because the card restores itself.
-function useRegistrationAnnouncements(
+// What registration and deletion say when they start.
+const startAnnouncements: Partial<Record<string, string>> = {
+  disabling: copy.changeReminders.disabling,
+  saving: copy.changeReminders.saving.body,
+};
+
+// Announces registration and deletion starting and finishing, once each. Live
+// regions do not suit this: iOS ignores them, and on Android the enabled text
+// would be read on every launch and return to the app, because the card
+// restores itself.
+function useProgressAnnouncements(
   kind: string,
   outcome: string | undefined,
   outcomeReadByRegion: boolean,
@@ -58,17 +65,16 @@ function useRegistrationAnnouncements(
   useEffect(() => {
     const previous = previousKind.current;
     previousKind.current = kind;
-    if (kind === 'saving') {
+    const start = startAnnouncements[kind];
+    if (start !== undefined) {
       // Every return to the app rechecks a blocked permission, usually with no
       // change, so only a new outcome is worth saying.
-      recheckingBlock.current = previous === 'os-blocked';
+      recheckingBlock.current = kind === 'saving' && previous === 'os-blocked';
       if (!recheckingBlock.current) {
-        AccessibilityInfo.announceForAccessibility(
-          copy.changeReminders.saving.body,
-        );
+        AccessibilityInfo.announceForAccessibility(start);
       }
     } else if (
-      previous === 'saving' &&
+      startAnnouncements[previous] !== undefined &&
       outcome !== undefined &&
       !outcomeReadByRegion &&
       !(recheckingBlock.current && kind === 'os-blocked')
@@ -410,7 +416,7 @@ export default function ChangeReminderSection({
 
   const card = cardOf(snapshot);
   const Actions = card.Actions;
-  useRegistrationAnnouncements(
+  useProgressAnnouncements(
     snapshot.kind,
     card.tone === 'busy' ? undefined : card.content.body,
     card.tone === 'error' && Platform.OS === 'android',
