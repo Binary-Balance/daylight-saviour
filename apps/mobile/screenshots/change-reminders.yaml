@@ -7,9 +7,13 @@ appId: au.com.binarybalance.daylightsaviour
     element: 'Warn me before time misbehaves'
     timeout: 120000
 - tapOn: 'Warn me before time misbehaves'
+# Centred so the explanation above the button shows too.
 - scrollUntilVisible:
     element: 'Enable reminders'
+    centerElement: true
     timeout: 120000
+- waitForAnimationToEnd
+- takeScreenshot: ${PREFIX}-change-reminders-explainer
 - tapOn: 'Enable reminders'
 # Centred so the screenshot shows the whole timing row, not just its edge.
 # At the largest iOS text size the enabled card is much shorter than the
