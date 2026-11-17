@@ -193,6 +193,15 @@ jobs:
           xcrun simctl bootstatus "$SIMULATOR"
           xcrun simctl install booted "$RUNNER_TEMP/derived-data/Build/Products/Debug-iphonesimulator/DaylightSaviour.app"
 
+      # Twice the app gave up on a first bundle that took Metro over four
+      # minutes, and showed "Could not connect to development server".
+      # Requesting the app's own bundle URL first leaves Metro's cache warm.
+      - name: Build the first bundle
+        run: |
+          curl --fail --silent --show-error --output /dev/null \
+            --retry 30 --retry-connrefused --retry-delay 2 --max-time 1200 \
+            'http://localhost:8081/.expo/.virtual-metro-entry.bundle?platform=ios&dev=true&lazy=true&minify=false&inlineSourceMap=false&modulesOnly=false&runModule=true&excludeSource=true&sourcePaths=url-server&app=au.com.binarybalance.daylightsaviour'
+
       - name: Capture screenshots
         run: |
           device=$(echo "$SIMULATOR" | tr '[:upper:] ' '[:lower:]-' | tr -d '()')
