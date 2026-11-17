@@ -260,6 +260,8 @@ const styles = StyleSheet.create({
   button: {
     alignSelf: 'flex-start',
     borderWidth: 1,
+    // Centres the label when the 44-point minimum is taller than it.
+    justifyContent: 'center',
     minHeight: 44,
     paddingHorizontal: 14,
     paddingVertical: 10,

@@ -1224,6 +1224,8 @@ function expectCard({
     expect(button.props.accessibilityHint).toBe(hint);
     const outline = StyleSheet.flatten(button.props.style);
     const text = StyleSheet.flatten(label.props.style);
+    // The label sits in the middle of the 44-point minimum, not at its top.
+    expect(outline).toMatchObject({ justifyContent: 'center' });
     if (primary) {
       expect(outline).toMatchObject({ backgroundColor: dark.actionFill });
       expect(outline).not.toHaveProperty('borderColor');
