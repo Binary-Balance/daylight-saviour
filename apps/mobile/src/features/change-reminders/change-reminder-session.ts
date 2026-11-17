@@ -54,6 +54,7 @@ export type ChangeReminderSessionSnapshot =
   | {
       readonly kind: 'disable-failed';
       readonly preferences: ChangeReminderPreferences;
+      readonly throttled?: true;
     }
   | {
       readonly kind: 'disabling';
@@ -360,7 +361,8 @@ export function createChangeReminderSession({
           publish(
             result.kind === 'disabled'
               ? result
-              : { kind: 'disable-failed', preferences },
+              : // Keeps whether the service throttled the request.
+                { ...result, kind: 'disable-failed', preferences },
           );
       },
       () => {

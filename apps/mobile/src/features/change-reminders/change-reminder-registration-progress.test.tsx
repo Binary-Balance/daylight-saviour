@@ -439,6 +439,49 @@ describe('announcements', () => {
   });
 });
 
+describe('when the service refuses too many requests', () => {
+  const throttled = () => Response.json({}, { status: 429 });
+
+  it('asks for a wait before registering again', async () => {
+    const test = setup({
+      fetchImplementation: inOrder(Promise.resolve(throttled())),
+    });
+
+    await startRegistration(test.adapters);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      copy.changeReminders.failed.throttledBody,
+    );
+    expect(screen.getByText(copy.changeReminders.failed.heading)).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: copy.changeReminders.failed.retry }),
+    ).toBeTruthy();
+  });
+
+  it('asks for a wait before deleting again, and says so on iOS', async () => {
+    jest.replaceProperty(Platform, 'OS', 'ios');
+    const test = setup({ fetchImplementation: deletionReplies(throttled()) });
+
+    await startDeletion(test.adapters);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      copy.changeReminders.disableFailed.throttledBody,
+    );
+    expect(
+      screen.getByText(copy.changeReminders.disableFailed.heading),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('button', {
+        name: copy.changeReminders.disableFailed.confirm,
+      }),
+    ).toBeTruthy();
+    expect(spoken()).toEqual([
+      copy.changeReminders.disabling,
+      copy.changeReminders.disableFailed.throttledBody,
+    ]);
+  });
+});
+
 it.each<[string, () => Response]>([
   ['a refusal', () => Response.json({}, { status: 500 })],
   [

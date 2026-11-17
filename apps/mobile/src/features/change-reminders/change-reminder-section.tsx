@@ -239,16 +239,30 @@ const cards: Record<Exclude<Kind, 'enabled'>, Card> = {
   'zone-mismatch': { content: reminders.zoneMismatch, tone: 'error' },
 };
 
+// Retrying at once after the service throttled a request is refused again,
+// so these say how long to wait instead.
+const throttledBodies = {
+  'disable-failed': reminders.disableFailed.throttledBody,
+  failed: reminders.failed.throttledBody,
+};
+
 function cardOf(snapshot: ChangeReminderSessionSnapshot): Card {
-  return snapshot.kind === 'enabled'
+  if (snapshot.kind === 'enabled') {
+    return {
+      content: {
+        body: reminders.enabled.body(snapshot.preferences),
+        heading: reminders.enabled.heading,
+      },
+      tone: 'plain',
+    };
+  }
+  const card = cards[snapshot.kind];
+  return 'throttled' in snapshot
     ? {
-        content: {
-          body: reminders.enabled.body(snapshot.preferences),
-          heading: reminders.enabled.heading,
-        },
-        tone: 'plain',
+        ...card,
+        content: { ...card.content, body: throttledBodies[snapshot.kind] },
       }
-    : cards[snapshot.kind];
+    : card;
 }
 
 function CardMessage({

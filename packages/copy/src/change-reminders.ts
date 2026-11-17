@@ -54,6 +54,8 @@ export const changeReminders = Object.freeze({
     body: 'Deletion could not be confirmed on this device. Check your connection and try again.',
     confirm: 'Try deletion again',
     heading: 'REMINDER DELETION NOT CONFIRMED',
+    throttledBody:
+      'Too many reminder changes in a short time. Try deletion again in 10 minutes.',
   }),
   disabling: 'Deleting Change Reminder registration…',
   enabled: Object.freeze({
@@ -77,6 +79,8 @@ export const changeReminders = Object.freeze({
     body: 'Reminders are not enabled. Check your connection and try again.',
     heading: 'REMINDER REGISTRATION FAILED',
     retry: 'Try registration again',
+    throttledBody:
+      'Too many reminder changes in a short time. Try again in 10 minutes.',
   }),
   heading: 'CHANGE REMINDERS',
   loading: 'Checking reminder registration…',

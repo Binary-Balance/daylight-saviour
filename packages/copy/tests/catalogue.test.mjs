@@ -107,6 +107,18 @@ describe('Australian-English copy catalogue', () => {
     );
   });
 
+  it('asks for a wait, not a connection check, when the service throttles', () => {
+    const reminders = australianEnglish.changeReminders;
+    assert.equal(
+      reminders.failed.throttledBody,
+      'Too many reminder changes in a short time. Try again in 10 minutes.',
+    );
+    assert.equal(
+      reminders.disableFailed.throttledBody,
+      'Too many reminder changes in a short time. Try deletion again in 10 minutes.',
+    );
+  });
+
   it('names the App info switch Android shows on each version', () => {
     const { androidPause } = australianEnglish.changeReminders;
     assert.equal(Object.isFrozen(androidPause), true);
