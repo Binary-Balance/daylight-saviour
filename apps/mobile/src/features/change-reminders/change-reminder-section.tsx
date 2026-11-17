@@ -69,7 +69,7 @@ function useProgressAnnouncements(
     if (start !== undefined) {
       // Every return to the app rechecks a blocked permission, usually with no
       // change, so only a new outcome is worth saying.
-      recheckingBlock.current = kind === 'saving' && previous === 'os-blocked';
+      recheckingBlock.current = previous === 'os-blocked';
       if (!recheckingBlock.current) {
         AccessibilityInfo.announceForAccessibility(start);
       }
