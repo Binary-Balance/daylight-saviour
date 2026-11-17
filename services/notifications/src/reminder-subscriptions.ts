@@ -1218,7 +1218,9 @@ async function takeThrottleAllowance(
       if (updateStatus !== 409 && updateStatus !== 412) throw updateError;
     }
   }
-  throw new Error('Throttle update contention exceeded retry limit');
+  // A burst this busy is what the throttle is for, so refuse it with a 429
+  // rather than fail as a server error.
+  return false;
 }
 
 interface SubscriptionRow {
