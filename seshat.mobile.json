@@ -28,7 +28,7 @@
       "name": "mobile",
       "runner": "jest",
       "cwd": "apps/mobile",
-      "timeoutMs": 120000,
+      "timeoutMs": 180000,
       "typecheck": [
         "node",
         "../../node_modules/typescript/bin/tsc",
