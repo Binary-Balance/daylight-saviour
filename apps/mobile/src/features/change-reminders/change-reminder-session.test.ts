@@ -1294,6 +1294,46 @@ describe('Change Reminder session', () => {
     stop();
   });
 
+  // Any return to the app restores the card, even pulling down Control
+  // Centre on iOS, so the wait message must survive it.
+  it('still says to wait after a throttled deletion when the app returns', async () => {
+    const restore = jest.fn(
+      async (): Promise<ChangeReminderRestoreResult> => registered,
+    );
+    const { session, stop } = await startEnabledSession({
+      disable: jest.fn(async () => ({
+        kind: 'failed' as const,
+        throttled: true as const,
+      })),
+      restore,
+    });
+    session.dispatch({
+      type: 'change-preferences',
+      preferences: { oneDayEnabled: false, oneWeekEnabled: false },
+    });
+    session.dispatch({ type: 'confirm-disable' });
+    await waitForSnapshot(
+      session,
+      (snapshot) => snapshot.kind === 'disable-failed',
+    );
+    restore.mockResolvedValue({
+      homeTimeZone: 'Australia/Sydney',
+      kind: 'deleting',
+      preferences: bothTimings,
+    });
+
+    session.dispatch({ type: 'foreground' });
+
+    await flush();
+    expect(restore).toHaveBeenCalledTimes(2);
+    expect(session.getSnapshot()).toEqual({
+      kind: 'disable-failed',
+      preferences: bothTimings,
+      throttled: true,
+    });
+    stop();
+  });
+
   it('shows a failure when a token refresh fails for good', async () => {
     const { session, stop } = await startEnabledSession();
 
