@@ -23,7 +23,11 @@ export const warnAfterLastContactMs = 365 * 24 * 60 * 60 * 1000;
 const expireAfterLastContactMs = 2 * warnAfterLastContactMs;
 const registrationRequestValidityMs = 24 * 60 * 60 * 1000;
 const registrationRequestFutureSkewMs = 5 * 60 * 1000;
-const throttleLimit = 5;
+// Carriers often share one address between many phones, so the address limit
+// is looser. Turning reminders off and on again creates a new installation, so
+// a phone can still spend more than one installation's allowance.
+const sourceThrottleLimit = 30;
+const installationThrottleLimit = 5;
 const tableMutationRetryLimit = 12;
 const subscriptionPartitionKey = 'subscriptions-v1';
 const zoneSubscriptionPageSize = 100;
@@ -1071,6 +1075,7 @@ export function createTableReminderSubscriptionStore(
       return takeThrottleAllowance(
         throttles,
         hashOpaqueValue(`daylight-saviour:reminder-source:v1:${sourceHash}`),
+        sourceThrottleLimit,
         now,
       );
     },
@@ -1080,6 +1085,7 @@ export function createTableReminderSubscriptionStore(
         hashOpaqueValue(
           `daylight-saviour:reminder-installation:v1:${installationId}`,
         ),
+        installationThrottleLimit,
         now,
       );
     },
@@ -1177,6 +1183,7 @@ async function startWindow(
 async function takeThrottleAllowance(
   throttles: ThrottleTable,
   subjectHash: string,
+  limit: number,
   now: Date,
 ) {
   const window = Math.floor(now.getTime() / throttleWindowMs);
@@ -1194,7 +1201,7 @@ async function takeThrottleAllowance(
       continue;
     }
 
-    if (entity.count >= throttleLimit) return false;
+    if (entity.count >= limit) return false;
     try {
       await throttles.replace(
         {
