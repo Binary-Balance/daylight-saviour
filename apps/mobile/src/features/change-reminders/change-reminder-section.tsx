@@ -45,8 +45,10 @@ import {
   type ChangeReminderSessionSnapshot,
 } from './change-reminder-session';
 
+type Kind = ChangeReminderSessionSnapshot['kind'];
+
 // What registration and deletion say when they start.
-const startAnnouncements: Partial<Record<string, string>> = {
+const startAnnouncements: Partial<Record<Kind, string>> = {
   disabling: copy.changeReminders.disabling,
   saving: copy.changeReminders.saving.body,
 };
@@ -56,7 +58,7 @@ const startAnnouncements: Partial<Record<string, string>> = {
 // would be read on every launch and return to the app, because the card
 // restores itself.
 function useProgressAnnouncements(
-  kind: string,
+  kind: Kind,
   outcome: string | undefined,
   outcomeReadByRegion: boolean,
 ) {
@@ -153,8 +155,6 @@ function useTestInstallationId(
 }
 
 const reminders = copy.changeReminders;
-
-type Kind = ChangeReminderSessionSnapshot['kind'];
 
 interface Card {
   readonly Actions?: ComponentType<ActionProps>;
