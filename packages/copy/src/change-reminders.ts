@@ -71,7 +71,7 @@ export const changeReminders = Object.freeze({
     heading: 'CHANGE REMINDERS ENABLED',
   }),
   explainer: Object.freeze({
-    body: 'One week and one day before your clocks change, following your Home Time Zone as you travel. Best effort, no account, and we store only what’s needed to send them.',
+    body: 'One week and one day before your clocks change, following your Home Time Zone as you travel. Best effort, no account, and we store only what’s needed to send them and prevent abuse.',
     confirm: 'Enable reminders',
     heading: 'WARN ME BEFORE TIME MISBEHAVES',
   }),
