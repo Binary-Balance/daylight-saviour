@@ -197,6 +197,8 @@ jobs:
       # minutes, and showed "Could not connect to development server".
       # Requesting the app's own bundle URL first leaves Metro's cache warm.
       - name: Build the first bundle
+        # Retries also follow timeouts and server errors, so cap the total.
+        timeout-minutes: 20
         run: |
           curl --fail --silent --show-error --output /dev/null \
             --retry 30 --retry-connrefused --retry-delay 2 --max-time 1200 \
