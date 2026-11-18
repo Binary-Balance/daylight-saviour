@@ -447,8 +447,10 @@ shape:
 
 Seshat stops each mutant job at a time limit: five times the area's slowest
 baseline test run, at least 30 seconds and at most the setup's `timeoutMs`. That
-is 30 seconds for packages, and for mobile about 70 to 100 seconds, depending on
-the baseline. Notifications sets
+is 30 seconds for packages, and for mobile about 128 seconds in November 2026
+(five times a 25-second baseline). A `timeoutMs` below that limit makes Seshat
+stop counting jobs cut off there as timeouts: at 120 seconds three were left
+unresolved. Mobile's `timeoutMs` is 180 seconds to stay above it. Notifications sets
 `mutantTimeoutMinMs` and `timeoutMs` to 120 seconds, because mutants that skip a
 `clearTimeout` hold a real 10-second timer open in each test file that reaches
 it, and the large zone test in dispatch makes every run slower. Its slowest

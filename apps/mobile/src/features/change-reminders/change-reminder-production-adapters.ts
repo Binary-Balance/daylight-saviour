@@ -9,6 +9,7 @@ import { canonicalAustralianZoneId } from '@daylight-saviour/domain/australian-z
 import { parseReminderRegistrationEndpoint } from './reminder-registration-endpoint.cjs';
 import type {
   ChangeReminderAdapters,
+  ChangeReminderDisableResult,
   ChangeReminderEnableResult,
   ChangeReminderPreferences,
   ChangeReminderRestoreResult,
@@ -396,6 +397,14 @@ function registrationGone(response: {
     response.status === 404 &&
     response.body.includes('Registration unavailable')
   );
+}
+
+// Retrying a 429 at once is refused again, so the card asks for a wait
+// instead of blaming the connection.
+function failure(status: number) {
+  return status === 429
+    ? ({ kind: 'failed', throttled: true } as const)
+    : ({ kind: 'failed' } as const);
 }
 
 function checkInDue(lastContactAt: string | undefined, now: Date) {
@@ -837,7 +846,7 @@ export function createProductionChangeReminderAdapters({
       await secureStore.deleteItemAsync(registrationKey);
       return { kind: 'unregistered' };
     }
-    return { kind: 'failed' };
+    return failure(response.status);
   }
 
   async function performEnable(
@@ -931,9 +940,7 @@ export function createProductionChangeReminderAdapters({
     readonly homeTimeZone: string;
     readonly promise: Promise<ChangeReminderEnableResult>;
   } | null = null;
-  let disableInFlight: Promise<
-    { readonly kind: 'disabled' } | { readonly kind: 'failed' }
-  > | null = null;
+  let disableInFlight: Promise<ChangeReminderDisableResult> | null = null;
   let registrationQueue = Promise.resolve();
   let queuedRefreshToken: unknown = null;
   let queuedRefreshListenerGeneration = 0;
@@ -1283,7 +1290,7 @@ export function createProductionChangeReminderAdapters({
             registrationEndpoint,
             pendingDelete,
           );
-          if (response.status !== 204) return { kind: 'failed' as const };
+          if (response.status !== 204) return failure(response.status);
           await secureStore.deleteItemAsync(registrationKey);
           latestHomeTimeZoneIntent = null;
           return { kind: 'disabled' as const };

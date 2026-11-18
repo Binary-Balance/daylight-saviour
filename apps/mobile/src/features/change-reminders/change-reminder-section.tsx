@@ -45,11 +45,20 @@ import {
   type ChangeReminderSessionSnapshot,
 } from './change-reminder-session';
 
-// Announces registration starting and finishing, once each. Live regions do
-// not suit this: iOS ignores them, and on Android the enabled text would be read
-// on every launch and return to the app, because the card restores itself.
-function useRegistrationAnnouncements(
-  kind: string,
+type Kind = ChangeReminderSessionSnapshot['kind'];
+
+// What registration and deletion say when they start.
+const startAnnouncements: Partial<Record<Kind, string>> = {
+  disabling: copy.changeReminders.disabling,
+  saving: copy.changeReminders.saving.body,
+};
+
+// Announces registration and deletion starting and finishing, once each. Live
+// regions do not suit this: iOS ignores them, and on Android the enabled text
+// would be read on every launch and return to the app, because the card
+// restores itself.
+function useProgressAnnouncements(
+  kind: Kind,
   outcome: string | undefined,
   outcomeReadByRegion: boolean,
 ) {
@@ -58,17 +67,16 @@ function useRegistrationAnnouncements(
   useEffect(() => {
     const previous = previousKind.current;
     previousKind.current = kind;
-    if (kind === 'saving') {
+    const start = startAnnouncements[kind];
+    if (start !== undefined) {
       // Every return to the app rechecks a blocked permission, usually with no
       // change, so only a new outcome is worth saying.
       recheckingBlock.current = previous === 'os-blocked';
       if (!recheckingBlock.current) {
-        AccessibilityInfo.announceForAccessibility(
-          copy.changeReminders.saving.body,
-        );
+        AccessibilityInfo.announceForAccessibility(start);
       }
     } else if (
-      previous === 'saving' &&
+      startAnnouncements[previous] !== undefined &&
       outcome !== undefined &&
       !outcomeReadByRegion &&
       !(recheckingBlock.current && kind === 'os-blocked')
@@ -147,8 +155,6 @@ function useTestInstallationId(
 }
 
 const reminders = copy.changeReminders;
-
-type Kind = ChangeReminderSessionSnapshot['kind'];
 
 interface Card {
   readonly Actions?: ComponentType<ActionProps>;
@@ -233,16 +239,30 @@ const cards: Record<Exclude<Kind, 'enabled'>, Card> = {
   'zone-mismatch': { content: reminders.zoneMismatch, tone: 'error' },
 };
 
+// Retrying at once after the service throttled a request is refused again,
+// so these say how long to wait instead.
+const throttledBodies = {
+  'disable-failed': reminders.disableFailed.throttledBody,
+  failed: reminders.failed.throttledBody,
+};
+
 function cardOf(snapshot: ChangeReminderSessionSnapshot): Card {
-  return snapshot.kind === 'enabled'
+  if (snapshot.kind === 'enabled') {
+    return {
+      content: {
+        body: reminders.enabled.body(snapshot.preferences),
+        heading: reminders.enabled.heading,
+      },
+      tone: 'plain',
+    };
+  }
+  const card = cards[snapshot.kind];
+  return 'throttled' in snapshot
     ? {
-        content: {
-          body: reminders.enabled.body(snapshot.preferences),
-          heading: reminders.enabled.heading,
-        },
-        tone: 'plain',
+        ...card,
+        content: { ...card.content, body: throttledBodies[snapshot.kind] },
       }
-    : cards[snapshot.kind];
+    : card;
 }
 
 function CardMessage({
@@ -410,7 +430,7 @@ export default function ChangeReminderSection({
 
   const card = cardOf(snapshot);
   const Actions = card.Actions;
-  useRegistrationAnnouncements(
+  useProgressAnnouncements(
     snapshot.kind,
     card.tone === 'busy' ? undefined : card.content.body,
     card.tone === 'error' && Platform.OS === 'android',

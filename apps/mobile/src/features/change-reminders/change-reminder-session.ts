@@ -54,6 +54,7 @@ export type ChangeReminderSessionSnapshot =
   | {
       readonly kind: 'disable-failed';
       readonly preferences: ChangeReminderPreferences;
+      readonly throttled?: true;
     }
   | {
       readonly kind: 'disabling';
@@ -247,9 +248,22 @@ export function createChangeReminderSession({
         case 'unregistered':
           publish({ kind: 'untouched' });
           break;
-        case 'deleting':
-          publish({ kind: 'disable-failed', preferences: result.preferences });
+        case 'deleting': {
+          // Any return to the app restores the card, even pulling down Control
+          // Centre on iOS. A throttled deletion must keep saying to wait.
+          const throttled =
+            snapshot.kind === 'disable-failed' && snapshot.throttled === true;
+          publish(
+            throttled
+              ? {
+                  kind: 'disable-failed',
+                  preferences: result.preferences,
+                  throttled,
+                }
+              : { kind: 'disable-failed', preferences: result.preferences },
+          );
           break;
+        }
         case 'pending':
           restorePending(expectedGeneration, result);
           break;
@@ -360,7 +374,8 @@ export function createChangeReminderSession({
           publish(
             result.kind === 'disabled'
               ? result
-              : { kind: 'disable-failed', preferences },
+              : // Keeps whether the service throttled the request.
+                { ...result, kind: 'disable-failed', preferences },
           );
       },
       () => {

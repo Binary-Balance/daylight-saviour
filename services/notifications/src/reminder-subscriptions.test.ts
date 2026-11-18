@@ -4007,17 +4007,30 @@ describe('durable throttle', () => {
     const now = new Date('2026-07-24T05:00:00.000Z');
     const results = await Promise.all(
       Array.from({ length: 10 }, () =>
-        tableStore.takeSourceAllowance('source-hash', now),
+        tableStore.takeInstallationAllowance('installation-id', now),
       ),
     );
     assert.equal(results.filter(Boolean).length, 5);
     assert.equal(results.filter((allowed) => !allowed).length, 5);
   });
 
-  // The first five requests fill a window, from any moment in it to its first
-  // and last millisecond. The sixth waits for the next window. A row is kept
-  // for thirty days from when its window opened, however late in the window it
-  // was made.
+  it('allows an address thirty requests a window', async () => {
+    const tableStore = createTableReminderSubscriptionStore(
+      subscriptionTable(),
+      createConcurrentTable(),
+    );
+    const now = new Date('2026-07-24T05:00:00.000Z');
+    const allowed = [];
+    for (let request = 0; request < 31; request += 1) {
+      allowed.push(await tableStore.takeSourceAllowance('source-hash', now));
+    }
+    assert.deepEqual(allowed, [...Array<boolean>(30).fill(true), false]);
+  });
+
+  // The first five requests for an installation fill a window, from any moment
+  // in it to its first and last millisecond. The sixth waits for the next
+  // window. A row is kept for thirty days from when its window opened, however
+  // late in the window it was made.
   it('counts each ten-minute window apart and expires its row thirty days after the window opens', async () => {
     const throttles = createConcurrentTable();
     const tableStore = createTableReminderSubscriptionStore(
@@ -4039,8 +4052,8 @@ describe('durable throttle', () => {
       windowMs,
     ]) {
       allowed.push(
-        await tableStore.takeSourceAllowance(
-          'source-hash',
+        await tableStore.takeInstallationAllowance(
+          'installation-id',
           new Date(windowStart + offset),
         ),
       );
@@ -4048,7 +4061,7 @@ describe('durable throttle', () => {
 
     assert.deepEqual(allowed, [true, true, true, true, true, false, true]);
     const subject = hashOpaqueValue(
-      'daylight-saviour:reminder-source:v1:source-hash',
+      'daylight-saviour:reminder-installation:v1:installation-id',
     );
     const window = windowStart / windowMs;
     assert.deepEqual(
@@ -4090,7 +4103,7 @@ describe('durable throttle', () => {
   });
 
   // Retries that lose their bound must fail these tests, not hang them.
-  it('gives up after twelve attempts to create a window that others create first', async () => {
+  it('refuses after twelve attempts to create a window that others create first', async () => {
     let reads = 0;
     const throttles = createConcurrentTable();
     const tableStore = createTableReminderSubscriptionStore(
@@ -4108,18 +4121,17 @@ describe('durable throttle', () => {
       },
     );
 
-    await assert.rejects(
-      () =>
-        tableStore.takeSourceAllowance(
-          'source-hash',
-          new Date('2026-07-24T05:00:00.000Z'),
-        ),
-      /Throttle update contention exceeded retry limit/,
+    assert.equal(
+      await tableStore.takeSourceAllowance(
+        'source-hash',
+        new Date('2026-07-24T05:00:00.000Z'),
+      ),
+      false,
     );
     assert.equal(reads, 12);
   });
 
-  it('gives up after twelve attempts to count a window that others count first', async () => {
+  it('refuses after twelve attempts to count a window that others count first', async () => {
     const now = new Date('2026-07-24T05:00:00.000Z');
     let reads = 0;
     const throttles = createConcurrentTable();
@@ -4140,9 +4152,9 @@ describe('durable throttle', () => {
     await tableStore.takeSourceAllowance('source-hash', now);
     reads = 0;
 
-    await assert.rejects(
-      () => tableStore.takeSourceAllowance('source-hash', now),
-      /Throttle update contention exceeded retry limit/,
+    assert.equal(
+      await tableStore.takeSourceAllowance('source-hash', now),
+      false,
     );
     assert.equal(reads, 12);
   });
@@ -4195,6 +4207,100 @@ describe('durable throttle', () => {
 
     // The table holds no subscription, so an allowed request is a 404.
     assert.deepEqual(statuses, [404, 404, 404, 404, 404, 429]);
+  });
+
+  // Found by an iPhone check: on, change a timing, off, then on and off again
+  // was refused on the sixth request. Turning reminders on again makes a new
+  // installation, so only the address allowance spans the whole sequence.
+  // Thirty allowed requests at once can need more writes than the retry
+  // limit. Running out must refuse the request, not fail as a server error.
+  it('refuses, never fails, a burst from one address beyond its limit', async () => {
+    const throttleStore = createTableReminderSubscriptionStore(
+      subscriptionTable(),
+      createConcurrentTable(),
+    );
+    const handlerStore = store({
+      takeSourceAllowance: throttleStore.takeSourceAllowance,
+    });
+    const now = new Date('2026-07-24T05:00:00.000Z');
+
+    const statuses = (
+      await Promise.all(
+        Array.from({ length: 40 }, () =>
+          registerReminderSubscription(
+            request(validRegistration),
+            handlerStore,
+            now,
+          ),
+        ),
+      )
+    ).map(({ status }) => status);
+
+    assert.deepEqual(
+      statuses.filter((status) => status !== 201 && status !== 429),
+      [],
+    );
+    assert.ok(statuses.filter((status) => status === 201).length <= 30);
+  });
+
+  it('lets one address turn reminders on and off twice, changing a timing each time', async () => {
+    const throttleStore = createTableReminderSubscriptionStore(
+      subscriptionTable(),
+      createConcurrentTable(),
+    );
+    const handlerStore = store({
+      takeInstallationAllowance: throttleStore.takeInstallationAllowance,
+      takeSourceAllowance: throttleStore.takeSourceAllowance,
+    });
+    const now = new Date('2026-07-24T05:00:00.000Z');
+    const update = {
+      attemptGeneration: 2,
+      deviceToken: validRegistration.deviceToken,
+      homeTimeZone: validRegistration.homeTimeZone,
+      oneDayEnabled: false,
+      oneWeekEnabled: true,
+      platform: 'android',
+    };
+
+    const statuses: (number | undefined)[] = [];
+    for (const requestKey of ['a', 'b']) {
+      const registered = await registerReminderSubscription(
+        request({
+          ...validRegistration,
+          registrationRequestId: validRegistration.registrationRequestId
+            .slice(0, -64)
+            .concat(requestKey.repeat(64)),
+        }),
+        handlerStore,
+        now,
+      );
+      const { credential, installationId } = registered.jsonBody as {
+        readonly credential: string;
+        readonly installationId: string;
+      };
+      const authorization = `Bearer ${credential}`;
+      statuses.push(
+        registered.status,
+        (
+          await updateReminderSubscription(
+            request(update, { authorization }),
+            handlerStore,
+            installationId,
+            now,
+          )
+        ).status,
+        (
+          await deleteReminderSubscription(
+            request('', { authorization }),
+            handlerStore,
+            installationId,
+            now,
+          )
+        ).status,
+      );
+    }
+
+    assert.deepEqual(statuses, [201, 204, 204, 201, 204, 204]);
   });
 
   it('distinguishes missing rows, races, and Azure service errors', async () => {

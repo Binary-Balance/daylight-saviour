@@ -54,6 +54,8 @@ export const changeReminders = Object.freeze({
     body: 'Deletion could not be confirmed on this device. Check your connection and try again.',
     confirm: 'Try deletion again',
     heading: 'REMINDER DELETION NOT CONFIRMED',
+    throttledBody:
+      'Too many reminder changes in a short time. Try deletion again in 10 minutes.',
   }),
   disabling: 'Deleting Change Reminder registration…',
   enabled: Object.freeze({
@@ -69,7 +71,7 @@ export const changeReminders = Object.freeze({
     heading: 'CHANGE REMINDERS ENABLED',
   }),
   explainer: Object.freeze({
-    body: 'One week and one day before a Change Event, following your Home Time Zone while you travel. Delivery is best effort. No account is needed. We store this installation’s ID, push token, Home Time Zone and timing preferences, plus 30 days of delivery and rate-limit records. Reminders stop after two years without opening the app, after a warning.',
+    body: 'One week and one day before your clocks change, following your Home Time Zone as you travel. Best effort, no account, and we store only what’s needed to send them and prevent abuse.',
     confirm: 'Enable reminders',
     heading: 'WARN ME BEFORE TIME MISBEHAVES',
   }),
@@ -77,6 +79,8 @@ export const changeReminders = Object.freeze({
     body: 'Reminders are not enabled. Check your connection and try again.',
     heading: 'REMINDER REGISTRATION FAILED',
     retry: 'Try registration again',
+    throttledBody:
+      'Too many reminder changes in a short time. Try again in 10 minutes.',
   }),
   heading: 'CHANGE REMINDERS',
   loading: 'Checking reminder registration…',

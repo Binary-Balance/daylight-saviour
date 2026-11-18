@@ -11,9 +11,19 @@ export type ChangeReminderEnableResult =
   | { readonly kind: 'permission-denied' }
   | { readonly kind: 'os-blocked' }
   | { readonly kind: 'unavailable' }
-  | { readonly kind: 'failed' }
+  | ChangeReminderFailure
   /** The service no longer holds the registration; the adapters cleared it. */
   | { readonly kind: 'unregistered' };
+
+/** `throttled` when the service refused because of too many requests. */
+export interface ChangeReminderFailure {
+  readonly kind: 'failed';
+  readonly throttled?: true;
+}
+
+export type ChangeReminderDisableResult =
+  | { readonly kind: 'disabled' }
+  | ChangeReminderFailure;
 
 export type ChangeReminderTokenRefreshResult =
   | { readonly kind: 'succeeded' }
@@ -157,9 +167,7 @@ export interface ChangeReminderAdapters {
     preferences: ChangeReminderPreferences,
   ) => Promise<ChangeReminderEnableResult>;
   /** Deletes the authenticated subscription before clearing local credentials. */
-  readonly disable: () => Promise<
-    { readonly kind: 'disabled' } | { readonly kind: 'failed' }
-  >;
+  readonly disable: () => Promise<ChangeReminderDisableResult>;
   /** Returns only the saved installation identifier for the test-build diagnostic. */
   readonly readInstallationId?: () => Promise<string | null>;
   readonly openSettings: () => Promise<void>;
