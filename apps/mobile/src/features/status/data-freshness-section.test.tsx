@@ -85,39 +85,37 @@ describe('DataFreshnessSection', () => {
 });
 
 describe('DataFreshnessNotice', () => {
+  it('warns about expired data and points to Settings', () => {
+    render(
+      <DataFreshnessNotice
+        facts={{ freshness: 'expired', source: 'cached' }}
+        palette={daylightSaviourPalettes.dark}
+      />,
+    );
+
+    const notice = screen.getByTestId('data-freshness-notice');
+    expect(notice.props.accessible).toBe(true);
+    expect(
+      screen.getByText('Validity Horizon passed · refresh required'),
+    ).toBeTruthy();
+    expect(screen.getByText('See Settings for details.')).toBeTruthy();
+  });
+
   it.each([
-    ['stale-valid', 'Verified data due for refresh'],
-    ['offline-valid', 'Offline · verified data remains valid'],
-    ['retry-failed', 'Refresh failed · verified data remains active'],
-    ['expired', 'Validity Horizon passed · refresh required'],
-  ] as const)(
-    'warns about %s data and points to Settings',
-    (freshness, status) => {
-      render(
-        <DataFreshnessNotice
-          facts={{ freshness, source: 'cached' }}
-          palette={daylightSaviourPalettes.dark}
-        />,
-      );
+    'current',
+    'checking',
+    'decision-unavailable',
+    'stale-valid',
+    'offline-valid',
+    'retry-failed',
+  ] as const)('leaves the report alone for %s data', (freshness) => {
+    render(
+      <DataFreshnessNotice
+        facts={{ freshness, source: 'bundled' }}
+        palette={daylightSaviourPalettes.light}
+      />,
+    );
 
-      const notice = screen.getByTestId('data-freshness-notice');
-      expect(notice.props.accessible).toBe(true);
-      expect(screen.getByText(status)).toBeTruthy();
-      expect(screen.getByText('See Settings for details.')).toBeTruthy();
-    },
-  );
-
-  it.each(['current', 'checking', 'decision-unavailable'] as const)(
-    'leaves the report alone for %s data',
-    (freshness) => {
-      render(
-        <DataFreshnessNotice
-          facts={{ freshness, source: 'bundled' }}
-          palette={daylightSaviourPalettes.light}
-        />,
-      );
-
-      expect(screen.queryByTestId('data-freshness-notice')).toBeNull();
-    },
-  );
+    expect(screen.queryByTestId('data-freshness-notice')).toBeNull();
+  });
 });

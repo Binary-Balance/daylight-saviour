@@ -25,7 +25,7 @@ MVP is a glanceable, single-screen experience with no tab navigation. It shows:
 3. Next Change Event date and local time, direction, and offset amount.
 4. Countdown to that event.
 5. Change Reminder state and timing.
-6. A data freshness warning, only when data is stale, expired or failed to refresh.
+6. A data freshness warning, only once data is out of date.
 7. Access to compact settings.
 
 Zones with no upcoming Change Event receive an equally intentional, celebratory state rather than an empty result.

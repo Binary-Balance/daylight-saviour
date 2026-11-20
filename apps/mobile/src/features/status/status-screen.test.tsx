@@ -223,7 +223,7 @@ describe('StatusScreen facade', () => {
   });
 
   it('composes unavailable report without civil-time claims', () => {
-    render(
+    const result = render(
       <StatusScreen now={new Date('2031-01-01T00:00:00.000Z')} reducedMotion />,
     );
 
@@ -234,14 +234,15 @@ describe('StatusScreen facade', () => {
     expect(screen.queryByText(/UTC\+\d/)).toBeNull();
     expect(screen.getByTestId('expired-civil-time-report')).toBeTruthy();
     expect(screen.getByTestId('data-freshness-notice')).toBeTruthy();
-    expect(
-      screen.getByText('Validity Horizon passed · refresh required'),
-    ).toBeTruthy();
+    const order = explicitAccessibilityOrder(result.toJSON() as RenderNode);
+    const warning = order.indexOf('Validity Horizon passed · refresh required');
+    expect(warning).toBeGreaterThanOrEqual(0);
+    expect(warning).toBeLessThan(order.indexOf('Settings'));
     fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByLabelText(/validity expired/)).toBeTruthy();
   });
 
-  it('warns on the report and retries from Settings when a refresh fails', () => {
+  it('keeps the report quiet and retries from Settings when a refresh fails', () => {
     const retry = jest.fn();
     render(
       <RawStatusScreen
@@ -257,10 +258,8 @@ describe('StatusScreen facade', () => {
       />,
     );
 
-    expect(
-      screen.getByText('Refresh failed · verified data remains active'),
-    ).toBeTruthy();
-    // The report keeps its facts: the data is still within its validity.
+    // Still-valid data gets no report warning, and the report keeps its facts.
+    expect(screen.queryByTestId('data-freshness-notice')).toBeNull();
     expect(
       screen.getByRole('header', { name: 'Daylight saving time applies' }),
     ).toBeTruthy();
@@ -725,7 +724,6 @@ describe('StatusScreen facade', () => {
       ),
       order.indexOf('CHANGE REMINDERS'),
       order.indexOf('Checking reminder registration…'),
-      order.indexOf('Refresh failed · verified data remains active'),
       order.indexOf('Settings'),
     ];
 

@@ -938,6 +938,9 @@ describe('HomeTimeZoneScreen', () => {
       for (const listener of listeners) listener();
     });
 
+    // Still-valid data gets no report warning; Settings shows the new state.
+    expect(screen.queryByTestId('data-freshness-notice')).toBeNull();
+    fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
     expect(
       screen.getByText('Refresh failed · verified data remains active'),
     ).toBeTruthy();

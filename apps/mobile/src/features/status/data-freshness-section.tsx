@@ -75,21 +75,19 @@ export default function DataFreshnessSection({
   );
 }
 
-// Checking and current data need no warning on the report.
-const reportWarningStates: ReadonlySet<DataFreshnessFacts['freshness']> =
-  new Set(['stale-valid', 'offline-valid', 'retry-failed', 'expired']);
-
 interface DataFreshnessNoticeProps {
   readonly facts: Pick<DataFreshnessFacts, 'freshness' | 'source'>;
   readonly palette: DaylightSaviourPalette;
 }
 
-// The report's short warning. Details and the manual retry live in Settings.
+// The report's short warning, shown only once data is out of date: the owner
+// judged warnings about due or failed checks of still-valid data as noise.
+// Details and the manual retry live in Settings.
 export function DataFreshnessNotice({
   facts,
   palette,
 }: DataFreshnessNoticeProps) {
-  if (!reportWarningStates.has(facts.freshness)) return null;
+  if (facts.freshness !== 'expired') return null;
 
   return (
     <View
