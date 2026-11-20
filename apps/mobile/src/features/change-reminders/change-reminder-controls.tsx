@@ -44,6 +44,7 @@ export function TimingControls({
           onValueChange={(oneWeekEnabled) =>
             onChange({ ...preferences, oneWeekEnabled })
           }
+          style={styles.switch}
           value={preferences.oneWeekEnabled}
         />
       </View>
@@ -59,6 +60,7 @@ export function TimingControls({
           onValueChange={(oneDayEnabled) =>
             onChange({ ...preferences, oneDayEnabled })
           }
+          style={styles.switch}
           value={preferences.oneDayEnabled}
         />
       </View>
@@ -267,6 +269,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   buttonText: { fontSize: 14, fontWeight: '800' },
+  // React Native's iOS Switch defaults to `alignSelf: 'flex-start'`, which
+  // overrides the row's centring and left labels sitting below the switch.
+  switch: { alignSelf: 'center' },
   timing: {
     alignItems: 'center',
     flexDirection: 'row',

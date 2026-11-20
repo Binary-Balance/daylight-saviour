@@ -110,7 +110,7 @@ it('renders restored registration truthfully without another enable action', asy
 });
 
 it.each(['light', 'dark'] as const)(
-  'renders timing labels legibly in %s appearance',
+  'renders timing rows legibly in %s appearance',
   async (appearance) => {
     const palette = daylightSaviourPalettes[appearance];
     render(
@@ -148,6 +148,16 @@ it.each(['light', 'dark'] as const)(
       expect(
         contrastRatio(String(color), palette.background),
       ).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const label of [
+      reminders.accessibility.oneWeek,
+      reminders.accessibility.oneDay,
+    ]) {
+      // iOS switches otherwise sit at the top of the row, above the label's
+      // centre.
+      expect(
+        StyleSheet.flatten(screen.getByLabelText(label).props.style),
+      ).toMatchObject({ alignSelf: 'center' });
     }
   },
 );
@@ -697,9 +707,7 @@ it('shows disabling, disabled, and recoverable deletion uncertainty', async () =
   ).toBeTruthy();
   await act(async () => resolveDelete({ kind: 'disabled' }));
   expect(
-    await screen.findByText(
-      /enabling again will create a fresh reminder registration/i,
-    ),
+    await screen.findByText('Change Reminders are disabled on this device.'),
   ).toBeTruthy();
   rendered.unmount();
   appStateSpy.mockRestore();

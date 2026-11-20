@@ -105,6 +105,14 @@ describe('Australian-English copy catalogue', () => {
       reminders.disableFailed.body,
       'Deletion could not be confirmed on this device. Check your connection and try again.',
     );
+    assert.equal(
+      reminders.disableConfirmation.body,
+      'Turning off both timings deletes this app’s Change Reminders registration. You can enable reminders again later.',
+    );
+    assert.equal(
+      reminders.disabled.body,
+      'Change Reminders are disabled on this device.',
+    );
   });
 
   it('asks for a wait, not a connection check, when the service throttles', () => {

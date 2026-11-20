@@ -5,6 +5,7 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentType,
+  type RefObject,
 } from 'react';
 import {
   AccessibilityInfo,
@@ -56,12 +57,13 @@ const startAnnouncements: Partial<Record<Kind, string>> = {
 // Announces registration and deletion starting and finishing, once each. Live
 // regions do not suit this: iOS ignores them, and on Android the enabled text
 // would be read on every launch and return to the app, because the card
-// restores itself.
+// restores itself. Returns the ref for the card's message.
 function useProgressAnnouncements(
   kind: Kind,
   outcome: string | undefined,
-  outcomeReadByRegion: boolean,
+  failure: boolean,
 ) {
+  const message = useRef<Text>(null);
   const previousKind = useRef(kind);
   const recheckingBlock = useRef(false);
   useEffect(() => {
@@ -78,12 +80,25 @@ function useProgressAnnouncements(
     } else if (
       startAnnouncements[previous] !== undefined &&
       outcome !== undefined &&
-      !outcomeReadByRegion &&
       !(recheckingBlock.current && kind === 'os-blocked')
     ) {
-      AccessibilityInfo.announceForAccessibility(outcome);
+      if (!failure) {
+        AccessibilityInfo.announceForAccessibility(outcome);
+      } else if (Platform.OS === 'ios') {
+        // The retry button takes the place of the control VoiceOver was on,
+        // so VoiceOver moved to it and cut off an announced failure. Focus on
+        // the message reads it first. Android's alert region reads it already.
+        // Fabric mounts the message only after this turn, so focus waits.
+        const timer = setTimeout(() => {
+          if (message.current !== null) {
+            AccessibilityInfo.sendAccessibilityEvent(message.current, 'focus');
+          }
+        }, 100);
+        return () => clearTimeout(timer);
+      }
     }
-  }, [kind, outcome, outcomeReadByRegion]);
+  }, [kind, outcome, failure]);
+  return message;
 }
 
 function useChangeReminderSession(
@@ -267,9 +282,11 @@ function cardOf(snapshot: ChangeReminderSessionSnapshot): Card {
 
 function CardMessage({
   card: { content, tone },
+  messageRef,
   palette,
 }: {
   readonly card: Card;
+  readonly messageRef: RefObject<Text | null>;
   readonly palette: DaylightSaviourPalette;
 }) {
   return (
@@ -300,6 +317,7 @@ function CardMessage({
         <Text
           accessibilityLiveRegion={tone === 'error' ? 'assertive' : 'none'}
           accessibilityRole={tone === 'error' ? 'alert' : undefined}
+          ref={messageRef}
           style={[styles.body, { color: palette.ink }]}
         >
           {content.body}
@@ -430,10 +448,10 @@ export default function ChangeReminderSection({
 
   const card = cardOf(snapshot);
   const Actions = card.Actions;
-  useProgressAnnouncements(
+  const message = useProgressAnnouncements(
     snapshot.kind,
     card.tone === 'busy' ? undefined : card.content.body,
-    card.tone === 'error' && Platform.OS === 'android',
+    card.tone === 'error',
   );
 
   return (
@@ -444,7 +462,7 @@ export default function ChangeReminderSection({
       >
         {copy.changeReminders.heading}
       </Text>
-      <CardMessage card={card} palette={palette} />
+      <CardMessage card={card} messageRef={message} palette={palette} />
       {snapshot.kind === 'enabled' && verifiedNoEvent ? (
         <Text style={[styles.body, { color: palette.ink }]}>
           {copy.changeReminders.noEvent}
