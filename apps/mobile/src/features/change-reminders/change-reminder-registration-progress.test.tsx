@@ -303,6 +303,14 @@ describe('announcements', () => {
     oneWeekEnabled: true,
   });
 
+  // On iOS the retry button replaces the button VoiceOver was on and takes
+  // its focus, which cut off an announced failure. Android's assertive region
+  // reads failures, so focusing them there would read them twice.
+  const failureFocus = (failure: string) => ({
+    android: [],
+    ios: [[failure, 'focus']],
+  });
+
   it.each(['android', 'ios'] as const)(
     'on %s announces registration starting and its confirmed outcome once each',
     async (platform) => {
@@ -348,6 +356,9 @@ describe('announcements', () => {
       });
       await startRegistration(test.adapters);
       await screen.findByText(copy.changeReminders.osBlocked.body);
+      expect(focused()).toEqual(
+        failureFocus(copy.changeReminders.osBlocked.body)[platform],
+      );
       announce.mockClear();
       focus.mockClear();
 
@@ -391,14 +402,6 @@ describe('announcements', () => {
     );
     await screen.findByText(enabledBody);
     expect(spoken()).toEqual([]);
-  });
-
-  // On iOS the retry button replaces the button VoiceOver was on and takes
-  // its focus, which cut off an announced failure. Android's assertive region
-  // reads failures, so focusing them there would read them twice.
-  const failureFocus = (failure: string) => ({
-    android: [],
-    ios: [[failure, 'focus']],
   });
 
   it.each(['android', 'ios'] as const)(
