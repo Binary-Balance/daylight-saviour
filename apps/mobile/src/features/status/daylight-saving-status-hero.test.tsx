@@ -27,7 +27,7 @@ function expectClockPartsGrouped() {
     screen.getByTestId('clock-value'),
     screen.queryByTestId('clock-overflow'),
     screen.queryByTestId('clock-meridiem'),
-    screen.getByText(/^AEST · UTC\+10:00 · /),
+    screen.getByText('AEST · UTC+10:00'),
   ];
   for (const part of parts) {
     if (part !== null) expect(part.props.accessible).toBe(false);
@@ -119,7 +119,7 @@ describe('DaylightSavingStatusHero', () => {
 
       expect(
         screen.getByLabelText(
-          `Home Time Zone current time, ${uses24hourClock ? '22:17' : '10:17 pm'}, AEST, UTC+10:00`,
+          `Current time, ${uses24hourClock ? '22:17' : '10:17 pm'}, AEST, UTC+10:00`,
         ),
       ).toBeTruthy();
       expect(
@@ -201,9 +201,7 @@ describe('DaylightSavingStatusHero', () => {
       maxWidth: '100%',
     });
     expect(overflow.props.horizontal).toBe(true);
-    expect(
-      screen.getByLabelText(/Home Time Zone current time, 10:17 pm/),
-    ).toBeTruthy();
+    expect(screen.getByLabelText(/^Current time, 10:17 pm/)).toBeTruthy();
     expect(ReactNative.StyleSheet.flatten(clock.props.style).fontSize).toBe(72);
     expect(
       ReactNative.StyleSheet.flatten(clock.props.style).fontSize * 2,

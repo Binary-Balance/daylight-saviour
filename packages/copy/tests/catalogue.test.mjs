@@ -241,6 +241,13 @@ describe('Australian-English copy catalogue', () => {
     assert.equal(clock.utcOffset(0), 'UTC+00:00');
     assert.equal(clock.utcOffset(-34_200), 'UTC-09:30');
     assert.equal(
+      clock.currentMetadata({
+        abbreviation: 'AEDT',
+        currentOffset: 'UTC+11:00',
+      }),
+      'AEDT · UTC+11:00',
+    );
+    assert.equal(
       changeEvent.offsetChange({
         afterSeconds: 39_600,
         beforeSeconds: 37_800,
@@ -256,14 +263,8 @@ describe('Australian-English copy catalogue', () => {
     assert.equal(changeEvent.countdown(90_061), 'In 1 day, 1 hour');
     assert.equal(changeEvent.elapsed(0), 'Applied now');
     assert.equal(changeEvent.elapsed(-3_600), '1 hour ago');
-    assert.equal(
-      changeEvent.clocksMove(1_800),
-      'Clocks move 30 minutes · Home Time Zone',
-    );
-    assert.equal(
-      changeEvent.clocksMove(-3_600),
-      'Clocks move 1 hour · Home Time Zone',
-    );
+    assert.equal(changeEvent.clocksMove(1_800), 'Clocks move 30 minutes');
+    assert.equal(changeEvent.clocksMove(-3_600), 'Clocks move 1 hour');
     assert.equal(
       accessibility.countdown(7_200),
       'Countdown, 2 hours until Change Event',
@@ -386,6 +387,7 @@ describe('Australian-English copy catalogue', () => {
       }),
       'Pack 2026c-australian-v1 · Valid through recorded UTC Validity Horizon',
     );
+    assert.equal(dataFreshness.seeSettings, 'See Settings for details.');
     assert.equal(
       settings.homeTimeZone('Sydney, Canberra & most of NSW'),
       'Home Time Zone: Sydney, Canberra & most of NSW',

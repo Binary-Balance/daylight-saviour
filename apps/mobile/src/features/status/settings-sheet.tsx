@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import {
   Modal,
   Pressable,
@@ -14,16 +14,17 @@ import type { DaylightSaviourPalette } from '../../theme';
 
 export interface SettingsSheetFacts {
   readonly friendlyZoneLabel: string;
-  readonly packVersion: string;
 }
 
 interface SettingsSheetProps {
+  readonly dataFreshness: ReactNode;
   readonly facts: SettingsSheetFacts;
   readonly palette: DaylightSaviourPalette;
   readonly reducedMotion: boolean | null;
 }
 
 export default function SettingsSheet({
+  dataFreshness,
   facts,
   palette,
   reducedMotion,
@@ -83,9 +84,7 @@ export default function SettingsSheet({
               <Text style={[styles.body, { color: palette.ink }]}>
                 {copy.settings.homeTimeZone(facts.friendlyZoneLabel)}
               </Text>
-              <Text style={[styles.body, { color: palette.ink }]}>
-                {copy.settings.timeZoneDataPack(facts.packVersion)}
-              </Text>
+              {dataFreshness}
               <Pressable
                 accessibilityRole="button"
                 onPress={() => setOpen(false)}

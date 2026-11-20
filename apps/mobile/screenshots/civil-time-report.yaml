@@ -3,3 +3,14 @@ appId: au.com.binarybalance.daylightsaviour
 - runFlow: common/open-report.yaml
 - waitForAnimationToEnd
 - takeScreenshot: ${PREFIX}-civil-time-report
+# Settings holds the data freshness details and manual retry. It shares this
+# flow because each flow repeats the slow fresh install. The section reads as
+# one label, so match that; at the largest text it can sit below the sheet's
+# first screen.
+- tapOn: 'Settings'
+- scrollUntilVisible:
+    element: 'Time-Zone Data Pack .*'
+    centerElement: true
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: ${PREFIX}-settings

@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import type { ComponentProps } from 'react';
 import * as ReactNative from 'react-native';
 import { activateAustralianTimeZoneDataPack } from '@daylight-saviour/domain';
@@ -160,15 +160,22 @@ describe('StatusScreen facade', () => {
       ).toBeTruthy();
       expect(screen.getByText('Backward Change')).toBeTruthy();
       expect(screen.getByText('In 1 second')).toBeTruthy();
+      // Current data needs no warning, and freshness details live in Settings.
+      expect(screen.queryByTestId('data-freshness-notice')).toBeNull();
+      expect(
+        screen.queryByText(new RegExp(bundledSnapshot.pack.packVersion), {
+          includeHiddenElements: true,
+        }),
+      ).toBeNull();
+      fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
       expect(screen.getByLabelText(/bundled data current/)).toBeTruthy();
-      // The pack version belongs to the freshness footer only; the header
-      // repeated it until PUB-266.
+      // The pack version appears once in Settings; the header repeated it
+      // until PUB-266.
       expect(
         screen.getAllByText(new RegExp(bundledSnapshot.pack.packVersion), {
           includeHiddenElements: true,
         }),
       ).toHaveLength(1);
-      expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
     },
   );
 
@@ -181,7 +188,7 @@ describe('StatusScreen facade', () => {
 
     expect(intervalSpy).not.toHaveBeenCalled();
     const clockFacts = screen.getByLabelText(
-      'Home Time Zone current time, 10:00 am, AEST, UTC+10:00',
+      'Current time, 10:00 am, AEST, UTC+10:00',
     );
     expect(clockFacts.props.accessibilityLiveRegion).toBe('none');
   });
@@ -226,8 +233,48 @@ describe('StatusScreen facade', () => {
     expect(screen.queryByText(/time applies$/)).toBeNull();
     expect(screen.queryByText(/UTC\+\d/)).toBeNull();
     expect(screen.getByTestId('expired-civil-time-report')).toBeTruthy();
+    expect(screen.getByTestId('data-freshness-notice')).toBeTruthy();
+    expect(
+      screen.getByText('Validity Horizon passed · refresh required'),
+    ).toBeTruthy();
+    fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByLabelText(/validity expired/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
+  });
+
+  it('warns on the report and retries from Settings when a refresh fails', () => {
+    const retry = jest.fn();
+    render(
+      <RawStatusScreen
+        dataPackSnapshot={{
+          ...bundledSnapshot,
+          freshness: 'retry-failed',
+          remoteEnabled: true,
+        }}
+        now={new Date('2026-04-04T15:59:59.000Z')}
+        onRetryDataPack={retry}
+        reducedMotion
+        secondaryCopySeed="test-installation"
+      />,
+    );
+
+    expect(
+      screen.getByText('Refresh failed · verified data remains active'),
+    ).toBeTruthy();
+    // The report keeps its facts: the data is still within its validity.
+    expect(
+      screen.getByRole('header', { name: 'Daylight saving time applies' }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole('button', {
+        name: 'Retry Time-Zone Data Pack refresh',
+      }),
+    ).toBeNull();
+
+    fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.press(
+      screen.getByRole('button', { name: 'Retry Time-Zone Data Pack refresh' }),
+    );
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 
   it('keeps reminders available in verified no-event zones only', async () => {
@@ -653,32 +700,32 @@ describe('StatusScreen facade', () => {
 
   it('orders every critical fact and action before visual-header settings', () => {
     const result = render(
-      <StatusScreen
+      <RawStatusScreen
+        dataPackSnapshot={{ ...bundledSnapshot, freshness: 'retry-failed' }}
         now={new Date('2026-10-02T16:00:00.000Z')}
         onChooseZone={jest.fn()}
         reducedMotion
+        secondaryCopySeed="test-installation"
       />,
     );
     const order = explicitAccessibilityOrder(result.toJSON() as RenderNode);
     const positions = [
       order.findIndex((label) => label.startsWith('Home Time Zone,')),
-      order.findIndex((label) =>
-        label.startsWith('Home Time Zone current time,'),
-      ),
+      order.findIndex((label) => label.startsWith('Current time,')),
       order.indexOf('Standard time applies'),
       order.indexOf('NEXT CHANGE EVENT'),
       order.indexOf('4 October 2026'),
       order.indexOf('Forward Change'),
       order.indexOf('2:00 am → 3:00 am'),
       order.indexOf('UTC+10:00 → UTC+11:00'),
-      order.indexOf('Clocks move 1 hour · Home Time Zone'),
+      order.indexOf('Clocks move 1 hour'),
       order.indexOf('COUNTDOWN'),
       order.findIndex((label) =>
         label.startsWith('Countdown, 1 day until Change Event'),
       ),
       order.indexOf('CHANGE REMINDERS'),
       order.indexOf('Checking reminder registration…'),
-      order.findIndex((label) => label.startsWith('Time-Zone Data Pack')),
+      order.indexOf('Refresh failed · verified data remains active'),
       order.indexOf('Settings'),
     ];
 

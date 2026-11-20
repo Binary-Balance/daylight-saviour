@@ -539,7 +539,7 @@ export const civilTimeReport = Object.freeze({
       readonly clock: string;
       readonly currentOffset: string;
     }) =>
-      `Home Time Zone current time, ${facts.clock}, ${facts.abbreviation}, ${facts.currentOffset}`,
+      `Current time, ${facts.clock}, ${facts.abbreviation}, ${facts.currentOffset}`,
     countdown: (secondsUntil: number) =>
       `Countdown, ${formatAbsoluteDuration(secondsUntil)} until Change Event`,
     homeTimeZone: (facts: {
@@ -550,7 +550,7 @@ export const civilTimeReport = Object.freeze({
   }),
   changeEvent: Object.freeze({
     clocksMove: (offsetDeltaSeconds: number) =>
-      `Clocks move ${formatOffsetAmount(offsetDeltaSeconds)} · Home Time Zone`,
+      `Clocks move ${formatOffsetAmount(offsetDeltaSeconds)}`,
     completedHeading: 'CHANGE COMPLETED',
     countdown: (secondsUntil: number) =>
       `In ${formatAbsoluteDuration(secondsUntil)}`,
@@ -582,7 +582,7 @@ export const civilTimeReport = Object.freeze({
     currentMetadata: (facts: {
       readonly abbreviation: string;
       readonly currentOffset: string;
-    }) => `${facts.abbreviation} · ${facts.currentOffset} · HOME TIME ZONE`,
+    }) => `${facts.abbreviation} · ${facts.currentOffset}`,
     format: (facts: {
       readonly context: HourCycleContext;
       readonly localDateTime: LocalDateTime;
