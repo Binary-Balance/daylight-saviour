@@ -236,7 +236,9 @@ describe('StatusScreen facade', () => {
     expect(screen.getByTestId('data-freshness-notice')).toBeTruthy();
     const order = explicitAccessibilityOrder(result.toJSON() as RenderNode);
     const warning = order.indexOf('Validity Horizon passed · refresh required');
-    expect(warning).toBeGreaterThanOrEqual(0);
+    const reminders = order.indexOf('CHANGE REMINDERS');
+    expect(reminders).toBeGreaterThanOrEqual(0);
+    expect(warning).toBeGreaterThan(reminders);
     expect(warning).toBeLessThan(order.indexOf('Settings'));
     fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByLabelText(/validity expired/)).toBeTruthy();
