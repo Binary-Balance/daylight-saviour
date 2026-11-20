@@ -14,9 +14,9 @@ Use one safe-area-aware column on an 8-point grid with roughly 20–24 logical p
 2. **Reminder notice:** only after a Change Reminder tap opens the app. It glows once, unless reduced motion is on.
 3. **Home Time Zone:** full-width control showing friendly geography first and IANA identifier as metadata.
 4. **Status hero:** large Home Time Zone clock without seconds, literal Daylight Saving Status, restrained fictional stamp, then one humorous line.
-5. **Change Event section:** unambiguous date, local-time transformation, direction word and arrow, UTC offset equation, explicit offset amount, countdown, and Home Time Zone qualifier.
+5. **Change Event section:** unambiguous date, local-time transformation, direction word and arrow, UTC offset equation, explicit offset amount, and countdown. The whole report is about the Home Time Zone, so clock and event labels do not repeat that qualifier.
 6. **Change Reminders:** compact state card showing both timing preferences or contextual opt-in action.
-7. **Freshness footer:** plain verified/checking/stale state opening pack details and manual retry.
+7. **Freshness warning:** only once the Validity Horizon has passed and data is out of date. A short bordered notice states the problem and points to Settings, which holds pack details and manual retry. Still-valid data adds nothing to the report, even when a refresh is due or failed.
 
 No-event zones receive an intentional Change Event record stating that no event is scheduled within current verified data. Never show an empty countdown. Expired data replaces affected claims with a prominent refresh-required state rather than claiming no event exists.
 
@@ -26,7 +26,7 @@ Reminder controls remain available in no-event zones. Explain: “No change sche
 
 Use one focused Home Time Zone confirmation screen, not a carousel. Show suggested friendly zone, current local time, subdued IANA identifier, and “No location permission needed.” If device zone is outside Australian Coverage, open chooser without guessing a nearby Australian zone.
 
-Settings remains a compact pushed screen or native sheet: Home Time Zone, Change Reminders, data freshness, diagnostic summary, help/privacy/reporting/source, version, and acknowledgements. Zone selection uses a searchable full-screen list grouped by friendly geography, with regional exceptions and external territories explicit. Each row presents a reviewed label such as “Sydney, Canberra & most of NSW” before its canonical IANA identifier. Device aliases normalize to canonical zones; rows never group solely by current UTC offset.
+Settings remains a compact pushed screen or native sheet: Home Time Zone, Change Reminders, data freshness with pack details and manual retry, diagnostic summary, help/privacy/reporting/source, version, and acknowledgements. Zone selection uses a searchable full-screen list grouped by friendly geography, with regional exceptions and external territories explicit. Each row presents a reviewed label such as “Sydney, Canberra & most of NSW” before its canonical IANA identifier. Device aliases normalize to canonical zones; rows never group solely by current UTC offset.
 
 ## Visual System
 
@@ -66,7 +66,7 @@ Motion occurs once when information enters or meaning changes; nothing loops.
 - **Status change:** old status exits and replacement locks into its stamp position; factual content changes atomically.
 - **Countdown:** changes only at displayed-unit boundaries through short crossfade or directional digit replacement.
 - **No event:** composition settles once, then remains deliberately still.
-- **Refresh:** last known-good content stays visible while a small freshness treatment updates.
+- **Refresh:** last known-good content stays visible while the check runs; the report adds a small freshness warning only once data is out of date.
 
 Reduced motion uses instant replacement or a very short fade. Remove skips, reversal, echoes, rotation, parallax, and distortion while retaining direction words, arrows, offset equation, and explicit amount.
 
@@ -107,7 +107,7 @@ Use two stages. In-app sheet first explains both default timings, Home Time Zone
 
 ## Accessibility
 
-Focus order follows any reminder notice, then zone, status, event, countdown, reminders, freshness, settings. Expose status and event as headings. Hide decorative rules, stamps, echoes, and duplicate digits from accessibility tree. Clock updates never create live-region chatter. Layouts stack at large text sizes and avoid fixed text heights. Direction, amount, reminder state, errors, and actions remain textual; humour never carries required meaning.
+Focus order follows any reminder notice, then zone, status, event, countdown, reminders, any freshness warning, settings. Expose status and event as headings. Hide decorative rules, stamps, echoes, and duplicate digits from accessibility tree. Clock updates never create live-region chatter. Layouts stack at large text sizes and avoid fixed text heights. Direction, amount, reminder state, errors, and actions remain textual; humour never carries required meaning.
 
 ## Settled Design Decisions
 

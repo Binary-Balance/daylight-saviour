@@ -261,7 +261,7 @@ describe('HomeTimeZoneScreen', () => {
       fireEvent.press(
         screen.getByRole('button', { name: 'Use this Home Time Zone' }),
       );
-      const clockLabel = `Home Time Zone current time, ${expectedClock}, AEST, UTC+10:00`;
+      const clockLabel = `Current time, ${expectedClock}, AEST, UTC+10:00`;
       expect(await screen.findByLabelText(clockLabel)).toBeTruthy();
 
       first.unmount();
@@ -481,7 +481,8 @@ describe('HomeTimeZoneScreen', () => {
         .mockReturnValue({ timeZone, uses24hourClock });
     }
 
-    // Sydney's report at `now`, with its clock, next event and data freshness.
+    // Sydney's report at `now`, with its clock, next event and, in Settings,
+    // data freshness.
     const sydneyReport = {
       '12-hour': {
         clock: '10:00 am',
@@ -499,14 +500,16 @@ describe('HomeTimeZoneScreen', () => {
       const shown = sydneyReport[format];
       const hidden = sydneyReport[format === '12-hour' ? '24-hour' : '12-hour'];
       const clockLabel = (clock: string) =>
-        `Home Time Zone current time, ${clock}, AEST, UTC+10:00`;
+        `Current time, ${clock}, AEST, UTC+10:00`;
 
       expect(screen.getByLabelText(clockLabel(shown.clock))).toBeTruthy();
       expect(screen.queryByLabelText(clockLabel(hidden.clock))).toBeNull();
       expect(screen.getByText(shown.event)).toBeTruthy();
       expect(screen.queryByText(hidden.event)).toBeNull();
+      fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
       expect(screen.getByText(shown.freshness)).toBeTruthy();
       expect(screen.queryByText(hidden.freshness)).toBeNull();
+      fireEvent.press(screen.getByRole('button', { name: 'Close settings' }));
       expect(
         screen.getByLabelText(
           'Home Time Zone, Sydney, Canberra & most of NSW, Australia/Sydney',
@@ -900,9 +903,7 @@ describe('HomeTimeZoneScreen', () => {
         ),
       ).toBeTruthy();
       expect(
-        screen.getByLabelText(
-          'Home Time Zone current time, 10:00, AEST, UTC+10:00',
-        ),
+        screen.getByLabelText('Current time, 10:00, AEST, UTC+10:00'),
       ).toBeTruthy();
     });
   });
@@ -926,20 +927,26 @@ describe('HomeTimeZoneScreen', () => {
     };
 
     render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
-    expect(await screen.findByText('Bundled data current')).toBeTruthy();
+    await screen.findByTestId('ordinary-civil-time-report');
+    expect(screen.queryByTestId('data-freshness-notice')).toBeNull();
 
     act(() => {
       snapshot = {
         ...snapshot,
-        freshness: 'checking',
+        freshness: 'retry-failed',
       } satisfies TimeZoneDataPackSnapshot;
       for (const listener of listeners) listener();
     });
 
-    expect(screen.getByText('Checking for verified data…')).toBeTruthy();
+    // Still-valid data gets no report warning; Settings shows the new state.
+    expect(screen.queryByTestId('data-freshness-notice')).toBeNull();
+    fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
+    expect(
+      screen.getByText('Refresh failed · verified data remains active'),
+    ).toBeTruthy();
   });
 
-  it('refreshes the data pack when the report is asked to check again', async () => {
+  it('refreshes the data pack when Settings is asked to check again', async () => {
     const base = createAdapters({ savedZone: 'Australia/Sydney' });
     const snapshot: TimeZoneDataPackSnapshot = {
       ...base.timeZoneDataPacks.getSnapshot(),
@@ -959,8 +966,9 @@ describe('HomeTimeZoneScreen', () => {
       />,
     );
 
+    fireEvent.press(await screen.findByRole('button', { name: 'Settings' }));
     fireEvent.press(
-      await screen.findByRole('button', {
+      screen.getByRole('button', {
         name: 'Retry Time-Zone Data Pack refresh',
       }),
     );

@@ -59,5 +59,5 @@ The absolute elapsed duration from now until a Change Event, calculated between 
 _Avoid_: Calendar countdown, wall-clock difference
 
 **Civil Time Report**:
-The app's main structured home/status report, presenting Home Time Zone facts, current time, Daylight Saving Status, relevant Change Event details, Countdown, and data freshness. Its structure, reviewed copy, and semantic motion respond to genuine Change Event phases.
+The app's main structured home/status report, presenting Home Time Zone facts, current time, Daylight Saving Status, relevant Change Event details, Countdown, and any data freshness warning. Its structure, reviewed copy, and semantic motion respond to genuine Change Event phases.
 _Avoid_: Dashboard, feed, metaphorical internal names

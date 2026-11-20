@@ -9,6 +9,4 @@ export const settings = Object.freeze({
   homeTimeZone: (friendlyZoneLabel: string) =>
     `Home Time Zone: ${friendlyZoneLabel}`,
   openButton: 'SETTINGS',
-  timeZoneDataPack: (packVersion: string) =>
-    `Time-Zone Data Pack: ${packVersion}`,
 });

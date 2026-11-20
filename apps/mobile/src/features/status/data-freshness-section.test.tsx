@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react-native';
 
 import { daylightSaviourPalettes } from '../../theme';
 import DataFreshnessSection, {
+  DataFreshnessNotice,
   type DataFreshnessFacts,
 } from './data-freshness-section';
 
@@ -80,5 +81,41 @@ describe('DataFreshnessSection', () => {
         name: 'Retry Time-Zone Data Pack refresh',
       }),
     ).toBeNull();
+  });
+});
+
+describe('DataFreshnessNotice', () => {
+  it('warns about expired data and points to Settings', () => {
+    render(
+      <DataFreshnessNotice
+        facts={{ freshness: 'expired', source: 'cached' }}
+        palette={daylightSaviourPalettes.dark}
+      />,
+    );
+
+    const notice = screen.getByTestId('data-freshness-notice');
+    expect(notice.props.accessible).toBe(true);
+    expect(
+      screen.getByText('Validity Horizon passed · refresh required'),
+    ).toBeTruthy();
+    expect(screen.getByText('See Settings for details.')).toBeTruthy();
+  });
+
+  it.each([
+    'current',
+    'checking',
+    'decision-unavailable',
+    'stale-valid',
+    'offline-valid',
+    'retry-failed',
+  ] as const)('leaves the report alone for %s data', (freshness) => {
+    render(
+      <DataFreshnessNotice
+        facts={{ freshness, source: 'bundled' }}
+        palette={daylightSaviourPalettes.light}
+      />,
+    );
+
+    expect(screen.queryByTestId('data-freshness-notice')).toBeNull();
   });
 });

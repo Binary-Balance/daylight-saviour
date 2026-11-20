@@ -221,10 +221,11 @@ it.
 [Maestro](https://maestro.mobile.dev) drives the app.
 `apps/mobile/screenshots/common/open-report.yaml` starts a fresh install and
 opens the Civil Time Report for Sydney. Each other flow in
-`apps/mobile/screenshots/` captures one screen, stopping as often as the
-largest text size needs. To add a screen, add a flow that runs the common
-flow, reaches the screen and ends with
-`takeScreenshot: ${PREFIX}-<screen-name>`. `capture.sh` runs every flow in each
+`apps/mobile/screenshots/` runs the common flow and captures one or more
+screens with `takeScreenshot: ${PREFIX}-<screen-name>`, stopping as often as
+the largest text size needs. A screen reached from one already captured, such
+as Settings from the report, goes at the end of that flow to skip another
+fresh install; otherwise add a flow. `capture.sh` runs every flow in each
 appearance and text size.
 
 To capture locally on an Android emulator, install Maestro and build the debug

@@ -11,7 +11,9 @@ import { daylightSaviourPalettes } from '../../theme';
 import ChangeEventSection from './change-event-section';
 import ChangeReminderNotificationContext from '../../../components/change-reminder-notification-context';
 import CivilTimeReportHeader from './civil-time-report-header';
-import DataFreshnessSection from './data-freshness-section';
+import DataFreshnessSection, {
+  DataFreshnessNotice,
+} from './data-freshness-section';
 import DaylightSavingStatusHero from './daylight-saving-status-hero';
 import SettingsSheet from './settings-sheet';
 import ChangeReminderSection from '../change-reminders/change-reminder-section';
@@ -199,24 +201,30 @@ export default function StatusScreen({
           }
         />
 
-        <DataFreshnessSection
+        <DataFreshnessNotice
           facts={{
             freshness: viewModel.freshness,
-            packVersion: viewModel.packVersion,
-            remoteEnabled: dataPackSnapshot.remoteEnabled,
             source: dataPackSnapshot.source,
-            uses24hourClock,
-            validUntil: viewModel.validUntil,
           }}
-          onRetry={onRetryDataPack}
           palette={palette}
         />
 
         <SettingsSheet
-          facts={{
-            friendlyZoneLabel: viewModel.friendlyZoneLabel,
-            packVersion: viewModel.packVersion,
-          }}
+          dataFreshness={
+            <DataFreshnessSection
+              facts={{
+                freshness: viewModel.freshness,
+                packVersion: viewModel.packVersion,
+                remoteEnabled: dataPackSnapshot.remoteEnabled,
+                source: dataPackSnapshot.source,
+                uses24hourClock,
+                validUntil: viewModel.validUntil,
+              }}
+              onRetry={onRetryDataPack}
+              palette={palette}
+            />
+          }
+          facts={{ friendlyZoneLabel: viewModel.friendlyZoneLabel }}
           palette={palette}
           reducedMotion={reducedMotion}
         />

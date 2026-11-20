@@ -31,7 +31,7 @@ export default function DataFreshnessSection({
   } as const;
 
   return (
-    <View style={[styles.footer, { borderTopColor: palette.rule }]}>
+    <View style={[styles.section, { borderTopColor: palette.rule }]}>
       <View
         accessible
         accessibilityLabel={copy.dataFreshness.accessibility.pack({
@@ -75,6 +75,39 @@ export default function DataFreshnessSection({
   );
 }
 
+interface DataFreshnessNoticeProps {
+  readonly facts: Pick<DataFreshnessFacts, 'freshness' | 'source'>;
+  readonly palette: DaylightSaviourPalette;
+}
+
+// The report's short warning, shown only once data is out of date: the owner
+// judged warnings about due or failed checks of still-valid data as noise.
+// Details and the manual retry live in Settings.
+export function DataFreshnessNotice({
+  facts,
+  palette,
+}: DataFreshnessNoticeProps) {
+  if (facts.freshness !== 'expired') return null;
+
+  return (
+    <View
+      accessible
+      style={[styles.notice, { borderColor: palette.decisionNoticeBorder }]}
+      testID="data-freshness-notice"
+    >
+      <Text style={[styles.metadata, { color: palette.decisionNoticeText }]}>
+        {copy.dataFreshness.heading}
+      </Text>
+      <Text style={[styles.body, { color: palette.ink }]}>
+        {copy.dataFreshness.status(facts)}
+      </Text>
+      <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
+        {copy.dataFreshness.seeSettings}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   body: {
     fontSize: 17,
@@ -84,11 +117,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.8,
-  },
-  footer: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    gap: 6,
-    paddingTop: 16,
   },
   identifier: {
     fontSize: 14,
@@ -100,6 +128,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1.1,
     lineHeight: 18,
   },
+  notice: {
+    borderWidth: 2,
+    gap: 6,
+    padding: 16,
+  },
   retryButton: {
     alignItems: 'center',
     alignSelf: 'flex-start',
@@ -108,5 +141,10 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: 14,
     paddingVertical: 10,
+  },
+  section: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 6,
+    paddingTop: 16,
   },
 });

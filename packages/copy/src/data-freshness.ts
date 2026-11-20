@@ -83,5 +83,6 @@ export const dataFreshness = Object.freeze({
     checkingButton: 'CHECKING…',
     checkButton: 'CHECK FOR VERIFIED DATA',
   }),
+  seeSettings: 'See Settings for details.',
   status: freshnessStatus,
 });
