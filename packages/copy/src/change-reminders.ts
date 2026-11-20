@@ -41,11 +41,11 @@ export const changeReminders = Object.freeze({
   appSleepNotNow: 'Not now',
   disabled: Object.freeze({
     action: 'Enable Change Reminders',
-    body: 'Change Reminders are disabled on this device. Enabling again will create a fresh reminder registration.',
+    body: 'Change Reminders are disabled on this device.',
     heading: 'CHANGE REMINDERS DISABLED',
   }),
   disableConfirmation: Object.freeze({
-    body: 'Turning off both timings deletes this installation’s Change Reminder registration and push token. Remaining records are deleted after 30 days. This cannot be undone, but you can enable reminders again later.',
+    body: 'Turning off both timings deletes this app’s Change Reminders registration. You can enable reminders again later.',
     cancel: 'Keep reminders',
     confirm: 'Disable and delete reminders',
     heading: 'DISABLE CHANGE REMINDERS?',

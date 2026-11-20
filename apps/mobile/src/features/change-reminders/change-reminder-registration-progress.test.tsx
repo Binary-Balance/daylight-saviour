@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react-native';
+import type { ReactElement } from 'react';
 import { AccessibilityInfo, AppState, Platform } from 'react-native';
 import { PermissionStatus } from 'expo-notifications';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
@@ -48,11 +49,21 @@ let announce: jest.SpiedFunction<
   typeof AccessibilityInfo.announceForAccessibility
 >;
 const spoken = () => announce.mock.calls.map(([message]) => message);
+let focus: jest.SpiedFunction<typeof AccessibilityInfo.sendAccessibilityEvent>;
+// The text each accessibility event went to. Each ref holds the element it
+// was rendered from: see `createNodeMock` below.
+const focused = () =>
+  focus.mock.calls.map(([node, event]) => [
+    (node as unknown as ReactElement<{ children: string }>).props.children,
+    event,
+  ]);
 
 beforeEach(() => {
-  // React Native's Jest setup already mocks this, so calls outlive each test.
+  // React Native's Jest setup already mocks these, so calls outlive each test.
   announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
   announce.mockClear();
+  focus = jest.spyOn(AccessibilityInfo, 'sendAccessibilityEvent');
+  focus.mockClear();
   // Response bodies settle on microtasks, which must keep running.
   jest.useFakeTimers({ doNotFake: ['nextTick', 'queueMicrotask'] });
   jest
@@ -151,6 +162,8 @@ async function startRegistration(adapters: ChangeReminderAdapters) {
       homeTimeZone="Australia/Sydney"
       palette={daylightSaviourPalettes.light}
     />,
+    // The test renderer leaves refs empty unless given something to hold.
+    { createNodeMock: (element) => element },
   );
   fireEvent.press(
     await screen.findByRole('button', {
@@ -336,10 +349,12 @@ describe('announcements', () => {
       await startRegistration(test.adapters);
       await screen.findByText(copy.changeReminders.osBlocked.body);
       announce.mockClear();
+      focus.mockClear();
 
       await act(async () => returnToApp?.('active'));
       await screen.findByText(copy.changeReminders.osBlocked.body);
       expect(spoken()).toEqual([]);
+      expect(focused()).toEqual([]);
 
       // Allowed in Settings: the one recheck worth announcing.
       test.setPermission(granted);
@@ -378,26 +393,33 @@ describe('announcements', () => {
     expect(spoken()).toEqual([]);
   });
 
-  it.each<[string, readonly string[]]>([
-    // Android's assertive region reads failures, so a second reading is noise.
-    ['android', [copy.changeReminders.saving.body]],
-    [
-      'ios',
-      [copy.changeReminders.saving.body, copy.changeReminders.failed.body],
-    ],
-  ])('announces a failure once on %s', async (platform, expected) => {
-    jest.replaceProperty(Platform, 'OS', platform as typeof Platform.OS);
-    const test = setup({
-      fetchImplementation: inOrder(
-        Promise.resolve(Response.json({}, { status: 500 })),
-      ),
-    });
-
-    await startRegistration(test.adapters);
-    await screen.findByRole('alert');
-
-    expect(spoken()).toEqual(expected);
+  // On iOS the retry button replaces the button VoiceOver was on and takes
+  // its focus, which cut off an announced failure. Android's assertive region
+  // reads failures, so focusing them there would read them twice.
+  const failureFocus = (failure: string) => ({
+    android: [],
+    ios: [[failure, 'focus']],
   });
+
+  it.each(['android', 'ios'] as const)(
+    'on %s reads a failure before its retry button',
+    async (platform) => {
+      jest.replaceProperty(Platform, 'OS', platform);
+      const test = setup({
+        fetchImplementation: inOrder(
+          Promise.resolve(Response.json({}, { status: 500 })),
+        ),
+      });
+
+      await startRegistration(test.adapters);
+      await screen.findByRole('alert');
+
+      expect(spoken()).toEqual([copy.changeReminders.saving.body]);
+      expect(focused()).toEqual(
+        failureFocus(copy.changeReminders.failed.body)[platform],
+      );
+    },
+  );
 
   it.each(['android', 'ios'] as const)(
     'on %s announces deletion starting and its outcome once each',
@@ -419,24 +441,25 @@ describe('announcements', () => {
     },
   );
 
-  it.each<[string, readonly string[]]>([
-    // Android's assertive region reads failures, so a second reading is noise.
-    ['android', [copy.changeReminders.disabling]],
-    [
-      'ios',
-      [copy.changeReminders.disabling, copy.changeReminders.disableFailed.body],
-    ],
-  ])('announces a failed deletion once on %s', async (platform, expected) => {
-    jest.replaceProperty(Platform, 'OS', platform as typeof Platform.OS);
-    const test = setup({
-      fetchImplementation: deletionReplies(Response.json({}, { status: 500 })),
-    });
+  it.each(['android', 'ios'] as const)(
+    'on %s reads a failed deletion before its retry button',
+    async (platform) => {
+      jest.replaceProperty(Platform, 'OS', platform);
+      const test = setup({
+        fetchImplementation: deletionReplies(
+          Response.json({}, { status: 500 }),
+        ),
+      });
 
-    await startDeletion(test.adapters);
-    await screen.findByRole('alert');
+      await startDeletion(test.adapters);
+      await screen.findByRole('alert');
 
-    expect(spoken()).toEqual(expected);
-  });
+      expect(spoken()).toEqual([copy.changeReminders.disabling]);
+      expect(focused()).toEqual(
+        failureFocus(copy.changeReminders.disableFailed.body)[platform],
+      );
+    },
+  );
 });
 
 describe('when the service refuses too many requests', () => {
@@ -458,7 +481,7 @@ describe('when the service refuses too many requests', () => {
     ).toBeTruthy();
   });
 
-  it('asks for a wait before deleting again, and says so on iOS', async () => {
+  it('asks for a wait before deleting again, and reads it on iOS', async () => {
     jest.replaceProperty(Platform, 'OS', 'ios');
     const test = setup({ fetchImplementation: deletionReplies(throttled()) });
 
@@ -475,9 +498,9 @@ describe('when the service refuses too many requests', () => {
         name: copy.changeReminders.disableFailed.confirm,
       }),
     ).toBeTruthy();
-    expect(spoken()).toEqual([
-      copy.changeReminders.disabling,
-      copy.changeReminders.disableFailed.throttledBody,
+    expect(spoken()).toEqual([copy.changeReminders.disabling]);
+    expect(focused()).toEqual([
+      [copy.changeReminders.disableFailed.throttledBody, 'focus'],
     ]);
   });
 });
