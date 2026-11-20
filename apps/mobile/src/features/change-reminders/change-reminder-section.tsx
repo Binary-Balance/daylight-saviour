@@ -84,11 +84,17 @@ function useProgressAnnouncements(
     ) {
       if (!failure) {
         AccessibilityInfo.announceForAccessibility(outcome);
-      } else if (Platform.OS === 'ios' && message.current !== null) {
+      } else if (Platform.OS === 'ios') {
         // The retry button takes the place of the control VoiceOver was on,
         // so VoiceOver moved to it and cut off an announced failure. Focus on
         // the message reads it first. Android's alert region reads it already.
-        AccessibilityInfo.sendAccessibilityEvent(message.current, 'focus');
+        // Fabric mounts the message only after this turn, so focus waits.
+        const timer = setTimeout(() => {
+          if (message.current !== null) {
+            AccessibilityInfo.sendAccessibilityEvent(message.current, 'focus');
+          }
+        }, 100);
+        return () => clearTimeout(timer);
       }
     }
   }, [kind, outcome, failure]);

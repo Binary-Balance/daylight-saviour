@@ -215,6 +215,13 @@ function deletionReplies(deletion: Response) {
   );
 }
 
+// Focus waits for the message to mount, which takes a later turn on device.
+async function settleFocus() {
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(1_000);
+  });
+}
+
 async function passDeadline() {
   await act(async () => {
     await jest.advanceTimersByTimeAsync(deadlineMs);
@@ -356,6 +363,7 @@ describe('announcements', () => {
       });
       await startRegistration(test.adapters);
       await screen.findByText(copy.changeReminders.osBlocked.body);
+      await settleFocus();
       expect(focused()).toEqual(
         failureFocus(copy.changeReminders.osBlocked.body)[platform],
       );
@@ -364,6 +372,7 @@ describe('announcements', () => {
 
       await act(async () => returnToApp?.('active'));
       await screen.findByText(copy.changeReminders.osBlocked.body);
+      await settleFocus();
       expect(spoken()).toEqual([]);
       expect(focused()).toEqual([]);
 
@@ -408,14 +417,20 @@ describe('announcements', () => {
     'on %s reads a failure before its retry button',
     async (platform) => {
       jest.replaceProperty(Platform, 'OS', platform);
-      const test = setup({
-        fetchImplementation: inOrder(
-          Promise.resolve(Response.json({}, { status: 500 })),
-        ),
-      });
+      const response = deferred<Response>();
+      const test = setup({ fetchImplementation: () => response.promise });
 
       await startRegistration(test.adapters);
-      await screen.findByRole('alert');
+      await waitFor(() => expect(test.request).toHaveBeenCalledTimes(1));
+      await act(async () =>
+        response.resolve(Response.json({}, { status: 500 })),
+      );
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        copy.changeReminders.failed.body,
+      );
+      // Not yet: on device the message is not mounted in this turn.
+      expect(focused()).toEqual([]);
+      await settleFocus();
 
       expect(spoken()).toEqual([copy.changeReminders.saving.body]);
       expect(focused()).toEqual(
@@ -456,6 +471,7 @@ describe('announcements', () => {
 
       await startDeletion(test.adapters);
       await screen.findByRole('alert');
+      await settleFocus();
 
       expect(spoken()).toEqual([copy.changeReminders.disabling]);
       expect(focused()).toEqual(
@@ -501,6 +517,7 @@ describe('when the service refuses too many requests', () => {
         name: copy.changeReminders.disableFailed.confirm,
       }),
     ).toBeTruthy();
+    await settleFocus();
     expect(spoken()).toEqual([copy.changeReminders.disabling]);
     expect(focused()).toEqual([
       [copy.changeReminders.disableFailed.throttledBody, 'focus'],
