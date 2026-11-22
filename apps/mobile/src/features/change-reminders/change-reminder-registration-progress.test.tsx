@@ -199,6 +199,7 @@ async function startDeletion(adapters: ChangeReminderAdapters) {
     false,
   );
   announce.mockClear();
+  focus.mockClear();
   fireEvent.press(
     await screen.findByRole('button', {
       name: copy.changeReminders.disableConfirmation.confirm,
@@ -318,8 +319,16 @@ describe('announcements', () => {
     ios: [[failure, 'focus']],
   });
 
+  // After an action in the card, TalkBack lost its place when the control it
+  // was on unmounted. Android focuses the new card's heading instead, which
+  // reads the outcome, so the outcome is not announced as well.
+  const outcome = (heading: string, body: string) => ({
+    android: { focused: [[heading, 'focus']], spoken: [] },
+    ios: { focused: [], spoken: [body] },
+  });
+
   it.each(['android', 'ios'] as const)(
-    'on %s announces registration starting and its confirmed outcome once each',
+    'on %s reads registration starting and its confirmed outcome once each',
     async (platform) => {
       jest.replaceProperty(Platform, 'OS', platform);
       const test = setup({
@@ -330,8 +339,17 @@ describe('announcements', () => {
 
       await startRegistration(test.adapters);
       await screen.findByText(enabledBody);
+      await settleFocus();
 
-      expect(spoken()).toEqual([copy.changeReminders.saving.body, enabledBody]);
+      const expected = outcome(
+        copy.changeReminders.enabled.heading,
+        enabledBody,
+      )[platform];
+      expect(spoken()).toEqual([
+        copy.changeReminders.saving.body,
+        ...expected.spoken,
+      ]);
+      expect(focused()).toEqual(expected.focused);
       expect(screen.getByText(enabledBody).props.accessibilityLiveRegion).toBe(
         'none',
       );
@@ -384,34 +402,90 @@ describe('announcements', () => {
     },
   );
 
-  it('stays silent when the card restores itself', async () => {
-    const test = setup({
-      fetchImplementation: inOrder(
-        Promise.resolve(Response.json(registration)),
-      ),
-    });
-    await startRegistration(test.adapters);
-    await screen.findByText(enabledBody);
-    announce.mockClear();
+  it.each(['android', 'ios'] as const)(
+    'on %s stays silent and keeps focus when the card restores itself',
+    async (platform) => {
+      jest.replaceProperty(Platform, 'OS', platform);
+      const test = setup({
+        fetchImplementation: inOrder(
+          Promise.resolve(Response.json(registration)),
+        ),
+      });
+      await startRegistration(test.adapters);
+      await screen.findByText(enabledBody);
+      await settleFocus();
+      announce.mockClear();
+      focus.mockClear();
 
-    // Each return to the app passes through a saving state and back.
-    act(() => returnToApp?.('active'));
-    await screen.findByText(enabledBody);
-    act(() => returnToApp?.('active'));
-    await screen.findByText(enabledBody);
-    expect(spoken()).toEqual([]);
+      // Each return to the app passes through a saving state and back.
+      act(() => returnToApp?.('active'));
+      await screen.findByText(enabledBody);
+      act(() => returnToApp?.('active'));
+      await screen.findByText(enabledBody);
+      await settleFocus();
+      expect(spoken()).toEqual([]);
+      expect(focused()).toEqual([]);
 
-    screen.unmount();
-    render(
-      <ChangeReminderSection
-        adapters={test.adapters}
-        homeTimeZone="Australia/Sydney"
-        palette={daylightSaviourPalettes.light}
-      />,
-    );
-    await screen.findByText(enabledBody);
-    expect(spoken()).toEqual([]);
-  });
+      screen.unmount();
+      render(
+        <ChangeReminderSection
+          adapters={test.adapters}
+          homeTimeZone="Australia/Sydney"
+          palette={daylightSaviourPalettes.light}
+        />,
+      );
+      await screen.findByText(enabledBody);
+      await settleFocus();
+      expect(spoken()).toEqual([]);
+      expect(focused()).toEqual([]);
+    },
+  );
+
+  it.each(['android', 'ios'] as const)(
+    'on %s reads the deletion question after the last timing is turned off',
+    async (platform) => {
+      jest.replaceProperty(Platform, 'OS', platform);
+      const test = setup({
+        fetchImplementation: inOrder(
+          Promise.resolve(Response.json(registration)),
+          Promise.resolve(new Response(null, { status: 204 })),
+        ),
+      });
+      await startRegistration(test.adapters);
+      fireEvent(
+        await screen.findByLabelText(
+          copy.changeReminders.accessibility.oneWeek,
+        ),
+        'valueChange',
+        false,
+      );
+      await screen.findByText(
+        copy.changeReminders.enabled.body({
+          oneDayEnabled: true,
+          oneWeekEnabled: false,
+        }),
+      );
+      await settleFocus();
+      focus.mockClear();
+
+      fireEvent(
+        screen.getByLabelText(copy.changeReminders.accessibility.oneDay),
+        'valueChange',
+        false,
+      );
+      await screen.findByText(copy.changeReminders.disableConfirmation.heading);
+      await settleFocus();
+
+      expect(focused()).toEqual(
+        {
+          android: [
+            [copy.changeReminders.disableConfirmation.heading, 'focus'],
+          ],
+          ios: [],
+        }[platform],
+      );
+    },
+  );
 
   it.each(['android', 'ios'] as const)(
     'on %s reads a failure before its retry button',
@@ -440,7 +514,7 @@ describe('announcements', () => {
   );
 
   it.each(['android', 'ios'] as const)(
-    'on %s announces deletion starting and its outcome once each',
+    'on %s reads deletion starting and its outcome once each',
     async (platform) => {
       jest.replaceProperty(Platform, 'OS', platform);
       const test = setup({
@@ -451,11 +525,17 @@ describe('announcements', () => {
 
       await startDeletion(test.adapters);
       await screen.findByText(copy.changeReminders.disabled.body);
+      await settleFocus();
 
+      const expected = outcome(
+        copy.changeReminders.disabled.heading,
+        copy.changeReminders.disabled.body,
+      )[platform];
       expect(spoken()).toEqual([
         copy.changeReminders.disabling,
-        copy.changeReminders.disabled.body,
+        ...expected.spoken,
       ]);
+      expect(focused()).toEqual(expected.focused);
     },
   );
 
