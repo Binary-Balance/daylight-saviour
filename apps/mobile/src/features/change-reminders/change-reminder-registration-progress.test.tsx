@@ -435,6 +435,7 @@ describe('announcements', () => {
           homeTimeZone="Australia/Sydney"
           palette={daylightSaviourPalettes.light}
         />,
+        { createNodeMock: (element) => element },
       );
       await screen.findByText(enabledBody);
       await settleFocus();
@@ -444,7 +445,7 @@ describe('announcements', () => {
   );
 
   it.each(['android', 'ios'] as const)(
-    'on %s reads the deletion question after the last timing is turned off',
+    'on %s reads the new card after each timing is turned off',
     async (platform) => {
       jest.replaceProperty(Platform, 'OS', platform);
       const test = setup({
@@ -454,6 +455,9 @@ describe('announcements', () => {
         ),
       });
       await startRegistration(test.adapters);
+      await screen.findByText(enabledBody);
+      await settleFocus();
+      focus.mockClear();
       fireEvent(
         await screen.findByLabelText(
           copy.changeReminders.accessibility.oneWeek,
@@ -468,6 +472,13 @@ describe('announcements', () => {
         }),
       );
       await settleFocus();
+      // The switches unmount while the timing saves.
+      expect(focused()).toEqual(
+        {
+          android: [[copy.changeReminders.enabled.heading, 'focus']],
+          ios: [],
+        }[platform],
+      );
       focus.mockClear();
 
       fireEvent(
