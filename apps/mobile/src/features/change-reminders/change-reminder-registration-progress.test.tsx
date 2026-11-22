@@ -398,7 +398,9 @@ describe('announcements', () => {
       test.setPermission(granted);
       await act(async () => returnToApp?.('active'));
       await screen.findByText(enabledBody);
+      await settleFocus();
       expect(spoken()).toEqual([enabledBody]);
+      expect(focused()).toEqual([]);
     },
   );
 
@@ -481,6 +483,32 @@ describe('announcements', () => {
           android: [
             [copy.changeReminders.disableConfirmation.heading, 'focus'],
           ],
+          ios: [],
+        }[platform],
+      );
+    },
+  );
+
+  it.each(['android', 'ios'] as const)(
+    'on %s reads the start card when the service no longer has the registration',
+    async (platform) => {
+      jest.replaceProperty(Platform, 'OS', platform);
+      const test = setup({
+        fetchImplementation: inOrder(
+          Promise.resolve(
+            new Response('Registration unavailable', { status: 404 }),
+          ),
+        ),
+      });
+
+      await startRegistration(test.adapters);
+      await screen.findByText(copy.changeReminders.untouched.body);
+      await settleFocus();
+
+      // The start card has no heading, so its message takes focus.
+      expect(focused()).toEqual(
+        {
+          android: [[copy.changeReminders.untouched.body, 'focus']],
           ios: [],
         }[platform],
       );

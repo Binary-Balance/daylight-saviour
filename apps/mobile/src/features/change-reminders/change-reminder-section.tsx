@@ -489,6 +489,8 @@ export default function ChangeReminderSection({
 
   const card = cardOf(snapshot);
   const Actions = card.Actions;
+  // Every action changes the card, which clears this. One the session ignored
+  // would leave it set, and the next restore or recheck would take focus.
   const actedRef = useRef(false);
   const dispatchAction = (event: ChangeReminderSessionEvent) => {
     actedRef.current = true;
