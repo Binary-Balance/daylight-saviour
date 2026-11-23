@@ -394,10 +394,12 @@ function appSleepCopy(prompt: AppSleepPrompt, guidance: AppSleepGuidance) {
 
 function AppSleepPromptMessage({
   guidance,
+  onNotNow,
   palette,
   prompt,
 }: {
   readonly guidance: AppSleepGuidance;
+  readonly onNotNow: (prompt: AppSleepPrompt) => void;
   readonly palette: DaylightSaviourPalette;
   readonly prompt: AppSleepPrompt;
 }) {
@@ -422,7 +424,10 @@ function AppSleepPromptMessage({
         />
         <ActionButton
           label={reminders.appSleepNotNow}
-          onPress={() => answer(prompt)}
+          onPress={() => {
+            answer(prompt);
+            onNotNow(prompt);
+          }}
           palette={palette}
         />
       </View>
@@ -440,13 +445,34 @@ function AppSleepMessages({
   readonly guidance: AppSleepGuidance;
   readonly palette: DaylightSaviourPalette;
 }) {
+  // "Not now" unmounts the button TalkBack was on, and TalkBack then moved to
+  // the line's own button, skipping the line. So focus moves to the line.
+  // "Open …" is left alone: TalkBack restores its own focus once the
+  // user is back from Settings, replacing any focus the app sends before then.
+  const [declined, setDeclined] = useState<AppSleepPrompt>();
+  const lines = useRef<Partial<Record<AppSleepPrompt, Text | null>>>({});
+  useEffect(() => {
+    if (declined === undefined) return;
+    // As in `useFocusAfterAction`: Android drops a focus event sent before
+    // React Native has passed this render to it, which the next task follows.
+    const timer = setTimeout(() => {
+      const line = lines.current[declined];
+      if (line != null) AccessibilityInfo.sendAccessibilityEvent(line, 'focus');
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [declined]);
   return (
     <>
       {guidance.lines.map((line) => {
         const content = appSleepCopy(line, guidance);
         return (
           <View key={line} style={styles.line}>
-            <Text style={[styles.body, { color: palette.ink }]}>
+            <Text
+              ref={(text) => {
+                lines.current[line] = text;
+              }}
+              style={[styles.body, { color: palette.ink }]}
+            >
               {content.line}
             </Text>
             <ActionButton
@@ -461,6 +487,7 @@ function AppSleepMessages({
       {guidance.prompt === undefined ? null : (
         <AppSleepPromptMessage
           guidance={guidance}
+          onNotNow={setDeclined}
           palette={palette}
           prompt={guidance.prompt}
         />
