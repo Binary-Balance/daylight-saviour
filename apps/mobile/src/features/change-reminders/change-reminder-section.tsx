@@ -450,14 +450,15 @@ function AppSleepMessages({
   // "Open …" is left alone: TalkBack restores its own focus once the
   // user is back from Settings, replacing any focus the app sends before then.
   const [declined, setDeclined] = useState<AppSleepPrompt>();
-  const lines = useRef<Partial<Record<AppSleepPrompt, Text | null>>>({});
+  const declinedLine = useRef<Text>(null);
   useEffect(() => {
     if (declined === undefined) return;
     // As in `useFocusAfterAction`: Android drops a focus event sent before
-    // React Native has passed this render to it, which the next task follows.
+    // React Native has passed this render to it. The next task runs after.
     const timer = setTimeout(() => {
-      const line = lines.current[declined];
-      if (line != null) AccessibilityInfo.sendAccessibilityEvent(line, 'focus');
+      if (declinedLine.current !== null) {
+        AccessibilityInfo.sendAccessibilityEvent(declinedLine.current, 'focus');
+      }
     }, 0);
     return () => clearTimeout(timer);
   }, [declined]);
@@ -468,9 +469,7 @@ function AppSleepMessages({
         return (
           <View key={line} style={styles.line}>
             <Text
-              ref={(text) => {
-                lines.current[line] = text;
-              }}
+              ref={line === declined ? declinedLine : undefined}
               style={[styles.body, { color: palette.ink }]}
             >
               {content.line}
