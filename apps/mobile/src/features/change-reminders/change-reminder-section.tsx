@@ -95,12 +95,13 @@ function useProgressAnnouncements(
         // The retry button takes the place of the control VoiceOver was on,
         // so VoiceOver moved to it and cut off an announced failure. Focus on
         // the message reads it first. Android's alert region reads it already.
-        // Fabric mounts the message only after this turn, so focus waits.
+        // React Native passes this render to iOS only after this task, so a
+        // focus event sent sooner finds no view. The next task runs after it.
         const timer = setTimeout(() => {
           if (message.current !== null) {
             AccessibilityInfo.sendAccessibilityEvent(message.current, 'focus');
           }
-        }, 100);
+        }, 0);
         return () => clearTimeout(timer);
       }
     }
