@@ -5,7 +5,8 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react-native';
-import { AppState } from 'react-native';
+import type { ReactElement } from 'react';
+import { AccessibilityInfo, AppState } from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
 import { daylightSaviourPalettes } from '../../theme';
@@ -87,6 +88,8 @@ function renderSection(
       homeTimeZone="Australia/Sydney"
       palette={daylightSaviourPalettes.light}
     />,
+    // Refs hold the element, so focus calls name the text they went to.
+    { createNodeMock: (element) => element },
   );
 }
 
@@ -349,4 +352,78 @@ it('stops listening after unmounting', async () => {
 
   // One listener for the reminder session and one for the sleep guidance.
   expect(remove).toHaveBeenCalledTimes(2);
+});
+
+describe('TalkBack focus', () => {
+  let focus: jest.SpiedFunction<
+    typeof AccessibilityInfo.sendAccessibilityEvent
+  >;
+  const focused = () =>
+    focus.mock.calls.map(([node, event]) => [
+      (node as unknown as ReactElement<{ children: string }>).props.children,
+      event,
+    ]);
+  const settleFocus = () =>
+    act(async () => {
+      await jest.advanceTimersByTimeAsync(1_000);
+    });
+
+  beforeEach(() => {
+    // React Native's Jest setup already mocks this, so calls outlive a test.
+    focus = jest.spyOn(AccessibilityInfo, 'sendAccessibilityEvent');
+    focus.mockClear();
+    // Adapter promises settle on microtasks, which must keep running.
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'queueMicrotask'] });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('moves to the new line after “Not now”', async () => {
+    renderSection(sleepAdapters());
+    await screen.findByText(reminders.androidPause.heading);
+
+    fireEvent.press(button(reminders.appSleepNotNow));
+    // Not yet: on device the line is not on screen in this turn.
+    expect(focused()).toEqual([]);
+    await settleFocus();
+
+    expect(focused()).toEqual([[androidLine, 'focus']]);
+  });
+
+  it('moves to each line in turn, not the Samsung prompt', async () => {
+    renderSection(sleepAdapters({ samsung: true }));
+    await screen.findByText(reminders.androidPause.heading);
+
+    fireEvent.press(button(reminders.appSleepNotNow));
+    await settleFocus();
+    expect(focused()).toEqual([[samsungAndroidLine, 'focus']]);
+
+    fireEvent.press(button(reminders.appSleepNotNow));
+    await settleFocus();
+    expect(focused()).toEqual([
+      [samsungAndroidLine, 'focus'],
+      [reminders.samsungSleep.line, 'focus'],
+    ]);
+  });
+
+  // TalkBack restores its own focus once the user is back from Settings and
+  // replaced any focus sent before then, so the app sends none.
+  it('leaves focus to TalkBack after either “Open …” button', async () => {
+    renderSection(sleepAdapters());
+    await screen.findByText(reminders.androidPause.heading);
+
+    fireEvent.press(button(reminders.androidPause.open));
+    await settleFocus();
+    await returnToApp();
+    await settleFocus();
+    fireEvent.press(button(reminders.androidPause.open));
+    await settleFocus();
+    await returnToApp();
+    await settleFocus();
+
+    expect(screen.getByText(androidLine)).toBeTruthy();
+    expect(focused()).toEqual([]);
+  });
 });
