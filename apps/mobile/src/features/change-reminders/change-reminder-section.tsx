@@ -115,8 +115,9 @@ function useProgressAnnouncements(
 // after an action in it, focus moves to its heading, or to its message when it
 // has none. The enabled card's message names the timings that are on, so it
 // takes focus there. Restores and rechecks are not actions, so they never move
-// focus. Errors keep their own handling: an alert on Android, and focus on the
-// message on iOS. Returns the ref for the card's heading.
+// focus. Errors never take focus here: Android reads them as alerts, and iOS
+// focuses a failed registration or deletion above. Returns the ref for the
+// card's heading.
 function useFocusAfterAction(
   kind: Kind,
   tone: Card['tone'],
