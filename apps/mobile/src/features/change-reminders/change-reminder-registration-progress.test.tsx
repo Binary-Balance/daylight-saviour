@@ -320,14 +320,6 @@ describe('announcements', () => {
     ios: [[failure, 'focus']],
   });
 
-  // After an action in the card, TalkBack lost its place when the control it
-  // was on unmounted. Android focuses the new card instead, which reads the
-  // outcome, so the outcome is not announced as well.
-  const outcome = (focusedText: string, body: string) => ({
-    android: { focused: [[focusedText, 'focus']], spoken: [] },
-    ios: { focused: [], spoken: [body] },
-  });
-
   it.each(['android', 'ios'] as const)(
     'on %s reads the explainer when it opens',
     async (platform) => {
@@ -350,12 +342,9 @@ describe('announcements', () => {
       expect(focused()).toEqual([]);
       await settleFocus();
 
-      expect(focused()).toEqual(
-        {
-          android: [[copy.changeReminders.explainer.heading, 'focus']],
-          ios: [],
-        }[platform],
-      );
+      expect(focused()).toEqual([
+        [copy.changeReminders.explainer.heading, 'focus'],
+      ]);
     },
   );
 
@@ -373,12 +362,9 @@ describe('announcements', () => {
       await screen.findByText(enabledBody);
       await settleFocus();
 
-      const expected = outcome(enabledBody, enabledBody)[platform];
-      expect(spoken()).toEqual([
-        copy.changeReminders.saving.body,
-        ...expected.spoken,
-      ]);
-      expect(focused()).toEqual(expected.focused);
+      // Focus reads the outcome, so it is not announced as well.
+      expect(spoken()).toEqual([copy.changeReminders.saving.body]);
+      expect(focused()).toEqual([[enabledBody, 'focus']]);
       expect(screen.getByText(enabledBody).props.accessibilityLiveRegion).toBe(
         'none',
       );
@@ -502,20 +488,15 @@ describe('announcements', () => {
       );
       await settleFocus();
       // The switches unmount while the timing saves.
-      expect(focused()).toEqual(
-        {
-          android: [
-            [
-              copy.changeReminders.enabled.body({
-                oneDayEnabled: true,
-                oneWeekEnabled: false,
-              }),
-              'focus',
-            ],
-          ],
-          ios: [],
-        }[platform],
-      );
+      expect(focused()).toEqual([
+        [
+          copy.changeReminders.enabled.body({
+            oneDayEnabled: true,
+            oneWeekEnabled: false,
+          }),
+          'focus',
+        ],
+      ]);
       focus.mockClear();
 
       fireEvent(
@@ -526,14 +507,9 @@ describe('announcements', () => {
       await screen.findByText(copy.changeReminders.disableConfirmation.heading);
       await settleFocus();
 
-      expect(focused()).toEqual(
-        {
-          android: [
-            [copy.changeReminders.disableConfirmation.heading, 'focus'],
-          ],
-          ios: [],
-        }[platform],
-      );
+      expect(focused()).toEqual([
+        [copy.changeReminders.disableConfirmation.heading, 'focus'],
+      ]);
     },
   );
 
@@ -554,12 +530,9 @@ describe('announcements', () => {
       await settleFocus();
 
       // The start card has no heading, so its message takes focus.
-      expect(focused()).toEqual(
-        {
-          android: [[copy.changeReminders.untouched.body, 'focus']],
-          ios: [],
-        }[platform],
-      );
+      expect(focused()).toEqual([
+        [copy.changeReminders.untouched.body, 'focus'],
+      ]);
     },
   );
 
@@ -603,15 +576,10 @@ describe('announcements', () => {
       await screen.findByText(copy.changeReminders.disabled.body);
       await settleFocus();
 
-      const expected = outcome(
-        copy.changeReminders.disabled.heading,
-        copy.changeReminders.disabled.body,
-      )[platform];
-      expect(spoken()).toEqual([
-        copy.changeReminders.disabling,
-        ...expected.spoken,
+      expect(spoken()).toEqual([copy.changeReminders.disabling]);
+      expect(focused()).toEqual([
+        [copy.changeReminders.disabled.heading, 'focus'],
       ]);
-      expect(focused()).toEqual(expected.focused);
     },
   );
 

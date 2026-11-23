@@ -86,9 +86,9 @@ function useProgressAnnouncements(
       !(recheckingBlock.current && kind === 'os-blocked')
     ) {
       if (!failure) {
-        // After an action, Android moves focus to the card, which reads the
-        // outcome. An announcement as well was cut off.
-        if (Platform.OS !== 'android' || !actedRef.current) {
+        // After an action, focus moves to the card, which reads the outcome.
+        // An announcement as well was cut off.
+        if (!actedRef.current) {
           AccessibilityInfo.announceForAccessibility(outcome);
         }
       } else if (Platform.OS === 'ios') {
@@ -109,13 +109,14 @@ function useProgressAnnouncements(
   return message;
 }
 
-// An action in the card unmounts the control TalkBack was on, and TalkBack
-// then moved to the report's status line instead of reading the card's new
-// state. So on Android, once the card settles after an action in it, focus
-// moves to its heading, or to its message when it has none. The enabled card's
-// message names the timings that are on, so it takes focus there. Restores and
-// rechecks are not actions, so they never move focus, and errors keep their
-// alert. VoiceOver is unchanged. Returns the ref for the card's heading.
+// An action in the card unmounts the control the screen reader was on. TalkBack
+// then moved to the report's status line and VoiceOver to the top of the
+// screen, and neither read the card's new state. So once the card settles
+// after an action in it, focus moves to its heading, or to its message when it
+// has none. The enabled card's message names the timings that are on, so it
+// takes focus there. Restores and rechecks are not actions, so they never move
+// focus. Errors keep their own handling: an alert on Android, and focus on the
+// message on iOS. Returns the ref for the card's heading.
 function useFocusAfterAction(
   kind: Kind,
   tone: Card['tone'],
@@ -126,10 +127,10 @@ function useFocusAfterAction(
   useEffect(() => {
     if (!actedRef.current || tone === 'busy') return;
     actedRef.current = false;
-    if (Platform.OS !== 'android' || tone === 'error') return;
+    if (tone === 'error') return;
     // Sent during this effect, the event reached a view Android had created
     // but not yet put on screen, and Android dropped it. The next task runs
-    // after React Native has passed this render to Android.
+    // after React Native has passed this render to the platform.
     const timer = setTimeout(() => {
       const target =
         kind === 'enabled'
