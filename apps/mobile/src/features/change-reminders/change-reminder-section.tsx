@@ -111,7 +111,8 @@ function useProgressAnnouncements(
 // An action in the card unmounts the control TalkBack was on, and TalkBack
 // then moved to the report's status line instead of reading the card's new
 // state. So on Android, once the card settles after an action in it, focus
-// moves to its heading, or to its message when it has none. Restores and
+// moves to its heading, or to its message when it has none. The enabled card's
+// message names the timings that are on, so it takes focus there. Restores and
 // rechecks are not actions, so they never move focus, and errors keep their
 // alert. VoiceOver is unchanged. Returns the ref for the card's heading.
 function useFocusAfterAction(
@@ -125,13 +126,18 @@ function useFocusAfterAction(
     if (!actedRef.current || tone === 'busy') return;
     actedRef.current = false;
     if (Platform.OS !== 'android' || tone === 'error') return;
-    // Fabric mounts the new card only after this turn, so focus waits.
+    // Sent during this effect, the event reached a view Android had created
+    // but not yet put on screen, and Android dropped it. The next task runs
+    // after React Native has passed this render to Android.
     const timer = setTimeout(() => {
-      const target = heading.current ?? message.current;
+      const target =
+        kind === 'enabled'
+          ? message.current
+          : (heading.current ?? message.current);
       if (target !== null) {
         AccessibilityInfo.sendAccessibilityEvent(target, 'focus');
       }
-    }, 100);
+    }, 0);
     return () => clearTimeout(timer);
   }, [kind, tone, actedRef, message]);
   return heading;

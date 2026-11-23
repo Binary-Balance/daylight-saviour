@@ -216,7 +216,8 @@ function deletionReplies(deletion: Response) {
   );
 }
 
-// Focus waits for the message to mount, which takes a later turn on device.
+// Focus waits for the new card to be on screen, which takes a later turn on
+// device.
 async function settleFocus() {
   await act(async () => {
     await jest.advanceTimersByTimeAsync(1_000);
@@ -320,12 +321,43 @@ describe('announcements', () => {
   });
 
   // After an action in the card, TalkBack lost its place when the control it
-  // was on unmounted. Android focuses the new card's heading instead, which
-  // reads the outcome, so the outcome is not announced as well.
-  const outcome = (heading: string, body: string) => ({
-    android: { focused: [[heading, 'focus']], spoken: [] },
+  // was on unmounted. Android focuses the new card instead, which reads the
+  // outcome, so the outcome is not announced as well.
+  const outcome = (focusedText: string, body: string) => ({
+    android: { focused: [[focusedText, 'focus']], spoken: [] },
     ios: { focused: [], spoken: [body] },
   });
+
+  it.each(['android', 'ios'] as const)(
+    'on %s reads the explainer when it opens',
+    async (platform) => {
+      jest.replaceProperty(Platform, 'OS', platform);
+      const test = setup({ fetchImplementation: inOrder() });
+      render(
+        <ChangeReminderSection
+          adapters={test.adapters}
+          homeTimeZone="Australia/Sydney"
+          palette={daylightSaviourPalettes.light}
+        />,
+        { createNodeMock: (element) => element },
+      );
+      fireEvent.press(
+        await screen.findByRole('button', {
+          name: copy.changeReminders.untouched.action,
+        }),
+      );
+      // Not yet: on device the new card is not on screen in this turn.
+      expect(focused()).toEqual([]);
+      await settleFocus();
+
+      expect(focused()).toEqual(
+        {
+          android: [[copy.changeReminders.explainer.heading, 'focus']],
+          ios: [],
+        }[platform],
+      );
+    },
+  );
 
   it.each(['android', 'ios'] as const)(
     'on %s reads registration starting and its confirmed outcome once each',
@@ -341,10 +373,7 @@ describe('announcements', () => {
       await screen.findByText(enabledBody);
       await settleFocus();
 
-      const expected = outcome(
-        copy.changeReminders.enabled.heading,
-        enabledBody,
-      )[platform];
+      const expected = outcome(enabledBody, enabledBody)[platform];
       expect(spoken()).toEqual([
         copy.changeReminders.saving.body,
         ...expected.spoken,
@@ -475,7 +504,15 @@ describe('announcements', () => {
       // The switches unmount while the timing saves.
       expect(focused()).toEqual(
         {
-          android: [[copy.changeReminders.enabled.heading, 'focus']],
+          android: [
+            [
+              copy.changeReminders.enabled.body({
+                oneDayEnabled: true,
+                oneWeekEnabled: false,
+              }),
+              'focus',
+            ],
+          ],
           ios: [],
         }[platform],
       );
