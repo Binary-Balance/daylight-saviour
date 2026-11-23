@@ -43,6 +43,7 @@ import {
 } from './change-reminder-controls';
 import {
   createChangeReminderSession,
+  type ChangeReminderSessionEvent,
   type ChangeReminderSessionSnapshot,
 } from './change-reminder-session';
 
@@ -57,11 +58,13 @@ const startAnnouncements: Partial<Record<Kind, string>> = {
 // Announces registration and deletion starting and finishing, once each. Live
 // regions do not suit this: iOS ignores them, and on Android the enabled text
 // would be read on every launch and return to the app, because the card
-// restores itself. Returns the ref for the card's message.
+// restores itself. `actedRef` is true after an action in the card. Returns the
+// ref for the card's message.
 function useProgressAnnouncements(
   kind: Kind,
   outcome: string | undefined,
   failure: boolean,
+  actedRef: RefObject<boolean>,
 ) {
   const message = useRef<Text>(null);
   const previousKind = useRef(kind);
@@ -83,22 +86,62 @@ function useProgressAnnouncements(
       !(recheckingBlock.current && kind === 'os-blocked')
     ) {
       if (!failure) {
-        AccessibilityInfo.announceForAccessibility(outcome);
+        // After an action, Android moves focus to the card, which reads the
+        // outcome. An announcement as well was cut off.
+        if (Platform.OS !== 'android' || !actedRef.current) {
+          AccessibilityInfo.announceForAccessibility(outcome);
+        }
       } else if (Platform.OS === 'ios') {
         // The retry button takes the place of the control VoiceOver was on,
         // so VoiceOver moved to it and cut off an announced failure. Focus on
         // the message reads it first. Android's alert region reads it already.
-        // Fabric mounts the message only after this turn, so focus waits.
+        // React Native passes this render to iOS only after this task, so a
+        // focus event sent sooner finds no view. The next task runs after it.
         const timer = setTimeout(() => {
           if (message.current !== null) {
             AccessibilityInfo.sendAccessibilityEvent(message.current, 'focus');
           }
-        }, 100);
+        }, 0);
         return () => clearTimeout(timer);
       }
     }
-  }, [kind, outcome, failure]);
+  }, [kind, outcome, failure, actedRef]);
   return message;
+}
+
+// An action in the card unmounts the control TalkBack was on, and TalkBack
+// then moved to the report's status line instead of reading the card's new
+// state. So on Android, once the card settles after an action in it, focus
+// moves to its heading, or to its message when it has none. The enabled card's
+// message names the timings that are on, so it takes focus there. Restores and
+// rechecks are not actions, so they never move focus, and errors keep their
+// alert. VoiceOver is unchanged. Returns the ref for the card's heading.
+function useFocusAfterAction(
+  kind: Kind,
+  tone: Card['tone'],
+  actedRef: RefObject<boolean>,
+  message: RefObject<Text | null>,
+) {
+  const heading = useRef<Text>(null);
+  useEffect(() => {
+    if (!actedRef.current || tone === 'busy') return;
+    actedRef.current = false;
+    if (Platform.OS !== 'android' || tone === 'error') return;
+    // Sent during this effect, the event reached a view Android had created
+    // but not yet put on screen, and Android dropped it. The next task runs
+    // after React Native has passed this render to Android.
+    const timer = setTimeout(() => {
+      const target =
+        kind === 'enabled'
+          ? message.current
+          : (heading.current ?? message.current);
+      if (target !== null) {
+        AccessibilityInfo.sendAccessibilityEvent(target, 'focus');
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [kind, tone, actedRef, message]);
+  return heading;
 }
 
 function useChangeReminderSession(
@@ -282,17 +325,22 @@ function cardOf(snapshot: ChangeReminderSessionSnapshot): Card {
 
 function CardMessage({
   card: { content, tone },
+  headingRef,
   messageRef,
   palette,
 }: {
   readonly card: Card;
+  readonly headingRef: RefObject<Text | null>;
   readonly messageRef: RefObject<Text | null>;
   readonly palette: DaylightSaviourPalette;
 }) {
   return (
     <>
       {'heading' in content ? (
-        <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
+        <Text
+          ref={headingRef}
+          style={[styles.metadata, { color: palette.secondaryInk }]}
+        >
           {content.heading}
         </Text>
       ) : null}
@@ -448,10 +496,25 @@ export default function ChangeReminderSection({
 
   const card = cardOf(snapshot);
   const Actions = card.Actions;
+  // Every action changes the card, which clears this. One the session ignored
+  // would leave it set, and the next restore or recheck would take focus.
+  const actedRef = useRef(false);
+  const dispatchAction = (event: ChangeReminderSessionEvent) => {
+    actedRef.current = true;
+    dispatch(event);
+  };
+  // Announcements run first: they need `actedRef`, which focus then clears.
   const message = useProgressAnnouncements(
     snapshot.kind,
     card.tone === 'busy' ? undefined : card.content.body,
     card.tone === 'error',
+    actedRef,
+  );
+  const heading = useFocusAfterAction(
+    snapshot.kind,
+    card.tone,
+    actedRef,
+    message,
   );
 
   return (
@@ -462,7 +525,12 @@ export default function ChangeReminderSection({
       >
         {copy.changeReminders.heading}
       </Text>
-      <CardMessage card={card} messageRef={message} palette={palette} />
+      <CardMessage
+        card={card}
+        headingRef={heading}
+        messageRef={message}
+        palette={palette}
+      />
       {snapshot.kind === 'enabled' && verifiedNoEvent ? (
         <Text style={[styles.body, { color: palette.ink }]}>
           {copy.changeReminders.noEvent}
@@ -474,7 +542,7 @@ export default function ChangeReminderSection({
         <TimingControls
           disabled={snapshot.kind !== 'enabled'}
           onChange={(preferences) =>
-            dispatch({ type: 'change-preferences', preferences })
+            dispatchAction({ type: 'change-preferences', preferences })
           }
           palette={palette}
           preferences={snapshot.preferences}
@@ -486,7 +554,7 @@ export default function ChangeReminderSection({
       {Actions === undefined ? null : (
         <Actions
           adapters={adapters}
-          dispatch={dispatch}
+          dispatch={dispatchAction}
           kind={snapshot.kind}
           palette={palette}
         />
