@@ -2,6 +2,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -80,12 +81,13 @@ function ZoneChooser({
   const firstMatchRef = useRef<View>(null);
   const scrollOffset = useRef(0);
   const viewportHeight = useRef(0);
-  const queryChanged = useRef(false);
+  const contentHeight = useRef(0);
+  const awaitingContentSize = useRef(false);
 
   // At large text sizes the field sits low on the screen, so the keyboard
   // would cover it and the matches below it (#296). Runs when the keyboard
-  // opens or new matches lay out.
-  const keepSearchInView = () => {
+  // opens or the matches change. It reads only refs, so it never changes.
+  const keepSearchInView = useCallback(() => {
     const content = listContentRef.current;
     const field = searchRef.current;
     if (content === null || field === null || !field.isFocused()) {
@@ -105,7 +107,22 @@ function ZoneChooser({
         });
       });
     });
-  };
+  }, []);
+
+  // After the matches change, scroll once they are laid out. When the
+  // content height changes, the scroll view clamps to its old height until
+  // it reports the new one, so wait for onContentSizeChange. Otherwise, as
+  // after a trailing space, scroll now and leave nothing pending.
+  useLayoutEffect(() => {
+    listContentRef.current?.measure((_x, _y, _width, height) => {
+      // The two reports of one height can differ in the fourth decimal.
+      awaitingContentSize.current =
+        Math.abs(height - contentHeight.current) > 0.5;
+      if (!awaitingContentSize.current) {
+        keepSearchInView();
+      }
+    });
+  }, [keepSearchInView, sections]);
 
   return (
     <SafeAreaView
@@ -130,11 +147,10 @@ function ZoneChooser({
           <SectionList
             // React Native's types predate React 19's nullable RefObject.
             innerViewRef={listContentRef as RefObject<View>}
-            // The list also grows as it renders more rows while someone
-            // scrolls, which must not pull them back to the field.
-            onContentSizeChange={() => {
-              if (queryChanged.current) {
-                queryChanged.current = false;
+            onContentSizeChange={(_width, height) => {
+              contentHeight.current = height;
+              if (awaitingContentSize.current) {
+                awaitingContentSize.current = false;
                 keepSearchInView();
               }
             }}
@@ -192,10 +208,7 @@ function ZoneChooser({
                     copy.homeTimeZone.accessibility.searchLabel
                   }
                   autoCapitalize="none"
-                  onChangeText={(text) => {
-                    queryChanged.current = true;
-                    setQuery(text);
-                  }}
+                  onChangeText={setQuery}
                   placeholder={copy.homeTimeZone.chooser.searchPlaceholder}
                   placeholderTextColor={palette.secondaryInk}
                   ref={searchRef}
