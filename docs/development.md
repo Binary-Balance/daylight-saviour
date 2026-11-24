@@ -219,8 +219,9 @@ contacts no service and asks for no notification permission. It works only when
 it.
 
 [Maestro](https://maestro.mobile.dev) drives the app.
-`apps/mobile/screenshots/common/open-report.yaml` starts a fresh install and
-opens the Civil Time Report for Sydney. Each other flow in
+`apps/mobile/screenshots/common/open-report.yaml` starts a fresh install,
+captures the zone search with the keyboard open, and opens the Civil Time
+Report for Sydney. Each other flow in
 `apps/mobile/screenshots/` runs the common flow and captures one or more
 screens with `takeScreenshot: ${PREFIX}-<screen-name>`, stopping as often as
 the largest text size needs. A screen reached from one already captured, such

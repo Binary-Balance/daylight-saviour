@@ -1,12 +1,16 @@
 import {
+  type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
 import {
   AppState,
+  KeyboardAvoidingView,
   Pressable,
   SectionList,
   ScrollView,
@@ -35,6 +39,7 @@ import {
 } from '../../theme';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
 import { createHomeTimeZoneSession } from './home-time-zone-session';
+import { searchScrollOffset } from './search-scroll-offset';
 import type { ReviewedNotificationTap } from '../change-reminders/change-reminder-notification-runtime';
 
 interface HomeTimeZoneScreenProps {
@@ -70,113 +75,206 @@ function ZoneChooser({
       }))
       .filter((section) => section.data.length > 0);
   }, [query]);
+  const listRef = useRef<SectionList<AustralianZone, { title: string }>>(null);
+  const listContentRef = useRef<View>(null);
+  const searchRef = useRef<TextInput>(null);
+  const firstMatchRef = useRef<View>(null);
+  const scrollOffset = useRef(0);
+  const viewportHeight = useRef(0);
+  const contentHeight = useRef(0);
+  const awaitingContentSize = useRef(false);
+
+  // At large text sizes the field sits low on the screen, so the keyboard
+  // would cover it and the matches below it (#296). Runs when the keyboard
+  // opens or the matches change. It reads only refs, so it never changes.
+  const keepSearchInView = useCallback(() => {
+    const content = listContentRef.current;
+    const field = searchRef.current;
+    if (content === null || field === null || !field.isFocused()) {
+      return;
+    }
+    const lastShown = firstMatchRef.current ?? field;
+    field.measureLayout(content, (_fieldX, fieldTop) => {
+      lastShown.measureLayout(content, (_x, top, _width, height) => {
+        listRef.current?.getScrollResponder()?.scrollTo({
+          animated: false,
+          y: searchScrollOffset({
+            current: scrollOffset.current,
+            fieldTop,
+            matchBottom: top + height,
+            viewportHeight: viewportHeight.current,
+          }),
+        });
+      });
+    });
+  }, []);
+
+  // After the matches change, scroll once they are laid out. When the
+  // content height changes, the native scroll view still has the old height
+  // and would cut the scroll short; onContentSizeChange arrives after it has
+  // the new one. Otherwise, as after a trailing space, scroll now and leave
+  // nothing pending.
+  useLayoutEffect(() => {
+    listContentRef.current?.measure((_x, _y, _width, height) => {
+      // The two reports of one height can differ in the fourth decimal.
+      awaitingContentSize.current =
+        Math.abs(height - contentHeight.current) > 0.5;
+      if (!awaitingContentSize.current) {
+        keepSearchInView();
+      }
+    });
+  }, [keepSearchInView, sections]);
 
   return (
     <SafeAreaView
       edges={['top', 'right', 'bottom', 'left']}
       style={[styles.safeArea, { backgroundColor: palette.background }]}
     >
-      <SectionList
-        ListHeaderComponent={
-          <View style={styles.chooserHeader}>
-            {onCancel === undefined ? null : (
+      <KeyboardAvoidingView behavior="padding" style={styles.safeArea}>
+        {/* Measures the list's visible height. The list's own onLayout also
+            reports its empty-result text, and a closing keyboard must not
+            pull the list back to the field. */}
+        <View
+          onLayout={(event) => {
+            const { height } = event.nativeEvent.layout;
+            const keyboardOpened = height < viewportHeight.current;
+            viewportHeight.current = height;
+            if (keyboardOpened) {
+              keepSearchInView();
+            }
+          }}
+          style={styles.safeArea}
+        >
+          <SectionList
+            // React Native's types predate React 19's nullable RefObject.
+            innerViewRef={listContentRef as RefObject<View>}
+            onContentSizeChange={(_width, height) => {
+              contentHeight.current = height;
+              if (awaitingContentSize.current) {
+                awaitingContentSize.current = false;
+                keepSearchInView();
+              }
+            }}
+            onScroll={(event) => {
+              scrollOffset.current = event.nativeEvent.contentOffset.y;
+            }}
+            ref={listRef}
+            ListHeaderComponent={
+              <View style={styles.chooserHeader}>
+                {onCancel === undefined ? null : (
+                  <Pressable
+                    accessibilityHint={
+                      copy.homeTimeZone.accessibility.cancelHint
+                    }
+                    accessibilityLabel={
+                      copy.homeTimeZone.accessibility.cancelLabel
+                    }
+                    accessibilityRole="button"
+                    disabled={saving}
+                    onPress={onCancel}
+                    style={styles.cancelButton}
+                  >
+                    <Text style={[styles.buttonText, { color: palette.ink }]}>
+                      {copy.homeTimeZone.chooser.cancelButton}
+                    </Text>
+                  </Pressable>
+                )}
+                <Text
+                  accessibilityRole="header"
+                  style={[styles.title, { color: palette.ink }]}
+                >
+                  {copy.homeTimeZone.chooser.heading}
+                </Text>
+                <Text style={[styles.body, { color: palette.secondaryInk }]}>
+                  {copy.homeTimeZone.chooser.introduction}
+                </Text>
+                {notice === null ? null : (
+                  <Text
+                    accessibilityRole="alert"
+                    style={[styles.body, { color: palette.ink }]}
+                  >
+                    {copy.homeTimeZone.notice(notice)}
+                  </Text>
+                )}
+                {saveError === null ? null : (
+                  <Text
+                    accessibilityRole="alert"
+                    style={[styles.body, { color: palette.ink }]}
+                  >
+                    {copy.homeTimeZone.errorMessage(saveError)}
+                  </Text>
+                )}
+                <TextInput
+                  accessibilityLabel={
+                    copy.homeTimeZone.accessibility.searchLabel
+                  }
+                  autoCapitalize="none"
+                  onChangeText={setQuery}
+                  placeholder={copy.homeTimeZone.chooser.searchPlaceholder}
+                  placeholderTextColor={palette.secondaryInk}
+                  ref={searchRef}
+                  style={[
+                    styles.search,
+                    {
+                      borderColor: palette.controlBoundary,
+                      color: palette.ink,
+                      backgroundColor: palette.surface,
+                    },
+                  ]}
+                  value={query}
+                />
+              </View>
+            }
+            contentContainerStyle={styles.listContent}
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={
+              <Text style={[styles.body, { color: palette.ink }]}>
+                {copy.homeTimeZone.chooser.emptyResult}
+              </Text>
+            }
+            renderItem={({ index, item, section }) => (
               <Pressable
-                accessibilityHint={copy.homeTimeZone.accessibility.cancelHint}
-                accessibilityLabel={copy.homeTimeZone.accessibility.cancelLabel}
+                accessibilityHint={
+                  copy.homeTimeZone.accessibility.zoneOptionHint
+                }
+                accessibilityLabel={copy.homeTimeZone.accessibility.zoneOption({
+                  friendlyLabel: item.friendlyLabel,
+                  zoneId: item.id,
+                })}
                 accessibilityRole="button"
                 disabled={saving}
-                onPress={onCancel}
-                style={styles.cancelButton}
+                onPress={() => onSelect(item.id)}
+                ref={
+                  index === 0 && section === sections[0] ? firstMatchRef : null
+                }
+                style={[styles.zoneRow, { backgroundColor: palette.surface }]}
               >
-                <Text style={[styles.buttonText, { color: palette.ink }]}>
-                  {copy.homeTimeZone.chooser.cancelButton}
+                <Text style={[styles.zoneLabel, { color: palette.ink }]}>
+                  {item.friendlyLabel}
+                </Text>
+                <Text
+                  style={[styles.identifier, { color: palette.secondaryInk }]}
+                >
+                  {item.id}
                 </Text>
               </Pressable>
             )}
-            <Text
-              accessibilityRole="header"
-              style={[styles.title, { color: palette.ink }]}
-            >
-              {copy.homeTimeZone.chooser.heading}
-            </Text>
-            <Text style={[styles.body, { color: palette.secondaryInk }]}>
-              {copy.homeTimeZone.chooser.introduction}
-            </Text>
-            {notice === null ? null : (
+            renderSectionHeader={({ section: { title } }) => (
               <Text
-                accessibilityRole="alert"
-                style={[styles.body, { color: palette.ink }]}
+                accessibilityRole="header"
+                style={[
+                  styles.sectionHeading,
+                  { color: palette.ink, backgroundColor: palette.background },
+                ]}
               >
-                {copy.homeTimeZone.notice(notice)}
+                {title}
               </Text>
             )}
-            {saveError === null ? null : (
-              <Text
-                accessibilityRole="alert"
-                style={[styles.body, { color: palette.ink }]}
-              >
-                {copy.homeTimeZone.errorMessage(saveError)}
-              </Text>
-            )}
-            <TextInput
-              accessibilityLabel={copy.homeTimeZone.accessibility.searchLabel}
-              autoCapitalize="none"
-              onChangeText={setQuery}
-              placeholder={copy.homeTimeZone.chooser.searchPlaceholder}
-              placeholderTextColor={palette.secondaryInk}
-              style={[
-                styles.search,
-                {
-                  borderColor: palette.controlBoundary,
-                  color: palette.ink,
-                  backgroundColor: palette.surface,
-                },
-              ]}
-              value={query}
-            />
-          </View>
-        }
-        contentContainerStyle={styles.listContent}
-        keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={
-          <Text style={[styles.body, { color: palette.ink }]}>
-            {copy.homeTimeZone.chooser.emptyResult}
-          </Text>
-        }
-        renderItem={({ item }: { item: AustralianZone }) => (
-          <Pressable
-            accessibilityHint={copy.homeTimeZone.accessibility.zoneOptionHint}
-            accessibilityLabel={copy.homeTimeZone.accessibility.zoneOption({
-              friendlyLabel: item.friendlyLabel,
-              zoneId: item.id,
-            })}
-            accessibilityRole="button"
-            disabled={saving}
-            onPress={() => onSelect(item.id)}
-            style={[styles.zoneRow, { backgroundColor: palette.surface }]}
-          >
-            <Text style={[styles.zoneLabel, { color: palette.ink }]}>
-              {item.friendlyLabel}
-            </Text>
-            <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
-              {item.id}
-            </Text>
-          </Pressable>
-        )}
-        renderSectionHeader={({ section: { title } }) => (
-          <Text
-            accessibilityRole="header"
-            style={[
-              styles.sectionHeading,
-              { color: palette.ink, backgroundColor: palette.background },
-            ]}
-          >
-            {title}
-          </Text>
-        )}
-        sections={sections}
-        stickySectionHeadersEnabled
-      />
+            sections={sections}
+            stickySectionHeadersEnabled
+          />
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
