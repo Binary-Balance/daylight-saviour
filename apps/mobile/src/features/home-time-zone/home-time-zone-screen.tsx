@@ -80,6 +80,7 @@ function ZoneChooser({
   const firstMatchRef = useRef<View>(null);
   const scrollOffset = useRef(0);
   const viewportHeight = useRef(0);
+  const queryChanged = useRef(false);
 
   // At large text sizes the field sits low on the screen, so the keyboard
   // would cover it and the matches below it (#296). Runs when the keyboard
@@ -129,7 +130,14 @@ function ZoneChooser({
           <SectionList
             // React Native's types predate React 19's nullable RefObject.
             innerViewRef={listContentRef as RefObject<View>}
-            onContentSizeChange={keepSearchInView}
+            // The list also grows as it renders more rows while someone
+            // scrolls, which must not pull them back to the field.
+            onContentSizeChange={() => {
+              if (queryChanged.current) {
+                queryChanged.current = false;
+                keepSearchInView();
+              }
+            }}
             onScroll={(event) => {
               scrollOffset.current = event.nativeEvent.contentOffset.y;
             }}
@@ -184,7 +192,10 @@ function ZoneChooser({
                     copy.homeTimeZone.accessibility.searchLabel
                   }
                   autoCapitalize="none"
-                  onChangeText={setQuery}
+                  onChangeText={(text) => {
+                    queryChanged.current = true;
+                    setQuery(text);
+                  }}
                   placeholder={copy.homeTimeZone.chooser.searchPlaceholder}
                   placeholderTextColor={palette.secondaryInk}
                   ref={searchRef}
