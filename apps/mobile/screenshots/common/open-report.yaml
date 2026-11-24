@@ -23,6 +23,10 @@ appId: au.com.binarybalance.daylightsaviour
 # The field and first match must stay above the keyboard. Every flow runs
 # this one, so each run overwrites the same screenshot.
 - takeScreenshot: ${PREFIX}-zone-search
+# At the largest iOS text size the keyboard still covers the middle of the
+# first match, where Maestro taps. Return closes it; Maestro's hideKeyboard
+# fails on iOS.
+- pressKey: Enter
 - scrollUntilVisible:
     element: 'Sydney, Canberra & most of NSW, Australia/Sydney'
 - tapOn: 'Sydney, Canberra & most of NSW, Australia/Sydney'
