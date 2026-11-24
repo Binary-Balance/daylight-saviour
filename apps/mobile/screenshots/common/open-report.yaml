@@ -20,9 +20,9 @@ appId: au.com.binarybalance.daylightsaviour
     timeout: 60000
 - tapOn: 'Search Australian Home Time Zones'
 - inputText: 'Sydney'
-# At the largest text size the keyboard covers the results (#296). Return
-# closes it; Maestro's hideKeyboard fails on iOS.
-- pressKey: Enter
+# The field and first match must stay above the keyboard. Every flow runs
+# this one, so each run overwrites the same screenshot.
+- takeScreenshot: ${PREFIX}-zone-search
 - scrollUntilVisible:
     element: 'Sydney, Canberra & most of NSW, Australia/Sydney'
 - tapOn: 'Sydney, Canberra & most of NSW, Australia/Sydney'
