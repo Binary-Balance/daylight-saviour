@@ -68,7 +68,7 @@ const audit = () => ({
 const lock = {
   packages: {
     'node_modules/expo-router': {
-      version: '57.0.31',
+      version: '57.0.32',
       dependencies: { 'query-string': '^7.1.3' },
     },
     'node_modules/query-string': {
@@ -261,7 +261,7 @@ test('rejects a changed decoder chain or lockfile version', () => {
     }),
     withPackage('node_modules/expo-router', {
       ...lock.packages['node_modules/expo-router'],
-      version: '57.0.32',
+      version: '57.0.33',
     }),
   ]) {
     assert.throws(
