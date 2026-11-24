@@ -110,9 +110,10 @@ function ZoneChooser({
   }, []);
 
   // After the matches change, scroll once they are laid out. When the
-  // content height changes, the scroll view clamps to its old height until
-  // it reports the new one, so wait for onContentSizeChange. Otherwise, as
-  // after a trailing space, scroll now and leave nothing pending.
+  // content height changes, the native scroll view still has the old height
+  // and would cut the scroll short; onContentSizeChange arrives after it has
+  // the new one. Otherwise, as after a trailing space, scroll now and leave
+  // nothing pending.
   useLayoutEffect(() => {
     listContentRef.current?.measure((_x, _y, _width, height) => {
       // The two reports of one height can differ in the fourth decimal.
