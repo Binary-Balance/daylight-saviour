@@ -1,6 +1,6 @@
 const { withAndroidStyles, withMod } = require('expo/config-plugins');
 
-// expo-splash-screen 57.0.11 mishandles a launch screen with no image:
+// expo-splash-screen 57.0.11 and 57.0.12 mishandle a launch screen with no image:
 // - Android keeps windowSplashScreenAnimatedIcon pointing at a
 //   splashscreen_logo drawable it never writes, so resource linking fails.
 //   Dropping the item is no better: core-splashscreen then shows Android's
