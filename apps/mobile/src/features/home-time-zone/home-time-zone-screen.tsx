@@ -74,7 +74,7 @@ function ZoneChooser({
       }))
       .filter((section) => section.data.length > 0);
   }, [query]);
-  const listRef = useRef<SectionList<AustralianZone>>(null);
+  const listRef = useRef<SectionList<AustralianZone, { title: string }>>(null);
   const listContentRef = useRef<View>(null);
   const searchRef = useRef<TextInput>(null);
   const firstMatchRef = useRef<View>(null);
@@ -83,7 +83,7 @@ function ZoneChooser({
 
   // At large text sizes the field sits low on the screen, so the keyboard
   // would cover it and the matches below it (#296). Runs when the keyboard
-  // resizes the list or new matches lay out.
+  // opens or new matches lay out.
   const keepSearchInView = () => {
     const content = listContentRef.current;
     const field = searchRef.current;
@@ -112,126 +112,143 @@ function ZoneChooser({
       style={[styles.safeArea, { backgroundColor: palette.background }]}
     >
       <KeyboardAvoidingView behavior="padding" style={styles.safeArea}>
-        <SectionList
-          // React Native's types predate React 19's nullable RefObject.
-          innerViewRef={listContentRef as RefObject<View>}
-          onContentSizeChange={keepSearchInView}
+        {/* Measures the list's visible height. The list's own onLayout also
+            reports its empty-result text, and a closing keyboard must not
+            pull the list back to the field. */}
+        <View
           onLayout={(event) => {
-            viewportHeight.current = event.nativeEvent.layout.height;
-            keepSearchInView();
+            const { height } = event.nativeEvent.layout;
+            const keyboardOpened = height < viewportHeight.current;
+            viewportHeight.current = height;
+            if (keyboardOpened) {
+              keepSearchInView();
+            }
           }}
-          onScroll={(event) => {
-            scrollOffset.current = event.nativeEvent.contentOffset.y;
-          }}
-          ref={listRef}
-          ListHeaderComponent={
-            <View style={styles.chooserHeader}>
-              {onCancel === undefined ? null : (
-                <Pressable
-                  accessibilityHint={copy.homeTimeZone.accessibility.cancelHint}
-                  accessibilityLabel={
-                    copy.homeTimeZone.accessibility.cancelLabel
-                  }
-                  accessibilityRole="button"
-                  disabled={saving}
-                  onPress={onCancel}
-                  style={styles.cancelButton}
+          style={styles.safeArea}
+        >
+          <SectionList
+            // React Native's types predate React 19's nullable RefObject.
+            innerViewRef={listContentRef as RefObject<View>}
+            onContentSizeChange={keepSearchInView}
+            onScroll={(event) => {
+              scrollOffset.current = event.nativeEvent.contentOffset.y;
+            }}
+            ref={listRef}
+            ListHeaderComponent={
+              <View style={styles.chooserHeader}>
+                {onCancel === undefined ? null : (
+                  <Pressable
+                    accessibilityHint={
+                      copy.homeTimeZone.accessibility.cancelHint
+                    }
+                    accessibilityLabel={
+                      copy.homeTimeZone.accessibility.cancelLabel
+                    }
+                    accessibilityRole="button"
+                    disabled={saving}
+                    onPress={onCancel}
+                    style={styles.cancelButton}
+                  >
+                    <Text style={[styles.buttonText, { color: palette.ink }]}>
+                      {copy.homeTimeZone.chooser.cancelButton}
+                    </Text>
+                  </Pressable>
+                )}
+                <Text
+                  accessibilityRole="header"
+                  style={[styles.title, { color: palette.ink }]}
                 >
-                  <Text style={[styles.buttonText, { color: palette.ink }]}>
-                    {copy.homeTimeZone.chooser.cancelButton}
+                  {copy.homeTimeZone.chooser.heading}
+                </Text>
+                <Text style={[styles.body, { color: palette.secondaryInk }]}>
+                  {copy.homeTimeZone.chooser.introduction}
+                </Text>
+                {notice === null ? null : (
+                  <Text
+                    accessibilityRole="alert"
+                    style={[styles.body, { color: palette.ink }]}
+                  >
+                    {copy.homeTimeZone.notice(notice)}
                   </Text>
-                </Pressable>
-              )}
+                )}
+                {saveError === null ? null : (
+                  <Text
+                    accessibilityRole="alert"
+                    style={[styles.body, { color: palette.ink }]}
+                  >
+                    {copy.homeTimeZone.errorMessage(saveError)}
+                  </Text>
+                )}
+                <TextInput
+                  accessibilityLabel={
+                    copy.homeTimeZone.accessibility.searchLabel
+                  }
+                  autoCapitalize="none"
+                  onChangeText={setQuery}
+                  placeholder={copy.homeTimeZone.chooser.searchPlaceholder}
+                  placeholderTextColor={palette.secondaryInk}
+                  ref={searchRef}
+                  style={[
+                    styles.search,
+                    {
+                      borderColor: palette.controlBoundary,
+                      color: palette.ink,
+                      backgroundColor: palette.surface,
+                    },
+                  ]}
+                  value={query}
+                />
+              </View>
+            }
+            contentContainerStyle={styles.listContent}
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={
+              <Text style={[styles.body, { color: palette.ink }]}>
+                {copy.homeTimeZone.chooser.emptyResult}
+              </Text>
+            }
+            renderItem={({ index, item, section }) => (
+              <Pressable
+                accessibilityHint={
+                  copy.homeTimeZone.accessibility.zoneOptionHint
+                }
+                accessibilityLabel={copy.homeTimeZone.accessibility.zoneOption({
+                  friendlyLabel: item.friendlyLabel,
+                  zoneId: item.id,
+                })}
+                accessibilityRole="button"
+                disabled={saving}
+                onPress={() => onSelect(item.id)}
+                ref={
+                  index === 0 && section === sections[0] ? firstMatchRef : null
+                }
+                style={[styles.zoneRow, { backgroundColor: palette.surface }]}
+              >
+                <Text style={[styles.zoneLabel, { color: palette.ink }]}>
+                  {item.friendlyLabel}
+                </Text>
+                <Text
+                  style={[styles.identifier, { color: palette.secondaryInk }]}
+                >
+                  {item.id}
+                </Text>
+              </Pressable>
+            )}
+            renderSectionHeader={({ section: { title } }) => (
               <Text
                 accessibilityRole="header"
-                style={[styles.title, { color: palette.ink }]}
-              >
-                {copy.homeTimeZone.chooser.heading}
-              </Text>
-              <Text style={[styles.body, { color: palette.secondaryInk }]}>
-                {copy.homeTimeZone.chooser.introduction}
-              </Text>
-              {notice === null ? null : (
-                <Text
-                  accessibilityRole="alert"
-                  style={[styles.body, { color: palette.ink }]}
-                >
-                  {copy.homeTimeZone.notice(notice)}
-                </Text>
-              )}
-              {saveError === null ? null : (
-                <Text
-                  accessibilityRole="alert"
-                  style={[styles.body, { color: palette.ink }]}
-                >
-                  {copy.homeTimeZone.errorMessage(saveError)}
-                </Text>
-              )}
-              <TextInput
-                accessibilityLabel={copy.homeTimeZone.accessibility.searchLabel}
-                autoCapitalize="none"
-                onChangeText={setQuery}
-                placeholder={copy.homeTimeZone.chooser.searchPlaceholder}
-                placeholderTextColor={palette.secondaryInk}
-                ref={searchRef}
                 style={[
-                  styles.search,
-                  {
-                    borderColor: palette.controlBoundary,
-                    color: palette.ink,
-                    backgroundColor: palette.surface,
-                  },
+                  styles.sectionHeading,
+                  { color: palette.ink, backgroundColor: palette.background },
                 ]}
-                value={query}
-              />
-            </View>
-          }
-          contentContainerStyle={styles.listContent}
-          keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={
-            <Text style={[styles.body, { color: palette.ink }]}>
-              {copy.homeTimeZone.chooser.emptyResult}
-            </Text>
-          }
-          renderItem={({ index, item, section }) => (
-            <Pressable
-              accessibilityHint={copy.homeTimeZone.accessibility.zoneOptionHint}
-              accessibilityLabel={copy.homeTimeZone.accessibility.zoneOption({
-                friendlyLabel: item.friendlyLabel,
-                zoneId: item.id,
-              })}
-              accessibilityRole="button"
-              disabled={saving}
-              onPress={() => onSelect(item.id)}
-              ref={
-                index === 0 && section === sections[0] ? firstMatchRef : null
-              }
-              style={[styles.zoneRow, { backgroundColor: palette.surface }]}
-            >
-              <Text style={[styles.zoneLabel, { color: palette.ink }]}>
-                {item.friendlyLabel}
-              </Text>
-              <Text
-                style={[styles.identifier, { color: palette.secondaryInk }]}
               >
-                {item.id}
+                {title}
               </Text>
-            </Pressable>
-          )}
-          renderSectionHeader={({ section: { title } }) => (
-            <Text
-              accessibilityRole="header"
-              style={[
-                styles.sectionHeading,
-                { color: palette.ink, backgroundColor: palette.background },
-              ]}
-            >
-              {title}
-            </Text>
-          )}
-          sections={sections}
-          stickySectionHeadersEnabled
-        />
+            )}
+            sections={sections}
+            stickySectionHeadersEnabled
+          />
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
