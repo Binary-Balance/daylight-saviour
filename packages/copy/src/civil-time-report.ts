@@ -513,12 +513,12 @@ function selectSecondaryCopy(input: SecondaryCopyInput) {
 }
 
 const phaseLabels = {
-  aftermath: 'CHANGE RECORDED',
-  approaching: 'CHANGE APPROACHING',
-  'no-event': 'NO CHANGE SCHEDULED',
-  ordinary: 'NO CHANGE IMMINENT',
-  'reminder-day': 'CHANGE WITHIN 24 HOURS',
-  'reminder-week': 'CHANGE WITHIN 7 DAYS',
+  aftermath: 'Change recorded',
+  approaching: 'Change approaching',
+  'no-event': 'No change scheduled',
+  ordinary: 'No change imminent',
+  'reminder-day': 'Change within 24 hours',
+  'reminder-week': 'Change within 7 days',
 } as const satisfies Record<CivilTimeReportPhase, string>;
 
 const unavailableMessages = {
@@ -551,10 +551,10 @@ export const civilTimeReport = Object.freeze({
   changeEvent: Object.freeze({
     clocksMove: (offsetDeltaSeconds: number) =>
       `Clocks move ${formatOffsetAmount(offsetDeltaSeconds)}`,
-    completedHeading: 'CHANGE COMPLETED',
+    completedHeading: 'Change completed',
     countdown: (secondsUntil: number) =>
       `In ${formatAbsoluteDuration(secondsUntil)}`,
-    countdownHeading: 'COUNTDOWN',
+    countdownHeading: 'Countdown',
     date: formatDate,
     directionArrow: (direction: ChangeDirection) =>
       direction === 'Forward Change' ? '→' : '←',
@@ -563,20 +563,20 @@ export const civilTimeReport = Object.freeze({
       return duration === 'now' ? 'Applied now' : `${duration} ago`;
     },
     heading: (relation: 'completed' | 'upcoming') =>
-      relation === 'completed' ? 'RECENT CHANGE EVENT' : 'NEXT CHANGE EVENT',
+      relation === 'completed' ? 'Recent Change Event' : 'Next Change Event',
     localTimeChange: (facts: {
       readonly after: LocalDateTime;
       readonly before: LocalDateTime;
       readonly context: HourCycleContext;
     }) =>
       `${formatTime(facts.before, facts.context)} → ${formatTime(facts.after, facts.context)}`,
-    localTimeHeading: 'LOCAL TIME',
+    localTimeHeading: 'Local time',
     offsetChange: (facts: {
       readonly afterSeconds: number;
       readonly beforeSeconds: number;
     }) =>
       `${formatOffset(facts.beforeSeconds)} → ${formatOffset(facts.afterSeconds)}`,
-    utcOffsetHeading: 'UTC OFFSET',
+    utcOffsetHeading: 'UTC offset',
   }),
   clock: Object.freeze({
     currentMetadata: (facts: {
@@ -593,22 +593,22 @@ export const civilTimeReport = Object.freeze({
     fallbackZoneLabel: 'Unsupported Home Time Zone',
     heading: 'Civil-time decision unavailable',
     label: (freshness: 'decision-unavailable' | 'expired') =>
-      freshness === 'expired' ? 'REFRESH REQUIRED' : 'DECISION UNAVAILABLE',
+      freshness === 'expired' ? 'Refresh required' : 'Decision unavailable',
     message: (reason: CivilTimeDecisionUnavailableReason) =>
       Object.prototype.hasOwnProperty.call(unavailableMessages, reason)
         ? unavailableMessages[reason as CivilTimeDecisionUnavailableReason]
         : 'Civil-time facts are unavailable. Choose a supported Home Time Zone or try again later.',
   }),
-  daylightSavingStatusHeading: 'DAYLIGHT SAVING STATUS',
+  daylightSavingStatusHeading: 'Daylight Saving Status',
   document: Object.freeze({
-    label: 'DAYLIGHT SAVIOUR · KEEPING CIVIL TIME CIVIL',
+    label: 'Daylight Saviour · Keeping civil time civil',
   }),
-  homeTimeZoneHeading: 'HOME TIME ZONE',
+  homeTimeZoneHeading: 'Home Time Zone',
   noEvent: Object.freeze({
     body: 'No countdown required. Your Home Time Zone remains on its recorded offset.',
     heading: 'No Change Event scheduled within verified data',
-    label: 'CHANGE EVENT RECORD',
-    mark: '✓ CIVIL TIME LEFT IN PEACE',
+    label: 'Change Event record',
+    mark: '✓ Civil time left in peace',
   }),
   phaseLabel: (phase: CivilTimeReportPhase) => phaseLabels[phase],
   secondary: Object.freeze({

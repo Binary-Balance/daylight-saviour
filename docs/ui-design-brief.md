@@ -10,7 +10,7 @@ Daylight Saviour should feel like civil-time paperwork designed by someone with 
 
 Use one safe-area-aware column on an 8-point grid with roughly 20–24 logical pixels of horizontal margin.
 
-1. **Utility header:** small `DAYLIGHT SAVIOUR` document label, subtle rule, and accessible settings control.
+1. **Utility header:** small `Daylight Saviour` document label, subtle rule, and accessible settings control.
 2. **Reminder notice:** only after a Change Reminder tap opens the app. It glows once, unless reduced motion is on.
 3. **Home Time Zone:** full-width control showing friendly geography first and IANA identifier as metadata.
 4. **Status hero:** large Home Time Zone clock without seconds, literal Daylight Saving Status, restrained fictional stamp, then one humorous line.
@@ -33,11 +33,13 @@ Settings remains a compact pushed screen or native sheet: Home Time Zone, Change
 Use native system sans-serif typography: San Francisco on iOS, Roboto on Android, and system fallbacks for Expo web tests. Personality comes from scale, tabular figures, rules, labels, spacing, and motion—not fragile font loading.
 
 - Clock: responsive 72–104, heavy, tabular figures.
-- Status: 30–42, bold; uppercase only when short.
+- Status: 30–42, bold.
 - Event date: 26–34, semibold.
 - Section heading: 18–22.
 - Body: 17 minimum.
-- Metadata: 12–14 tracked capitals; remove tracking at large text sizes.
+- Metadata: 12–14, bold.
+
+All text uses sentence case without tracking: at the largest text sizes, words in capitals grow too wide for the screen and break mid-word. Display text, anything larger than body text apart from the clock, stops growing at 48 pt, so its longest word, such as "Whitsunday" or "Backward", still fits one line on a 375 pt wide iPhone at the largest iOS text size. Body text and labels keep scaling in full. The clock scrolls sideways instead.
 
 Candidate colour tokens, subject to on-device contrast validation:
 

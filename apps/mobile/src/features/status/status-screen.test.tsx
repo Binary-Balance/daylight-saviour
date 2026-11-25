@@ -4,6 +4,7 @@ import * as ReactNative from 'react-native';
 import { activateAustralianTimeZoneDataPack } from '@daylight-saviour/domain';
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
+import { textBreakingDisplayLimit } from '../../../test-support/display-text';
 import { daylightSaviourPalettes } from '../../theme';
 import { productionChangeReminderAdapters } from '../change-reminders/change-reminder-production-adapters';
 import type { ChangeReminderRestoreResult } from '../change-reminders/change-reminder-adapters';
@@ -156,7 +157,7 @@ describe('StatusScreen facade', () => {
         daylightSaviourPalettes[appearance].ink,
       );
       expect(
-        screen.getByRole('header', { name: 'NEXT CHANGE EVENT' }),
+        screen.getByRole('header', { name: 'Next Change Event' }),
       ).toBeTruthy();
       expect(screen.getByText('Backward Change')).toBeTruthy();
       expect(screen.getByText('In 1 second')).toBeTruthy();
@@ -176,6 +177,19 @@ describe('StatusScreen facade', () => {
           includeHiddenElements: true,
         }),
       ).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    ['ready', '2026-04-04T15:59:59.000Z'],
+    ['unavailable', '2031-01-01T00:00:00.000Z'],
+  ])(
+    'stops only display-size text at the display maximum in the %s report',
+    (_, now) => {
+      render(<StatusScreen now={new Date(now)} reducedMotion />);
+      fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
+
+      expect(textBreakingDisplayLimit()).toEqual([]);
     },
   );
 
@@ -214,7 +228,7 @@ describe('StatusScreen facade', () => {
     ).toBeTruthy();
     expect(screen.getByText('Backward Change')).toBeTruthy();
     expect(
-      screen.getByText('CHANGE RECORDED', { includeHiddenElements: true }),
+      screen.getByText('Change recorded', { includeHiddenElements: true }),
     ).toBeTruthy();
     expect(screen.getByText('Applied now')).toBeTruthy();
     expect(screen.getByTestId('status-motion-short-fade')).toBeTruthy();
@@ -236,7 +250,7 @@ describe('StatusScreen facade', () => {
     expect(screen.getByTestId('data-freshness-notice')).toBeTruthy();
     const order = explicitAccessibilityOrder(result.toJSON() as RenderNode);
     const warning = order.indexOf('Validity Horizon passed · refresh required');
-    const reminders = order.indexOf('CHANGE REMINDERS');
+    const reminders = order.indexOf('Change Reminders');
     expect(reminders).toBeGreaterThanOrEqual(0);
     expect(warning).toBeGreaterThan(reminders);
     expect(warning).toBeLessThan(order.indexOf('Settings'));
@@ -374,7 +388,7 @@ describe('StatusScreen facade', () => {
     expect(scrollTo).toHaveBeenCalledWith({ animated: false, y: 0 });
     const order = explicitAccessibilityOrder(toJSON() as RenderNode);
     const notice = order.findIndex((label) =>
-      label.startsWith('CHANGE REMINDER OPENED.'),
+      label.startsWith('Change Reminder opened.'),
     );
     expect(notice).toBeGreaterThanOrEqual(0);
     expect(notice).toBeLessThan(
@@ -491,32 +505,32 @@ describe('StatusScreen facade', () => {
     [
       '2026-09-05T15:59:59.000Z',
       'ordinary-civil-time-report',
-      'NO CHANGE IMMINENT',
+      'No change imminent',
     ],
     [
       '2026-09-05T16:00:00.000Z',
       'approaching-civil-time-report',
-      'CHANGE APPROACHING',
+      'Change approaching',
     ],
     [
       '2026-09-26T16:00:00.000Z',
       'reminder-week-civil-time-report',
-      'CHANGE WITHIN 7 DAYS',
+      'Change within 7 days',
     ],
     [
       '2026-10-02T16:00:00.000Z',
       'reminder-day-civil-time-report',
-      'CHANGE WITHIN 24 HOURS',
+      'Change within 24 hours',
     ],
     [
       '2026-10-03T16:00:00.000Z',
       'aftermath-civil-time-report',
-      'CHANGE RECORDED',
+      'Change recorded',
     ],
     [
       '2026-10-05T16:00:00.000Z',
       'ordinary-civil-time-report',
-      'NO CHANGE IMMINENT',
+      'No change imminent',
     ],
   ] as const)(
     'composes deterministic phase at %s',
@@ -714,17 +728,17 @@ describe('StatusScreen facade', () => {
       order.findIndex((label) => label.startsWith('Home Time Zone,')),
       order.findIndex((label) => label.startsWith('Current time,')),
       order.indexOf('Standard time applies'),
-      order.indexOf('NEXT CHANGE EVENT'),
+      order.indexOf('Next Change Event'),
       order.indexOf('4 October 2026'),
       order.indexOf('Forward Change'),
       order.indexOf('2:00 am → 3:00 am'),
       order.indexOf('UTC+10:00 → UTC+11:00'),
       order.indexOf('Clocks move 1 hour'),
-      order.indexOf('COUNTDOWN'),
+      order.indexOf('Countdown'),
       order.findIndex((label) =>
         label.startsWith('Countdown, 1 day until Change Event'),
       ),
-      order.indexOf('CHANGE REMINDERS'),
+      order.indexOf('Change Reminders'),
       order.indexOf('Checking reminder registration…'),
       order.indexOf('Settings'),
     ];

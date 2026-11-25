@@ -74,14 +74,14 @@ export const dataFreshness = Object.freeze({
     retryHint: 'Checks for a newer verified Time-Zone Data Pack',
     retryLabel: 'Retry Time-Zone Data Pack refresh',
   }),
-  heading: 'DATA FRESHNESS',
+  heading: 'Data freshness',
   packDetails: (
     facts: Pick<PackFacts, 'packVersion' | 'uses24hourClock' | 'validUntil'>,
   ) =>
     `Pack ${facts.packVersion} · Valid through ${formatUtcValidityHorizon(facts.validUntil, facts.uses24hourClock)}`,
   retry: Object.freeze({
-    checkingButton: 'CHECKING…',
-    checkButton: 'CHECK FOR VERIFIED DATA',
+    checkingButton: 'Checking…',
+    checkButton: 'Check for verified data',
   }),
   seeSettings: 'See Settings for details.',
   status: freshnessStatus,

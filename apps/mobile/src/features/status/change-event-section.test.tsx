@@ -54,7 +54,7 @@ describe('ChangeEventSection', () => {
 
       expect(screen.getByTestId('reminder-day-civil-time-report')).toBeTruthy();
       expect(
-        screen.getByRole('header', { name: 'NEXT CHANGE EVENT' }),
+        screen.getByRole('header', { name: 'Next Change Event' }),
       ).toBeTruthy();
       expect(screen.getByText('Backward Change')).toBeTruthy();
       expect(screen.getByText('3:00 am → 2:00 am')).toBeTruthy();
@@ -113,7 +113,7 @@ describe('ChangeEventSection', () => {
     );
 
     expect(screen.getByTestId('unavailable-civil-time-report')).toBeTruthy();
-    expect(screen.getByText('DECISION UNAVAILABLE')).toBeTruthy();
+    expect(screen.getByText('Decision unavailable')).toBeTruthy();
     expect(screen.getByText(/Home Time Zone is not supported/)).toBeTruthy();
     expect(screen.queryByText('Validity Horizon passed')).toBeNull();
   });

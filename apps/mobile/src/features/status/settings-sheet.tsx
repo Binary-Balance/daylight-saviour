@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
-import type { DaylightSaviourPalette } from '../../theme';
+import { displayTextMaxScale, type DaylightSaviourPalette } from '../../theme';
 
 export interface SettingsSheetFacts {
   readonly friendlyZoneLabel: string;
@@ -77,6 +77,9 @@ export default function SettingsSheet({
               </Text>
               <Text
                 accessibilityRole="header"
+                maxFontSizeMultiplier={displayTextMaxScale(
+                  styles.heading.fontSize,
+                )}
                 style={[styles.heading, { color: palette.ink }]}
               >
                 {copy.settings.heading}
@@ -133,7 +136,6 @@ const styles = StyleSheet.create({
   metadata: {
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.1,
     lineHeight: 18,
   },
   modalBackdrop: {
@@ -159,7 +161,6 @@ const styles = StyleSheet.create({
   settingsButtonText: {
     fontSize: 11,
     fontWeight: '900',
-    letterSpacing: 0.7,
   },
   settingsSheet: {
     flexGrow: 1,

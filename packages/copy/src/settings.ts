@@ -3,10 +3,10 @@ export const settings = Object.freeze({
     openHint: 'Opens compact app and data details',
     openLabel: 'Settings',
   }),
-  appDetailsHeading: 'APP DETAILS',
+  appDetailsHeading: 'App details',
   closeButton: 'Close settings',
   heading: 'Settings',
   homeTimeZone: (friendlyZoneLabel: string) =>
     `Home Time Zone: ${friendlyZoneLabel}`,
-  openButton: 'SETTINGS',
+  openButton: 'Settings',
 });

@@ -10,6 +10,7 @@ import {
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
 import appConfig from '../../../app.json';
+import { textBreakingDisplayLimit } from '../../../test-support/display-text';
 import { daylightSaviourPalettes } from '../../theme';
 import HomeTimeZoneScreen from './home-time-zone-screen';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
@@ -173,6 +174,18 @@ describe('HomeTimeZoneScreen', () => {
     expect(screen.queryByText('Mainland & state regions')).toBeNull();
   });
 
+  it('stops only display-size text at the display maximum', async () => {
+    const adapters = createAdapters({ deviceZone: 'Australia/Sydney' });
+    render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
+
+    const chooseAnother = await screen.findByRole('button', {
+      name: 'Choose another region',
+    });
+    expect(textBreakingDisplayLimit()).toEqual([]);
+    fireEvent.press(chooseAnother);
+    expect(textBreakingDisplayLimit()).toEqual([]);
+  });
+
   it('says so when no zone matches the search', async () => {
     const adapters = createAdapters({ deviceZone: 'Europe/London' });
     render(<HomeTimeZoneScreen adapters={adapters} now={now} />);
@@ -241,7 +254,7 @@ describe('HomeTimeZoneScreen', () => {
         'Home Time Zone, Perth & most of Western Australia, Australia/Perth',
       ),
     ).toBeTruthy();
-    expect(screen.queryByText('SUGGESTED HOME TIME ZONE')).toBeNull();
+    expect(screen.queryByText('Suggested Home Time Zone')).toBeNull();
   });
 
   it.each([

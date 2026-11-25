@@ -156,7 +156,7 @@ describe('Australian-English copy catalogue', () => {
     assert.equal(Object.isFrozen(samsungSleep), true);
     assert.deepEqual(samsungSleep, {
       body: 'Samsung puts apps to sleep after a few weeks unopened, and sleeping apps can’t receive reminders. To get reminders even when you haven’t opened Daylight Saviour in a while, add it to “Never sleeping apps”.',
-      heading: 'KEEP DAYLIGHT SAVING REMINDERS ARRIVING ON SAMSUNG',
+      heading: 'Keep daylight saving reminders arriving on Samsung',
       line: 'Check that Daylight Saviour is in “Never sleeping apps” so daylight saving reminders can arrive.',
       open: 'Open Never sleeping apps',
     });
@@ -167,37 +167,37 @@ describe('Australian-English copy catalogue', () => {
     assert.equal(Object.isFrozen(saving), true);
     assert.deepEqual(saving, {
       body: 'Waiting for confirmation. Reminders are not enabled yet.',
-      heading: 'REGISTERING REMINDERS',
+      heading: 'Registering reminders',
     });
   });
 
   it('owns exact safe Change Reminder report-context wording', () => {
     assert.deepEqual(australianEnglish.changeReminders.notificationContext, {
       opened: {
-        heading: 'CHANGE REMINDER OPENED',
+        heading: 'Change Reminder opened',
         past: 'This Civil Time Report shows the Change Event from your reminder.',
         upcoming:
           'This Civil Time Report shows the upcoming Change Event from your reminder.',
       },
       agedOut: {
         body: "This reminder's Change Event passed 48 hours ago or more. Current Civil Time Report details are shown instead.",
-        heading: 'REMINDER EVENT PASSED',
+        heading: 'Reminder event passed',
       },
       eventMismatch: {
         body: 'This reminder does not match the verified Change Event. Current Civil Time Report details are shown instead.',
-        heading: 'REMINDER EVENT MISMATCH',
+        heading: 'Reminder event mismatch',
       },
       eventUnavailable: {
         body: 'This reminder refers to a Change Event no longer available in verified time-zone data. Current Civil Time Report details are shown instead.',
-        heading: 'REMINDER EVENT UNAVAILABLE',
+        heading: 'Reminder event unavailable',
       },
       reportUnavailable: {
         body: 'Verified Civil Time Report details are unavailable. Refresh time-zone data and try again.',
-        heading: 'REMINDER REPORT UNAVAILABLE',
+        heading: 'Reminder report unavailable',
       },
       zoneMismatch: {
         body: 'This reminder was sent for a different Home Time Zone. Current Civil Time Report details are shown instead.',
-        heading: 'REMINDER HOME TIME ZONE CHANGED',
+        heading: 'Reminder Home Time Zone changed',
       },
     });
   });
@@ -274,12 +274,12 @@ describe('Australian-English copy catalogue', () => {
   it('names each Civil Time Report phase by its Change Event meaning', () => {
     const { phaseLabel } = australianEnglish.civilTimeReport;
     const expected = {
-      aftermath: 'CHANGE RECORDED',
-      approaching: 'CHANGE APPROACHING',
-      'no-event': 'NO CHANGE SCHEDULED',
-      ordinary: 'NO CHANGE IMMINENT',
-      'reminder-day': 'CHANGE WITHIN 24 HOURS',
-      'reminder-week': 'CHANGE WITHIN 7 DAYS',
+      aftermath: 'Change recorded',
+      approaching: 'Change approaching',
+      'no-event': 'No change scheduled',
+      ordinary: 'No change imminent',
+      'reminder-day': 'Change within 24 hours',
+      'reminder-week': 'Change within 7 days',
     };
 
     for (const [phase, label] of Object.entries(expected)) {
@@ -293,12 +293,12 @@ describe('Australian-English copy catalogue', () => {
 
     assert.equal(changeEvent.directionArrow('Forward Change'), '→');
     assert.equal(changeEvent.directionArrow('Backward Change'), '←');
-    assert.equal(changeEvent.heading('completed'), 'RECENT CHANGE EVENT');
-    assert.equal(changeEvent.heading('upcoming'), 'NEXT CHANGE EVENT');
-    assert.equal(decisionUnavailable.label('expired'), 'REFRESH REQUIRED');
+    assert.equal(changeEvent.heading('completed'), 'Recent Change Event');
+    assert.equal(changeEvent.heading('upcoming'), 'Next Change Event');
+    assert.equal(decisionUnavailable.label('expired'), 'Refresh required');
     assert.equal(
       decisionUnavailable.label('decision-unavailable'),
-      'DECISION UNAVAILABLE',
+      'Decision unavailable',
     );
   });
 

@@ -10,7 +10,7 @@ import {
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 import type { DaylightSavingStatus } from '@daylight-saviour/domain';
 
-import type { DaylightSaviourPalette } from '../../theme';
+import { displayTextMaxScale, type DaylightSaviourPalette } from '../../theme';
 
 export interface DaylightSavingStatusHeroFacts {
   readonly abbreviation: string;
@@ -188,6 +188,7 @@ export default function DaylightSavingStatusHero({
           <Animated.Text
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
+            maxFontSizeMultiplier={displayTextMaxScale(styles.status.fontSize)}
             style={[
               styles.status,
               styles.previousStatus,
@@ -199,6 +200,7 @@ export default function DaylightSavingStatusHero({
         )}
         <Animated.Text
           accessibilityRole="header"
+          maxFontSizeMultiplier={displayTextMaxScale(styles.status.fontSize)}
           style={[
             styles.status,
             { color: palette.ink, opacity: currentOpacity },
@@ -266,7 +268,6 @@ const styles = StyleSheet.create({
   metadata: {
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.1,
     lineHeight: 18,
   },
   secondaryLine: {
@@ -284,7 +285,6 @@ const styles = StyleSheet.create({
   stampText: {
     fontSize: 13,
     fontWeight: '900',
-    letterSpacing: 1,
   },
   status: {
     fontSize: 38,

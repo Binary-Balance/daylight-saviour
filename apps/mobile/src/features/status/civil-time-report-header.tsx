@@ -1,8 +1,14 @@
 import { Fragment, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
-import type { DaylightSaviourPalette } from '../../theme';
+import { displayTextMaxScale, type DaylightSaviourPalette } from '../../theme';
 
 export interface CivilTimeReportHeaderFacts {
   readonly friendlyZoneLabel: string;
@@ -23,6 +29,12 @@ export default function CivilTimeReportHeader({
   onChooseZone,
   palette,
 }: CivilTimeReportHeaderProps) {
+  const { fontScale } = useWindowDimensions();
+  // From 1.5× the Settings button, drawn over the report's top right corner,
+  // grows wider than the space kept beside this label, so the label moves
+  // below the button instead.
+  const belowSettings = fontScale >= 1.5;
+
   return (
     <Fragment>
       <View
@@ -30,8 +42,10 @@ export default function CivilTimeReportHeader({
         importantForAccessibility="no-hide-descendants"
         style={[
           styles.utilityHeader,
+          belowSettings && styles.utilityHeaderBelowSettings,
           { borderBottomColor: palette.solarGoldStructure },
         ]}
+        testID="utility-header"
       >
         <Text style={[styles.documentLabel, { color: palette.secondaryInk }]}>
           {copy.civilTimeReport.document.label}
@@ -65,7 +79,10 @@ export default function CivilTimeReportHeader({
         <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
           {copy.civilTimeReport.homeTimeZoneHeading}
         </Text>
-        <Text style={[styles.zone, { color: palette.ink }]}>
+        <Text
+          maxFontSizeMultiplier={displayTextMaxScale(styles.zone.fontSize)}
+          style={[styles.zone, { color: palette.ink }]}
+        >
           {facts.friendlyZoneLabel}
         </Text>
         <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
@@ -80,7 +97,6 @@ const styles = StyleSheet.create({
   documentLabel: {
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.2,
   },
   identifier: {
     fontSize: 14,
@@ -89,7 +105,6 @@ const styles = StyleSheet.create({
   metadata: {
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.1,
     lineHeight: 18,
   },
   utilityHeader: {
@@ -98,6 +113,9 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     paddingRight: 92,
   },
+  // The button sits 12 from the top of the report and is 48 tall, so this
+  // starts the label 12 below it.
+  utilityHeaderBelowSettings: { paddingRight: 0, paddingTop: 48 },
   zone: {
     fontSize: 28,
     fontWeight: '700',

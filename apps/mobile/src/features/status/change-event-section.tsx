@@ -3,7 +3,7 @@ import { Animated, StyleSheet, Text, View } from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 import type { ChangeDirection } from '@daylight-saviour/domain';
 
-import type { DaylightSaviourPalette } from '../../theme';
+import { displayTextMaxScale, type DaylightSaviourPalette } from '../../theme';
 import { createCivilTimeReportMotionRecipe } from './civil-time-report-motion';
 import type { StatusViewModel } from './status-view-model';
 
@@ -100,6 +100,9 @@ function SemanticEventMotion({
         <Animated.Text
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
+          maxFontSizeMultiplier={displayTextMaxScale(
+            styles.decorativeEcho.fontSize,
+          )}
           style={[
             styles.decorativeEcho,
             {
@@ -194,6 +197,7 @@ function CountdownTransition({
         <Animated.Text
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
+          maxFontSizeMultiplier={displayTextMaxScale(styles.countdown.fontSize)}
           style={[
             styles.countdown,
             styles.countdownPrevious,
@@ -206,6 +210,7 @@ function CountdownTransition({
       <Animated.Text
         accessibilityLabel={accessibilityLabel}
         accessibilityLiveRegion="none"
+        maxFontSizeMultiplier={displayTextMaxScale(styles.countdown.fontSize)}
         style={[styles.countdown, { color, opacity: currentOpacity }]}
         testID="countdown-current"
       >
@@ -242,6 +247,7 @@ export default function ChangeEventSection({
         </Text>
         <Text
           accessibilityRole="header"
+          maxFontSizeMultiplier={displayTextMaxScale(styles.status.fontSize)}
           style={[styles.status, { color: palette.ink }]}
         >
           {copy.civilTimeReport.decisionUnavailable.heading}
@@ -270,6 +276,7 @@ export default function ChangeEventSection({
         </Text>
         <Text
           accessibilityRole="header"
+          maxFontSizeMultiplier={displayTextMaxScale(styles.eventDate.fontSize)}
           style={[styles.eventDate, { color: palette.ink }]}
         >
           {copy.civilTimeReport.noEvent.heading}
@@ -308,16 +315,31 @@ export default function ChangeEventSection({
         >
           {copy.civilTimeReport.changeEvent.heading(report.event.relation)}
         </Text>
-        <Text style={[styles.eventDate, { color: palette.ink }]}>
+        <Text
+          maxFontSizeMultiplier={displayTextMaxScale(styles.eventDate.fontSize)}
+          style={[styles.eventDate, { color: palette.ink }]}
+        >
           {report.event.date}
         </Text>
         <View style={styles.directionRow}>
-          <Text style={[styles.direction, { color: palette.solarGold }]}>
+          <Text
+            maxFontSizeMultiplier={displayTextMaxScale(
+              styles.direction.fontSize,
+            )}
+            style={[
+              styles.direction,
+              styles.directionWord,
+              { color: palette.solarGold },
+            ]}
+          >
             {report.event.direction}
           </Text>
           <Text
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
+            maxFontSizeMultiplier={displayTextMaxScale(
+              styles.direction.fontSize,
+            )}
             style={[styles.direction, { color: palette.solarGold }]}
           >
             {copy.civilTimeReport.changeEvent.directionArrow(
@@ -329,13 +351,23 @@ export default function ChangeEventSection({
           <Text style={[styles.equationLabel, { color: palette.secondaryInk }]}>
             {copy.civilTimeReport.changeEvent.localTimeHeading}
           </Text>
-          <Text style={[styles.eventFact, { color: palette.ink }]}>
+          <Text
+            maxFontSizeMultiplier={displayTextMaxScale(
+              styles.eventFact.fontSize,
+            )}
+            style={[styles.eventFact, { color: palette.ink }]}
+          >
             {report.event.wallTimeChange}
           </Text>
           <Text style={[styles.equationLabel, { color: palette.secondaryInk }]}>
             {copy.civilTimeReport.changeEvent.utcOffsetHeading}
           </Text>
-          <Text style={[styles.eventFact, { color: palette.ink }]}>
+          <Text
+            maxFontSizeMultiplier={displayTextMaxScale(
+              styles.eventFact.fontSize,
+            )}
+            style={[styles.eventFact, { color: palette.ink }]}
+          >
             {report.event.offsetChange}
           </Text>
           <Text style={[styles.body, { color: palette.secondaryInk }]}>
@@ -347,7 +379,12 @@ export default function ChangeEventSection({
             <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
               {copy.civilTimeReport.changeEvent.completedHeading}
             </Text>
-            <Text style={[styles.countdown, { color: palette.ink }]}>
+            <Text
+              maxFontSizeMultiplier={displayTextMaxScale(
+                styles.countdown.fontSize,
+              )}
+              style={[styles.countdown, { color: palette.ink }]}
+            >
               {report.event.elapsed}
             </Text>
           </View>
@@ -406,13 +443,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
     lineHeight: 24,
-    textTransform: 'uppercase',
   },
   directionRow: {
     alignItems: 'center',
     flexDirection: 'row',
+    // At large text the arrow wraps below the word rather than pushing it
+    // off the card.
+    flexWrap: 'wrap',
     gap: 8,
   },
+  directionWord: { flexShrink: 1 },
   equationGroup: {
     gap: 6,
     paddingTop: 4,
@@ -420,7 +460,6 @@ const styles = StyleSheet.create({
   equationLabel: {
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1,
     paddingTop: 6,
   },
   eventCard: {
@@ -449,7 +488,6 @@ const styles = StyleSheet.create({
   metadata: {
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.1,
     lineHeight: 18,
   },
   motionFrame: {
@@ -464,7 +502,6 @@ const styles = StyleSheet.create({
   noEventMark: {
     fontSize: 13,
     fontWeight: '900',
-    letterSpacing: 0.8,
     paddingTop: 8,
   },
   status: {

@@ -6,7 +6,7 @@ import { daylightSaviourPalettes } from '../src/theme';
 import ChangeReminderNotificationContext from './change-reminder-notification-context';
 
 const passedLabel =
-  "REMINDER EVENT PASSED. This reminder's Change Event passed 48 hours ago or more. Current Civil Time Report details are shown instead.";
+  "Reminder event passed. This reminder's Change Event passed 48 hours ago or more. Current Civil Time Report details are shown instead.";
 
 function Notice({
   appearance = 'light',
