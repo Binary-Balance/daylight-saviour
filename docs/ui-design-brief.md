@@ -43,17 +43,17 @@ Labels and stamps use sentence case, with Glossary terms capitalised, and no add
 
 Candidate colour tokens, subject to on-device contrast validation:
 
-| Role                       | Light                  | Dark                    |
-| -------------------------- | ---------------------- | ----------------------- |
-| Background                 | Civic White `#F7F8FA`  | Midnight navy `#081426` |
-| Surface                    | White record `#FFFFFF` | Navy `#101F35`          |
-| Primary ink                | `#101B2D`              | `#F6F0DE`               |
-| Secondary ink              | `#5B6678`              | `#B6C0CF`               |
-| Decorative rules           | `#AAB2BC`              | `#405067`               |
-| Neutral control boundaries | `#87919D`              | `#405067`               |
-| Solar-gold text            | `#9A6700`              | Signal coral `#FF6A4D`  |
-| Solar-gold structure       | `#C99A22`              | Warm gold `#FFB238`     |
-| Fictional phase stamp      | Signal red `#E5482D`   | Signal coral `#FF6A4D`  |
+| Role | Light | Dark |
+| --- | --- | --- |
+| Background | Civic White `#F7F8FA` | Midnight navy `#081426` |
+| Surface | White record `#FFFFFF` | Navy `#101F35` |
+| Primary ink | `#101B2D` | `#F6F0DE` |
+| Secondary ink | `#5B6678` | `#B6C0CF` |
+| Decorative rules | `#AAB2BC` | `#405067` |
+| Neutral control boundaries | `#87919D` | `#405067` |
+| Solar-gold text | `#9A6700` | Signal coral `#FF6A4D` |
+| Solar-gold structure | `#C99A22` | Warm gold `#FFB238` |
+| Fictional phase stamp | Signal red `#E5482D` | Signal coral `#FF6A4D` |
 
 In light appearance, Solar Gold guides the eye from the utility-header divider to the next Change Event's direction, top rule, and left rail. Its text token meets 4.5:1 contrast against both Civic White and white record surfaces; neutral control boundaries meet 3:1 while cool rules remain decorative. Signal red is reserved for fictional phase stamps so it remains recognisably stamped. Settings, Home Time Zone controls, and unrelated rules remain neutral. Colour never carries meaning alone: direction and status remain textual. Prefer rules and tonal surfaces over shadows; avoid beige, cream, manila, parchment, sepia, gradients, metallic effects, sun motifs other than the app's mark, and implied government affiliation.
 
