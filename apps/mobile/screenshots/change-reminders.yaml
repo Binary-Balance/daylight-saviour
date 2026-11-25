@@ -1,7 +1,7 @@
 appId: au.com.binarybalance.daylightsaviour
 ---
 - runFlow: common/open-report.yaml
-# The largest iOS report is about 17 screens long, so scrolls get two
+# The largest iOS report is several screens long, so scrolls get two
 # minutes.
 - scrollUntilVisible:
     element: 'Warn me before time misbehaves'

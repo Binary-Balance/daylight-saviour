@@ -49,8 +49,8 @@ describe('CivilTimeReportHeader', () => {
 
   // The Settings button is drawn over the report's top right corner.
   it.each([
-    [1.353, { paddingRight: 92 }],
-    [1.5, { paddingRight: 0, paddingTop: 48 }],
+    [1.235, { paddingRight: 92 }],
+    [1.3, { paddingRight: 0, paddingTop: 48 }],
   ])(
     'keeps the document label clear of Settings at text scale %d',
     (fontScale, clearance) => {

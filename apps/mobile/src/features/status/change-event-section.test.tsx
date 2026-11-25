@@ -4,6 +4,7 @@ import type { ReactTestInstance } from 'react-test-renderer';
 import { activateAustralianTimeZoneDataPack } from '@daylight-saviour/domain';
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
+import { textBreakingDisplayLimit } from '../../../test-support/display-text';
 import { holdAnimations } from '../../../test-support/hold-animations';
 import { daylightSaviourPalettes } from '../../theme';
 import ChangeEventSection from './change-event-section';
@@ -413,6 +414,8 @@ describe('ChangeEventSection', () => {
         });
         expect(previous.props.accessibilityElementsHidden).toBe(true);
         expect(opacityOf(previous)).toBe(1);
+        // Also covers the Backward echo while reduced motion is off.
+        expect(textBreakingDisplayLimit()).toEqual([]);
         expect(opacityOf(screen.getByTestId('countdown-current'))).toBe(
           startOpacity,
         );

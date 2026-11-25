@@ -30,10 +30,10 @@ export default function CivilTimeReportHeader({
   palette,
 }: CivilTimeReportHeaderProps) {
   const { fontScale } = useWindowDimensions();
-  // From 1.5× the Settings button, drawn over the report's top right corner,
-  // grows wider than the space kept beside this label, so the label moves
-  // below the button instead.
-  const belowSettings = fontScale >= 1.5;
+  // The Settings button, drawn over the report's top right corner, is about
+  // 50 × fontScale + 20 wide. At iOS's 1.353 that leaves only 4 of the 92
+  // kept beside this label, so from 1.3 the label moves below the button.
+  const belowSettings = fontScale >= 1.3;
 
   return (
     <Fragment>
@@ -113,8 +113,9 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     paddingRight: 92,
   },
-  // The button sits 12 from the top of the report and is 48 tall, so this
-  // starts the label 12 below it.
+  // The button sits 12 from the top of the report and is at least 48 tall;
+  // its text stays shorter than that up to the largest iOS size (3.571×).
+  // This starts the label 12 below it.
   utilityHeaderBelowSettings: { paddingRight: 0, paddingTop: 48 },
   zone: {
     fontSize: 28,

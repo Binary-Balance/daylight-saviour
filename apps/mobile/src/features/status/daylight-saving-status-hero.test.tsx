@@ -3,6 +3,7 @@ import * as ReactNative from 'react-native';
 import type { ReactTestInstance } from 'react-test-renderer';
 
 import { holdAnimations } from '../../../test-support/hold-animations';
+import { textBreakingDisplayLimit } from '../../../test-support/display-text';
 import { daylightSaviourPalettes } from '../../theme';
 import DaylightSavingStatusHero, {
   type DaylightSavingStatusHeroFacts,
@@ -383,6 +384,7 @@ describe('DaylightSavingStatusHero', () => {
         });
         expect(previous.props.accessibilityElementsHidden).toBe(true);
         expect(opacityOf(previous)).toBe(1);
+        expect(textBreakingDisplayLimit()).toEqual([]);
         expect(opacityOf(screen.getByRole('header', { name: daylight }))).toBe(
           startOpacity,
         );

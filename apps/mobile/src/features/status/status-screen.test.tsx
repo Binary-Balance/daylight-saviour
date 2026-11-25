@@ -181,12 +181,16 @@ describe('StatusScreen facade', () => {
   );
 
   it.each([
-    ['ready', '2026-04-04T15:59:59.000Z'],
-    ['unavailable', '2031-01-01T00:00:00.000Z'],
+    ['ready', '2026-04-04T15:59:59.000Z', 'Australia/Sydney'],
+    ['aftermath', '2026-04-05T00:00:00.000Z', 'Australia/Sydney'],
+    ['no-event', '2026-04-04T15:59:59.000Z', 'Australia/Brisbane'],
+    ['unavailable', '2031-01-01T00:00:00.000Z', 'Australia/Sydney'],
   ])(
     'stops only display-size text at the display maximum in the %s report',
-    (_, now) => {
-      render(<StatusScreen now={new Date(now)} reducedMotion />);
+    (_, now, zoneId) => {
+      render(
+        <StatusScreen now={new Date(now)} reducedMotion zoneId={zoneId} />,
+      );
       fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
 
       expect(textBreakingDisplayLimit()).toEqual([]);
