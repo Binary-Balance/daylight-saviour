@@ -144,5 +144,5 @@ function Notice({
 const styles = StyleSheet.create({
   body: { fontSize: 17, lineHeight: 25 },
   card: { borderWidth: 1, gap: 8, padding: 16 },
-  heading: { fontSize: 12, fontWeight: '800', letterSpacing: 1.1 },
+  heading: { fontSize: 12, fontWeight: '800' },
 });

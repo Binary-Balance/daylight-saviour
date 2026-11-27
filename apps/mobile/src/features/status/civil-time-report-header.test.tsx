@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
-import { StyleSheet, Text } from 'react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { Dimensions, StyleSheet, Text } from 'react-native';
 
 import { daylightSaviourPalettes } from '../../theme';
 import CivilTimeReportHeader from './civil-time-report-header';
@@ -23,7 +23,7 @@ describe('CivilTimeReportHeader', () => {
       );
 
       expect(
-        screen.getByText('DAYLIGHT SAVIOUR · KEEPING CIVIL TIME CIVIL', {
+        screen.getByText('Daylight Saviour · Keeping civil time civil', {
           includeHiddenElements: true,
         }),
       ).toBeTruthy();
@@ -47,6 +47,43 @@ describe('CivilTimeReportHeader', () => {
     },
   );
 
+  // The Settings button is drawn over the report's top right corner.
+  it.each([
+    [1.235, { paddingRight: 92 }],
+    [1.3, { paddingRight: 0, paddingTop: 48 }],
+  ])(
+    'keeps the document label clear of Settings at text scale %d',
+    (fontScale, clearance) => {
+      const window = Dimensions.get('window');
+      const deviceScreen = Dimensions.get('screen');
+      Dimensions.set({
+        screen: { ...deviceScreen, fontScale },
+        window: { ...window, fontScale },
+      });
+      try {
+        render(
+          <CivilTimeReportHeader
+            facts={{
+              friendlyZoneLabel: 'Sydney, Canberra & most of NSW',
+              zoneId: 'Australia/Sydney',
+            }}
+            palette={daylightSaviourPalettes.light}
+          />,
+        );
+
+        expect(
+          StyleSheet.flatten(
+            screen.getByTestId('utility-header', {
+              includeHiddenElements: true,
+            }).props.style,
+          ),
+        ).toMatchObject(clearance);
+      } finally {
+        act(() => Dimensions.set({ screen: deviceScreen, window }));
+      }
+    },
+  );
+
   it('shows a notice between the document label and the Home Time Zone', () => {
     const { toJSON } = render(
       <CivilTimeReportHeader
@@ -60,7 +97,7 @@ describe('CivilTimeReportHeader', () => {
     );
 
     const rendered = JSON.stringify(toJSON());
-    const label = rendered.indexOf('DAYLIGHT SAVIOUR');
+    const label = rendered.indexOf('Daylight Saviour');
     const notice = rendered.indexOf('"Notice"');
     expect(label).toBeGreaterThanOrEqual(0);
     expect(notice).toBeGreaterThan(label);

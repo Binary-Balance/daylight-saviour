@@ -607,7 +607,6 @@ const styles = StyleSheet.create({
   metadata: {
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.1,
     lineHeight: 18,
   },
 });

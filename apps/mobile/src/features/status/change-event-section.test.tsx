@@ -4,6 +4,7 @@ import type { ReactTestInstance } from 'react-test-renderer';
 import { activateAustralianTimeZoneDataPack } from '@daylight-saviour/domain';
 import { bundledAustralianDataPack } from '@daylight-saviour/time-zone-data';
 
+import { textBreakingDisplayLimit } from '../../../test-support/display-text';
 import { holdAnimations } from '../../../test-support/hold-animations';
 import { daylightSaviourPalettes } from '../../theme';
 import ChangeEventSection from './change-event-section';
@@ -54,7 +55,7 @@ describe('ChangeEventSection', () => {
 
       expect(screen.getByTestId('reminder-day-civil-time-report')).toBeTruthy();
       expect(
-        screen.getByRole('header', { name: 'NEXT CHANGE EVENT' }),
+        screen.getByRole('header', { name: 'Next Change Event' }),
       ).toBeTruthy();
       expect(screen.getByText('Backward Change')).toBeTruthy();
       expect(screen.getByText('3:00 am → 2:00 am')).toBeTruthy();
@@ -113,7 +114,7 @@ describe('ChangeEventSection', () => {
     );
 
     expect(screen.getByTestId('unavailable-civil-time-report')).toBeTruthy();
-    expect(screen.getByText('DECISION UNAVAILABLE')).toBeTruthy();
+    expect(screen.getByText('Decision unavailable')).toBeTruthy();
     expect(screen.getByText(/Home Time Zone is not supported/)).toBeTruthy();
     expect(screen.queryByText('Validity Horizon passed')).toBeNull();
   });
@@ -413,6 +414,8 @@ describe('ChangeEventSection', () => {
         });
         expect(previous.props.accessibilityElementsHidden).toBe(true);
         expect(opacityOf(previous)).toBe(1);
+        // Also covers the Backward echo while reduced motion is off.
+        expect(textBreakingDisplayLimit()).toEqual([]);
         expect(opacityOf(screen.getByTestId('countdown-current'))).toBe(
           startOpacity,
         );

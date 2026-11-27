@@ -14,7 +14,8 @@ appId: au.com.binarybalance.daylightsaviour
       visible: 'Choose another region'
     commands:
       - tapOn: 'Choose another region'
-# At the largest iOS text size the heading fills about two screens.
+# At the largest iOS text size the heading and suggested zone can fill the
+# screen.
 - scrollUntilVisible:
     element: 'Search Australian Home Time Zones'
     timeout: 60000

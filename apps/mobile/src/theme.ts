@@ -45,3 +45,14 @@ export const daylightSaviourPalettes = {
 
 export type DaylightSaviourPalette =
   (typeof daylightSaviourPalettes)[keyof typeof daylightSaviourPalettes];
+
+// Display text, anything set larger than 17 pt body text, stops growing at
+// this size. The largest iOS text size scales text 3.571×, which made words
+// such as "Backward" or "Whitsunday" wider than a 375 pt iPhone, so they broke
+// mid-word. Body text and labels keep scaling in full.
+export const displayTextMaxSize = 48;
+
+/** The `maxFontSizeMultiplier` that stops display text at its maximum size. */
+export function displayTextMaxScale(fontSize: number): number {
+  return displayTextMaxSize / fontSize;
+}

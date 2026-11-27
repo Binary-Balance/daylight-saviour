@@ -35,6 +35,7 @@ import {
 import StatusScreen from '../status/status-screen';
 import {
   daylightSaviourPalettes,
+  displayTextMaxScale,
   type DaylightSaviourPalette,
 } from '../../theme';
 import type { HomeTimeZoneAdapters } from './home-time-zone-adapters';
@@ -181,6 +182,9 @@ function ZoneChooser({
                 )}
                 <Text
                   accessibilityRole="header"
+                  maxFontSizeMultiplier={displayTextMaxScale(
+                    styles.title.fontSize,
+                  )}
                   style={[styles.title, { color: palette.ink }]}
                 >
                   {copy.homeTimeZone.chooser.heading}
@@ -249,7 +253,12 @@ function ZoneChooser({
                 }
                 style={[styles.zoneRow, { backgroundColor: palette.surface }]}
               >
-                <Text style={[styles.zoneLabel, { color: palette.ink }]}>
+                <Text
+                  maxFontSizeMultiplier={displayTextMaxScale(
+                    styles.zoneLabel.fontSize,
+                  )}
+                  style={[styles.zoneLabel, { color: palette.ink }]}
+                >
                   {item.friendlyLabel}
                 </Text>
                 <Text
@@ -262,6 +271,9 @@ function ZoneChooser({
             renderSectionHeader={({ section: { title } }) => (
               <Text
                 accessibilityRole="header"
+                maxFontSizeMultiplier={displayTextMaxScale(
+                  styles.sectionHeading.fontSize,
+                )}
                 style={[
                   styles.sectionHeading,
                   { color: palette.ink, backgroundColor: palette.background },
@@ -383,6 +395,7 @@ export default function HomeTimeZoneScreen({
           </Text>
           <Text
             accessibilityRole="header"
+            maxFontSizeMultiplier={displayTextMaxScale(styles.title.fontSize)}
             style={[styles.title, { color: palette.ink }]}
           >
             {snapshot.friendlyZoneLabel}
@@ -396,6 +409,9 @@ export default function HomeTimeZoneScreen({
                 abbreviation: snapshot.currentTime.abbreviation,
                 clock: snapshot.currentTime.clock,
               })}
+              maxFontSizeMultiplier={displayTextMaxScale(
+                styles.suggestedTime.fontSize,
+              )}
               style={[styles.suggestedTime, { color: palette.ink }]}
             >
               {snapshot.currentTime.clock} {snapshot.currentTime.abbreviation}
@@ -496,7 +512,7 @@ const styles = StyleSheet.create({
   confirmation: { flexGrow: 1, gap: 20, justifyContent: 'center', padding: 24 },
   identifier: { fontSize: 14 },
   listContent: { padding: 24 },
-  metadata: { fontSize: 12, fontWeight: '700', letterSpacing: 1.1 },
+  metadata: { fontSize: 12, fontWeight: '700' },
   primaryButton: { alignItems: 'center', minHeight: 52, padding: 16 },
   primaryButtonText: { fontSize: 17, fontWeight: '800' },
   safeArea: { flex: 1 },

@@ -3,6 +3,7 @@ import * as ReactNative from 'react-native';
 import type { ReactTestInstance } from 'react-test-renderer';
 
 import { holdAnimations } from '../../../test-support/hold-animations';
+import { textBreakingDisplayLimit } from '../../../test-support/display-text';
 import { daylightSaviourPalettes } from '../../theme';
 import DaylightSavingStatusHero, {
   type DaylightSavingStatusHeroFacts,
@@ -12,7 +13,7 @@ const facts: DaylightSavingStatusHeroFacts = {
   abbreviation: 'AEST',
   clock: '10:17 pm',
   currentOffset: 'UTC+10:00',
-  phaseLabel: 'NO CHANGE IMMINENT',
+  phaseLabel: 'No change imminent',
   secondaryLine: 'Test secondary line.',
   status: 'Standard time applies',
 };
@@ -126,7 +127,7 @@ describe('DaylightSavingStatusHero', () => {
         screen.getByRole('header', { name: 'Standard time applies' }),
       ).toBeTruthy();
       expect(
-        screen.getByText('NO CHANGE IMMINENT', {
+        screen.getByText('No change imminent', {
           includeHiddenElements: true,
         }),
       ).toBeTruthy();
@@ -383,6 +384,7 @@ describe('DaylightSavingStatusHero', () => {
         });
         expect(previous.props.accessibilityElementsHidden).toBe(true);
         expect(opacityOf(previous)).toBe(1);
+        expect(textBreakingDisplayLimit()).toEqual([]);
         expect(opacityOf(screen.getByRole('header', { name: daylight }))).toBe(
           startOpacity,
         );

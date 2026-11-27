@@ -312,7 +312,7 @@ with TemporaryDirectory(prefix="daylight-saviour-chromium-") as profile:
         )
         driver.refresh()
         WebDriverWait(driver, 20).until(
-            lambda browser: "HOME TIME ZONE"
+            lambda browser: "Home Time Zone"
             in browser.find_element(By.TAG_NAME, "body").text
         )
         driver.save_screenshot("/tmp/daylight-saviour-web.png")

@@ -1,8 +1,14 @@
 import { Fragment, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { australianEnglish as copy } from '@daylight-saviour/copy';
 
-import type { DaylightSaviourPalette } from '../../theme';
+import { displayTextMaxScale, type DaylightSaviourPalette } from '../../theme';
 
 export interface CivilTimeReportHeaderFacts {
   readonly friendlyZoneLabel: string;
@@ -23,6 +29,12 @@ export default function CivilTimeReportHeader({
   onChooseZone,
   palette,
 }: CivilTimeReportHeaderProps) {
+  const { fontScale } = useWindowDimensions();
+  // The Settings button, drawn over the report's top right corner, is about
+  // 50 × fontScale + 20 wide. At iOS's 1.353 that leaves only 4 of the 92
+  // kept beside this label, so from 1.3 the label moves below the button.
+  const belowSettings = fontScale >= 1.3;
+
   return (
     <Fragment>
       <View
@@ -30,8 +42,10 @@ export default function CivilTimeReportHeader({
         importantForAccessibility="no-hide-descendants"
         style={[
           styles.utilityHeader,
+          belowSettings && styles.utilityHeaderBelowSettings,
           { borderBottomColor: palette.solarGoldStructure },
         ]}
+        testID="utility-header"
       >
         <Text style={[styles.documentLabel, { color: palette.secondaryInk }]}>
           {copy.civilTimeReport.document.label}
@@ -65,7 +79,10 @@ export default function CivilTimeReportHeader({
         <Text style={[styles.metadata, { color: palette.secondaryInk }]}>
           {copy.civilTimeReport.homeTimeZoneHeading}
         </Text>
-        <Text style={[styles.zone, { color: palette.ink }]}>
+        <Text
+          maxFontSizeMultiplier={displayTextMaxScale(styles.zone.fontSize)}
+          style={[styles.zone, { color: palette.ink }]}
+        >
           {facts.friendlyZoneLabel}
         </Text>
         <Text style={[styles.identifier, { color: palette.secondaryInk }]}>
@@ -80,7 +97,6 @@ const styles = StyleSheet.create({
   documentLabel: {
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.2,
   },
   identifier: {
     fontSize: 14,
@@ -89,7 +105,6 @@ const styles = StyleSheet.create({
   metadata: {
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.1,
     lineHeight: 18,
   },
   utilityHeader: {
@@ -98,6 +113,10 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     paddingRight: 92,
   },
+  // The button sits 12 from the top of the report and is at least 48 tall;
+  // its text stays shorter than that up to the largest iOS size (3.571×).
+  // This starts the label 12 below it.
+  utilityHeaderBelowSettings: { paddingRight: 0, paddingTop: 48 },
   zone: {
     fontSize: 28,
     fontWeight: '700',

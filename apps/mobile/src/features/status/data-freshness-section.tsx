@@ -116,7 +116,6 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 14,
     fontWeight: '800',
-    letterSpacing: 0.8,
   },
   identifier: {
     fontSize: 14,
@@ -125,7 +124,6 @@ const styles = StyleSheet.create({
   metadata: {
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.1,
     lineHeight: 18,
   },
   notice: {

@@ -51,7 +51,7 @@ export const homeTimeZone = Object.freeze({
     chooseAnotherButton: 'Choose another region',
     explanation:
       'No location permission needed. Suggestion comes from device civil-time settings.',
-    heading: 'SUGGESTED HOME TIME ZONE',
+    heading: 'Suggested Home Time Zone',
     useSuggestedButton: 'Use this Home Time Zone',
   }),
   errorMessage: (code: HomeTimeZoneErrorCode) =>

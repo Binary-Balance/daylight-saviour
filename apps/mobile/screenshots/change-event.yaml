@@ -2,7 +2,7 @@ appId: au.com.binarybalance.daylightsaviour
 ---
 # At the largest text size each event fact can fill half a screen, so this
 # stops at each fact in turn: date, direction, local time, UTC offset, amount
-# and countdown. The largest iOS report is about 17 screens long, so scrolls
+# and countdown. The largest iOS report is several screens long, so scrolls
 # get two minutes.
 - runFlow: common/open-report.yaml
 - scrollUntilVisible:
